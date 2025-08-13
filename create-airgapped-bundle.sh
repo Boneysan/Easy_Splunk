@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # create-airgapped.sh
@@ -16,12 +17,14 @@
 #   --compression <c>     Image tar compression: gzip|zstd|none (default: gzip)
 #   --image <ref>         Add extra image (may be repeated)
 #   --include <path>      Add extra file/dir into bundle (may be repeated)
+#   --with-secrets        Generate secrets using generate-credentials.sh
 #   --yes, -y             Non-interactive (assume yes)
 #   -h, --help            Show usage
 #
 # Dependencies:
 #   lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
-#   lib/runtime-detection.sh, lib/air-gapped.sh
+#   lib/runtime-detection.sh, lib/security.sh, lib/air-gapped.sh, generate-credentials.sh
+# Version: 1.0.0
 # ==============================================================================
 
 set -eEuo pipefail
@@ -33,6 +36,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/security.sh
+source "${SCRIPT_DIR}/lib/security.sh"
 # shellcheck source=versions.env
 source "${SCRIPT_DIR}/versions.env"
 # shellcheck source=lib/versions.sh
@@ -42,20 +47,23 @@ source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 # shellcheck source=lib/air-gapped.sh
 source "${SCRIPT_DIR}/lib/air-gapped.sh"
 
-# Validate versions file sanity
+# --- Version Checks ------------------------------------------------------------
+if [[ "${AIR_GAPPED_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "create-airgapped.sh requires air-gapped.sh version >= 1.0.0"
+fi
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "create-airgapped.sh requires security.sh version >= 1.0.0"
+fi
 verify_versions_env || die "${E_INVALID_INPUT}" "versions.env contains invalid values"
 
 # --- Defaults / flags -----------------------------------------------------------
 OUT_DIR="dist/bundle-$(date +%Y%m%d)"
-# Prefer BUNDLE_VERSION from versions.env; fall back to APP_VERSION if needed.
 _BVER="${BUNDLE_VERSION:-${APP_VERSION:-0.0.0}}"
 ARCHIVE_NAME="app-bundle-v${_BVER}-$(date +%Y%m%d)"
-
-# Set/propagate image-archive compression to the air-gapped lib
 COMPRESSION="${TARBALL_COMPRESSION:-gzip}" # gzip|zstd|none
 export TARBALL_COMPRESSION="${COMPRESSION}"
-
 AUTO_YES=0
+WITH_SECRETS=0
 declare -a EXTRA_IMAGES=()
 declare -a EXTRA_INCLUDES=()
 
@@ -69,12 +77,13 @@ Options:
   --compression <c>      Image archive compression: gzip|zstd|none (default: ${COMPRESSION})
   --image <ref>          Add an extra container image (can repeat)
   --include <path>       Include extra file/dir in bundle (can repeat)
+  --with-secrets         Generate secrets using generate-credentials.sh
   --yes, -y              Non-interactive (assume yes)
   -h, --help             Show this help and exit
 
 Examples:
   $(basename "$0") --out dist/bundle-\$(date +%Y%m%d) --compression zstd
-  $(basename "$0") --image alpine:3.20 --include docs/
+  $(basename "$0") --image alpine:3.20 --include docs/ --with-secrets
 EOF
 }
 
@@ -86,6 +95,7 @@ while [[ $# -gt 0 ]]; do
     --compression) COMPRESSION="${2:?}"; export TARBALL_COMPRESSION="${COMPRESSION}"; shift 2 ;;
     --image) EXTRA_IMAGES+=("${2:?}"); shift 2 ;;
     --include) EXTRA_INCLUDES+=("${2:?}"); shift 2 ;;
+    --with-secrets) WITH_SECRETS=1; shift ;;
     -y|--yes) AUTO_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "${E_INVALID_INPUT}" "Unknown option: $1" ;;
@@ -108,17 +118,11 @@ confirm_or_exit() {
 # --- Collect images from versions.env (+extras), dedupe -------------------------
 gather_images() {
   local -a imgs=()
-  # Use helper to list *_IMAGE var names, then capture their values
-  local var
   while IFS= read -r var; do
     local v="${!var:-}"
     [[ -n "${v}" ]] && imgs+=("${v}")
   done < <(list_all_images)
-
-  # Extras from CLI
   imgs+=("${EXTRA_IMAGES[@]}")
-
-  # Deduplicate while preserving order
   declare -A seen=()
   local -a out=()
   local i
@@ -129,7 +133,6 @@ gather_images() {
       out+=("$i")
     fi
   done
-
   printf '%s\n' "${out[@]}"
 }
 
@@ -139,6 +142,9 @@ main() {
   log_info "Output dir: ${OUT_DIR}"
   log_info "Archive name (final distributable): ${ARCHIVE_NAME}.tar.gz"
   log_info "Image archive compression (inside bundle): ${COMPRESSION}"
+  if (( WITH_SECRETS == 1 )); then
+    log_info "Secrets will be generated using generate-credentials.sh"
+  fi
 
   # Build image list
   mapfile -t IMAGES < <(gather_images)
@@ -153,33 +159,44 @@ main() {
   fi
 
   mkdir -p "${OUT_DIR}"
-  # Clean up OUT_DIR on failure (but keep on success)
   register_cleanup "rm -rf '${OUT_DIR}'"
 
   # 1) Ensure runtime is ready and summarized
   detect_container_runtime
   runtime_summary
 
-  # 2) Build the images bundle inside OUT_DIR (pull, save, checksum, manifest)
+  # 2) Generate secrets if requested
+  if (( WITH_SECRETS == 1 )); then
+    log_info "Generating secrets for bundle..."
+    "${SCRIPT_DIR}/generate-credentials.sh" --yes \
+      --secrets-dir "${OUT_DIR}/config/secrets" \
+      --certs-dir "${OUT_DIR}/config/certs" \
+      --with-splunk
+  fi
+
+  # 3) Build the images bundle inside OUT_DIR
   create_airgapped_bundle "${OUT_DIR}" "${IMAGES[@]}"
 
-  # 3) Add scripts/configs to the bundle directory
+  # 4) Add scripts/configs to the bundle directory
   log_info "Adding scripts and configs to bundle directory..."
-  # Always include these if present; feel free to extend as needed
   declare -a DEFAULT_INCLUDES=( "airgapped-quickstart.sh" "docker-compose.yml" "versions.env" "lib" "config" )
   DEFAULT_INCLUDES+=("${EXTRA_INCLUDES[@]}")
-
   for path in "${DEFAULT_INCLUDES[@]}"; do
     local src="${SCRIPT_DIR}/${path}"
     if [[ ! -e "${src}" ]]; then
       log_warn "Skip missing path: ${path}"
       continue
     fi
-    cp -a "${src}" "${OUT_DIR}/"
+    if [[ "${path}" =~ secrets|credentials ]]; then
+      cp -a "${src}" "${OUT_DIR}/"
+      harden_file_permissions "${OUT_DIR}/${path}" "600" "sensitive file" || true
+    else
+      cp -a "${src}" "${OUT_DIR}/"
+    fi
     log_debug "  -> Included: ${path}"
   done
 
-  # 4) Create the final distributable tarball of the OUT_DIR (separate from images.tar.*)
+  # 5) Create the final distributable tarball
   local parent dirbase archive archive_path
   parent="$(dirname -- "${OUT_DIR}")"
   dirbase="$(basename -- "${OUT_DIR}")"
@@ -193,22 +210,20 @@ main() {
   fi
 
   log_info "Packing final bundle archive: ${archive}"
-  # Normalize owner/group for reproducibility where supported; fall back gracefully.
   if tar --help 2>/dev/null | grep -q -- '--owner'; then
     tar --owner=0 --group=0 -czf "${archive_path}" -C "${parent}" "${dirbase}"
   else
     tar -czf "${archive_path}" -C "${parent}" "${dirbase}"
   fi
 
-  # 5) Checksum for final archive
+  # 6) Checksum for final archive
   generate_checksum_file "${archive}"
 
-  # Success: keep OUT_DIR; unregister cleanup if available, else neutralize
-  if command -v unregister_cleanup >/dev/null 2>&1; then
-    unregister_cleanup "rm -rf '${OUT_DIR}'"
-  else
-    register_cleanup ":"  # replace with no-op
-  fi
+  # 7) Run security audit
+  audit_security_configuration "${OUT_DIR}/security-audit.txt"
+
+  # 8) Success: keep OUT_DIR
+  unregister_cleanup "rm -rf '${OUT_DIR}'"
 
   log_success "✅ Air-gapped bundle created."
   log_info "Bundle dir: ${OUT_DIR}"
@@ -218,3 +233,4 @@ main() {
 }
 
 main "$@"
+```
