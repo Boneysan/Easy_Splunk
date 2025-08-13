@@ -5,7 +5,7 @@
 # Enhanced argument parsing + config templating for orchestrator.sh
 #
 # Dependencies: lib/core.sh (log_*, die, is_true, is_empty, is_number)
-#               lib/validation.sh (validate_required_var, validate_or_prompt_for_dir)
+#               lib/validation.sh (validate_required_var, validate_or_prompt_for_dir, validate_rf_sf)
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
@@ -27,7 +27,7 @@ fi
 : "${CONFIG_VALIDATION:=true}"   # validate configuration after parsing
 
 # Splunk-specific defaults
-: "${SPLUNK_CLUSTER_MODE:=single}"
+: "${SPLUNK_CLUSTER_MODE:=single}"     # single|cluster
 : "${SPLUNK_WEB_PORT:=8000}"
 : "${INDEXER_COUNT:=1}"
 : "${SEARCH_HEAD_COUNT:=1}"
@@ -54,13 +54,13 @@ Basic Options:
   --data-dir <path>      Persistent data directory (default: ${DATA_DIR})
   --project-name <name>  Docker Compose project name (default: auto-generated)
   -i, --interactive      Prompt for missing values (ignored if NON_INTERACTIVE=1)
-  
+
 Services:
   --with-monitoring      Enable Prometheus & Grafana
   --no-monitoring        Disable monitoring (overrides template/env)
   --with-splunk          Enable Splunk cluster
-  --no-splunk           Disable Splunk cluster
-  
+  --no-splunk            Disable Splunk cluster
+
 Splunk Configuration:
   --splunk-mode <mode>   Cluster mode: single|cluster (default: ${SPLUNK_CLUSTER_MODE})
   --splunk-web-port <p>  Splunk Web port (default: ${SPLUNK_WEB_PORT})
@@ -71,62 +71,64 @@ Splunk Configuration:
   --splunk-data-dir <dir> Splunk data directory (default: ${SPLUNK_DATA_DIR})
   --splunk-password <pwd> Splunk admin password (prompt if not provided)
   --splunk-secret <key>  Splunk secret key (auto-generate if not provided)
-  
+
 Resource Management:
   --app-cpu <limit>      CPU limit for app (e.g., 1.5)
-  --app-mem <limit>      Memory limit for app (e.g., 2G)
-  
+  --app-mem <limit>      Memory limit for app (e.g., 2G, 512M)
+
 Advanced Options:
-  --dry-run             Show what would be done without executing
-  --verbose             Enable verbose logging
-  --log-level <level>   Set log level: debug|info|warn|error (default: ${LOG_LEVEL})
-  --no-validation       Skip configuration validation
-  --write-effective <f> Write normalized config (key=value) to file <f>
-  
-  -h, --help            Show this help and exit
+  --dry-run              Show what would be done without executing
+  --verbose              Enable verbose logging
+  --log-level <level>    Set log level: debug|info|warn|error (default: ${LOG_LEVEL})
+  --no-validation        Skip configuration validation
+  --write-effective <f>  Write normalized config (key=value) to file <f>
+
+  -h, --help             Show this help and exit
 
 Configuration Precedence:
   defaults < --config file < environment variables < CLI flags
-
-Examples:
-  # Basic application deployment
-  $(basename "$0") --port 8080 --data-dir /opt/myapp
-
-  # Splunk cluster with monitoring
-  $(basename "$0") --with-splunk --with-monitoring --indexers 3 --search-heads 2
-
-  # Load from template and override specific values
-  $(basename "$0") --config production.env --splunk-web-port 8000
-
-  # Interactive mode for missing configuration
-  $(basename "$0") --interactive --with-splunk
 EOF
 }
 
-# ---- Enhanced Helpers ----------------------------------------------------------
+# ---- Helpers -------------------------------------------------------------------
+
+# _load_env_file: load .env-like KEY=VALUE lines safely; accepts:
+# - comments (#), blank lines
+# - optional "export " prefix
+# - single/double quotes
+# - tolerant of CRLF endings
 _load_env_file() {
-  # load a .env-like file safely (KEY=VALUE pairs, allows quotes and comments)
   local f="${1:?config file required}"
   [[ -f "$f" ]] || die "${E_INVALID_INPUT}" "Configuration file not found: ${f}"
   log_info "Loading configuration from template: ${f}"
 
   local line_num=0
-  # shellcheck disable=SC1090
+  # Normalize CRLF to LF while reading
   while IFS= read -r line || [[ -n "$line" ]]; do
     ((line_num++))
+    line="${line%$'\r'}"
+
     # trim leading/trailing whitespace
     line="${line#"${line%%[![:space:]]*}"}"
     line="${line%"${line##*[![:space:]]}"}"
-    # skip blanks and comments
+
     [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
-    # only accept KEY=VALUE
+
+    # strip optional "export "
+    if [[ "$line" =~ ^[[:space:]]*export[[:space:]]+(.*)$ ]]; then
+      line="${BASH_REMATCH[1]}"
+    fi
+
+    # KEY=VALUE capture (allow anything after '=')
     if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
       local k="${BASH_REMATCH[1]}"
       local v="${BASH_REMATCH[2]}"
+
       # strip surrounding quotes if present
       if [[ "$v" =~ ^\"(.*)\"$ ]]; then v="${BASH_REMATCH[1]}"; fi
       if [[ "$v" =~ ^\'(.*)\'$ ]]; then v="${BASH_REMATCH[1]}"; fi
-      # only set if variable is currently unset (template < env < CLI)
+
+      # only set if currently unset (template < env < CLI)
       if [[ -z "${!k+x}" ]]; then
         printf -v "$k" '%s' "$v"
         export "$k"
@@ -144,7 +146,7 @@ _write_effective_config() {
   local out="${1:?output file required}"
   umask 077
   log_info "Writing effective configuration to: ${out}"
-  
+
   cat > "${out}" <<EOF
 # ==============================================================================
 # Normalized configuration generated by parse-args.sh
@@ -184,10 +186,23 @@ EOF
   log_success "Effective configuration written"
 }
 
+# Generate a random base64 secret with robust fallbacks
+_gen_base64_secret() {
+  local nbytes="${1:-32}"
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -base64 "${nbytes}" 2>/dev/null && return 0
+  fi
+  if [[ -r /dev/urandom ]]; then
+    head -c "${nbytes}" /dev/urandom | base64 && return 0
+  fi
+  # ultra-fallback: date + pid
+  printf '%s' "$(date +%s%N)$$" | base64
+}
+
 _auto_generate_splunk_secret() {
   if [[ -z "${SPLUNK_SECRET}" ]] && is_true "${ENABLE_SPLUNK}"; then
     log_info "Auto-generating Splunk secret key..."
-    SPLUNK_SECRET=$(openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64)
+    SPLUNK_SECRET="$(_gen_base64_secret 32)"
     export SPLUNK_SECRET
     log_debug "Splunk secret generated"
   fi
@@ -206,12 +221,15 @@ _auto_generate_project_name() {
 _prompt_for_splunk_password() {
   if is_true "${ENABLE_SPLUNK}" && [[ -z "${SPLUNK_PASSWORD}" ]]; then
     if is_true "${INTERACTIVE_MODE}" && (( NON_INTERACTIVE == 0 )); then
+      if [[ ! -t 0 && ! -t 1 ]]; then
+        die "${E_INVALID_INPUT}" "Cannot prompt for Splunk password without a TTY; set SPLUNK_PASSWORD or use NON_INTERACTIVE=0 with a terminal."
+      fi
       local password confirm
       while true; do
-        read -r -s -p "Enter Splunk admin password: " password </dev/tty
+        read -r -s -p "Enter Splunk admin password: " password </dev/tty || password=""
         echo
         if [[ ${#password} -ge 8 ]]; then
-          read -r -s -p "Confirm password: " confirm </dev/tty
+          read -r -s -p "Confirm password: " confirm </dev/tty || confirm=""
           echo
           if [[ "$password" == "$confirm" ]]; then
             SPLUNK_PASSWORD="$password"
@@ -230,26 +248,29 @@ _prompt_for_splunk_password() {
   fi
 }
 
+# numeric/format validators
+_is_valid_port() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 )); }
+_is_valid_cpu()  { [[ "$1" =~ ^([0-9]+(\.[0-9]+)?)$ ]] && (( $(printf '%.0f' "$(echo "$1*100" | awk '{printf "%.2f",$1}')" ) >= 0 )); }
+_is_valid_mem()  { [[ "$1" =~ ^[0-9]+[KMG]i?$|^[0-9]+[KMG]$|^[0-9]+$ ]]; }
+
 _validate_values() {
   if ! is_true "${CONFIG_VALIDATION}"; then
     log_warn "Configuration validation disabled"
     return 0
   fi
-  
+
   log_info "Validating configuration..."
-  
+
   # Port sanity
-  if ! is_number "${APP_PORT}" || (( APP_PORT < 1 || APP_PORT > 65535 )); then
-    die "${E_INVALID_INPUT}" "Invalid --port '${APP_PORT}'. Must be 1..65535."
-  fi
-  
-  # Splunk web port validation
+  _is_valid_port "${APP_PORT}" || die "${E_INVALID_INPUT}" "Invalid --port '${APP_PORT}'. Must be 1..65535."
   if is_true "${ENABLE_SPLUNK}"; then
-    if ! is_number "${SPLUNK_WEB_PORT}" || (( SPLUNK_WEB_PORT < 1 || SPLUNK_WEB_PORT > 65535 )); then
-      die "${E_INVALID_INPUT}" "Invalid Splunk web port '${SPLUNK_WEB_PORT}'. Must be 1..65535."
-    fi
+    _is_valid_port "${SPLUNK_WEB_PORT}" || die "${E_INVALID_INPUT}" "Invalid Splunk web port '${SPLUNK_WEB_PORT}'. Must be 1..65535."
   fi
-  
+
+  # Resource limits
+  _is_valid_cpu "${APP_CPU_LIMIT}" || die "${E_INVALID_INPUT}" "Invalid --app-cpu '${APP_CPU_LIMIT}'. Use a positive number (e.g., 1.5)."
+  _is_valid_mem "${APP_MEM_LIMIT}" || die "${E_INVALID_INPUT}" "Invalid --app-mem '${APP_MEM_LIMIT}'. Use forms like 512M, 2G."
+
   # Cluster sizing validation
   if is_true "${ENABLE_SPLUNK}"; then
     if ! is_number "${INDEXER_COUNT}" || (( INDEXER_COUNT < 1 )); then
@@ -258,11 +279,16 @@ _validate_values() {
     if ! is_number "${SEARCH_HEAD_COUNT}" || (( SEARCH_HEAD_COUNT < 1 )); then
       die "${E_INVALID_INPUT}" "Invalid search head count '${SEARCH_HEAD_COUNT}'. Must be >= 1."
     fi
-    
+
+    # single mode with multiple nodes is likely a mistake; warn
+    if [[ "${SPLUNK_CLUSTER_MODE}" == "single" ]] && ( (( INDEXER_COUNT > 1 )) || (( SEARCH_HEAD_COUNT > 1 )) ); then
+      log_warn "SPLUNK_CLUSTER_MODE=single with multiple nodes detected; consider --splunk-mode cluster"
+    fi
+
     # Use validation library for RF/SF validation
     validate_rf_sf "${SPLUNK_REPLICATION_FACTOR}" "${SPLUNK_SEARCH_FACTOR}" "${INDEXER_COUNT}"
   fi
-  
+
   # Data directories
   if is_true "${INTERACTIVE_MODE}" && (( NON_INTERACTIVE == 0 )); then
     validate_or_prompt_for_dir "DATA_DIR" "application data"
@@ -275,13 +301,18 @@ _validate_values() {
       validate_required_var "${SPLUNK_DATA_DIR}" "Splunk Data Directory (--splunk-data-dir)"
     fi
   fi
-  
+
   # Log level validation
   case "${LOG_LEVEL}" in
     debug|info|warn|error) ;;
     *) die "${E_INVALID_INPUT}" "Invalid log level '${LOG_LEVEL}'. Must be: debug, info, warn, error" ;;
   esac
-  
+
+  # Verbose implies debug logs
+  if is_true "${VERBOSE}"; then
+    export DEBUG="true"
+  fi
+
   log_success "Configuration validation passed"
 }
 
@@ -295,7 +326,7 @@ _show_configuration_summary() {
   log_info "  • Application: enabled"
   log_info "  • Monitoring: ${ENABLE_MONITORING}"
   log_info "  • Splunk: ${ENABLE_SPLUNK}"
-  
+
   if is_true "${ENABLE_SPLUNK}"; then
     log_info "Splunk Configuration:"
     log_info "  • Mode: ${SPLUNK_CLUSTER_MODE}"
@@ -306,7 +337,7 @@ _show_configuration_summary() {
     log_info "  • Search Factor: ${SPLUNK_SEARCH_FACTOR}"
     log_info "  • Data Directory: ${SPLUNK_DATA_DIR}"
   fi
-  
+
   if is_true "${DRY_RUN}"; then
     log_warn "DRY RUN MODE: No actual changes will be made"
   fi
@@ -316,7 +347,7 @@ _show_configuration_summary() {
 parse_arguments() {
   local argv=("$@")
 
-  # First pass: isolate --config to populate defaults early
+  # First pass: isolate --config and --verbose to populate defaults early
   local i=0
   while (( i < ${#argv[@]} )); do
     case "${argv[$i]}" in
@@ -326,8 +357,7 @@ parse_arguments() {
         _load_env_file "$cfg"
         ((i+=2)); continue;;
       --verbose)
-        VERBOSE="true"
-        DEBUG="true"  # Enable debug logging for verbose mode
+        VERBOSE="true"; DEBUG="true"
         ((i++)); continue;;
       *) ((i++));;
     esac
@@ -338,24 +368,25 @@ parse_arguments() {
     case "$1" in
       -h|--help) _usage; exit 0 ;;
       -i|--interactive) INTERACTIVE_MODE="true"; shift ;;
+
       --dry-run) DRY_RUN="true"; shift ;;
       --verbose) VERBOSE="true"; DEBUG="true"; shift ;;
       --log-level) LOG_LEVEL="${2:?}"; shift 2 ;;
       --no-validation) CONFIG_VALIDATION="false"; shift ;;
-      
+
       # Services
       --with-monitoring) ENABLE_MONITORING="true"; shift ;;
       --no-monitoring)   ENABLE_MONITORING="false"; shift ;;
       --with-splunk)     ENABLE_SPLUNK="true"; shift ;;
       --no-splunk)       ENABLE_SPLUNK="false"; shift ;;
-      
+
       # Basic config
       --port)         APP_PORT="${2:?}"; shift 2 ;;
       --data-dir)     DATA_DIR="${2:?}"; shift 2 ;;
       --project-name) COMPOSE_PROJECT_NAME="${2:?}"; shift 2 ;;
       --app-cpu)      APP_CPU_LIMIT="${2:?}"; shift 2 ;;
       --app-mem)      APP_MEM_LIMIT="${2:?}"; shift 2 ;;
-      
+
       # Splunk config
       --splunk-mode)        SPLUNK_CLUSTER_MODE="${2:?}"; shift 2 ;;
       --splunk-web-port)    SPLUNK_WEB_PORT="${2:?}"; shift 2 ;;
@@ -366,14 +397,16 @@ parse_arguments() {
       --splunk-data-dir)    SPLUNK_DATA_DIR="${2:?}"; shift 2 ;;
       --splunk-password)    SPLUNK_PASSWORD="${2:?}"; shift 2 ;;
       --splunk-secret)      SPLUNK_SECRET="${2:?}"; shift 2 ;;
-      
+
       # Already handled
       --config) shift 2 ;;
-      
+
       # Output
       --write-effective) OUTPUT_EFFECTIVE_CONFIG="${2:?}"; shift 2 ;;
-      
-      *) die "${E_INVALID_INPUT}" "Unknown option: $1. Use --help for usage." ;;
+
+      *)
+        die "${E_INVALID_INPUT}" "Unknown option: $1. Use --help for usage."
+        ;;
     esac
   done
 
@@ -385,13 +418,13 @@ parse_arguments() {
   # Auto-generate missing values
   _auto_generate_project_name
   _auto_generate_splunk_secret
-  
+
   # Interactive prompts for required values
   _prompt_for_splunk_password
 
   # Validation
   _validate_values
-  
+
   # Show summary
   _show_configuration_summary
 
