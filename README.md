@@ -1,232 +1,186 @@
-Here’s the **complete, unified README** you asked for — I’ve merged the Quick Start, Installation Guide, Troubleshooting section, and your configuration templates into one cohesive document. Everything is in one place with no redundancy, and I’ve embedded an **ASCII architecture diagram** for a clean GitHub-friendly view.
+Here's the finalized README, incorporating all the updates with improved formatting for clarity.
 
----
+Easy Splunk – Cluster Orchestrator
+📦 Overview
+Easy Splunk automates the deployment of a containerized Splunk cluster with optional monitoring (Prometheus + Grafana). It supports small, medium, and large cluster sizes, works on Docker or Podman, and ships with scripts for credentials, configs, health checks, and teardown.
 
-# **App Cluster Orchestrator**
+📜 Architecture
+The deployment consists of a multi-node Splunk cluster and an optional monitoring stack.
 
-A comprehensive, shell-based toolkit for deploying, managing, and securing a containerized application stack with Docker or Podman.
+                 ┌───────────────────────┐
+                 │       Users / Apps     │
+                 └───────────┬────────────┘
+                             │
+                 ┌───────────▼───────────┐
+                 │     Search Head(s)     │
+                 │     (Captain) :8001    │
+                 └───────────┬───────────┘
+                             │
+      ┌──────────────────────▼─────────────────────┐
+      │          Cluster Master (License) :8000    │
+      └───────────┬────────────────────────────────┘
+                  │
+      ┌───────────▼───────────┐     ┌───────────────┐
+      │     Indexer Cluster   │     │ Monitoring    │
+      │  idx1   idx2   idx3   │     │ Prom:9090     │
+      │                       │     │ Graf:3000     │
+      └───────────────────────┘     └───────────────┘
+🚀 Quick Start (Recommended)
+This two-step process gets you up and running with a medium-sized cluster.
 
-This project automates everything from initial setup and configuration to ongoing operations like monitoring, backups, and security management. It’s designed for flexibility, reliability, and ease of use in both development and production environments.
+Bash
 
----
+# 1. Clone the repo and enter the directory
+git clone https://github.com/example/Easy_Splunk.git
+cd Easy_Splunk
 
-## **⭐ Features**
+# 2. Install prerequisites and deploy
+./install-prerequisites.sh && \
+./deploy.sh medium --index-name my_app_prod --splunk-user admin
+Once deployed, the services are available at:
 
-* 🚀 **Automated Deployment:** Single `orchestrator.sh` command for complete stack setup.
-* 🐳 **Flexible Runtimes:** Supports **Docker** and **Podman** with auto-detection.
-* 🔒 **Built-in Security:** Automatic credentials and self-signed TLS generation.
-* 📊 **Integrated Monitoring:** One-flag setup for Prometheus & Grafana dashboards.
-* ✈️ **Air-Gapped Support:** Create offline-ready bundles with SHA256 verification.
-* 🛡️ **RHEL Ready:** SELinux and `firewalld` helper scripts for RHEL/CentOS/Fedora.
-* ❤️ **Robust Health Checks:** Integrated script for verifying service health and resources.
-* 📦 **Backup & Restore:** GPG-encrypted disaster recovery.
+Splunk Web UI: http://localhost:8000
 
----
+Prometheus: http://localhost:9090 (if enabled)
 
-## **📦 Architecture Diagram (ASCII)**
+Grafana: http://localhost:3000 (if enabled)
 
-```
-                      ┌──────────────────────────┐
-                      │       Users / Apps        │
-                      └──────────────┬────────────┘
-                                     │
-                        ┌────────────▼────────────┐
-                        │    Main Application     │ :8080 / :80
-                        └────────────┬────────────┘
-                                     │
-             ┌───────────────────────┼───────────────────────┐
-             │                       │                       │
-┌────────────▼────────────┐   ┌──────▼───────────┐   ┌───────▼─────────┐
-│        Redis Cache      │   │   Prometheus     │   │    Grafana      │
-│   :6379                 │   │   :9090          │   │    :3000        │
-└─────────────────────────┘   └──────────────────┘   └─────────────────┘
-```
+🛠️ Deploy with Wrapper
+The deploy.sh script is the easiest way to manage deployments. It automates credential generation, configuration, and deployment.
 
----
+Bash
 
-## **1. Prerequisites**
+./deploy.sh <small|medium|large|/path/to/conf> [options]
+Options
+Flag	Description	Default
+--index-name <NAME>	Creates and configures the specified index in Splunk.	(none)
+--splunk-user <USER>	The Splunk admin username.	admin
+--splunk-password <PASS>	The Splunk admin password.	(prompt)
+--no-monitoring	Disables Prometheus + Grafana, even if enabled in the config.	
+--skip-creds	Skips credential generation to reuse existing ones.	
+--skip-health	Skips the post-deployment health check.	
 
-* **OS:** RHEL/CentOS/Rocky/Fedora, Debian/Ubuntu, or macOS
-* **Tools:** `git`, `bash` ≥4.0, `sudo` privileges
-* **Internet connection** (for first install; optional offline bundle later)
+Export to Sheets
+Examples
+Bash
 
----
+# Deploy a large cluster without the monitoring stack
+./deploy.sh large --no-monitoring
 
-## **2. Installation**
+# Use a custom config file and create an index
+./deploy.sh ./config-templates/custom.conf --index-name stage_index
+⚙️ Cluster Sizing & Configs
+The cluster size and resource allocations are defined in .conf files located in config-templates/.
 
-### **Clone the Repository**
+Size	Indexers	Search Heads	Indexer CPU / Mem	Search Head CPU / Mem	Best For
+Small	2	1	2 vCPU / 4 GB	1 vCPU / 2 GB	Light production
+Medium	3	1	4 vCPU / 8 GB	2 vCPU / 4 GB	Mid-size workloads
+Large	5	2	8 vCPU / 16 GB	4 vCPU / 8 GB	Heavy ingest / high availability
 
-```bash
-git clone https://github.com/example/app-cluster-orchestrator.git
-cd app-cluster-orchestrator
-```
+Export to Sheets
+Config Examples
+<details>
+<summary><strong>Small (small-production.conf)</strong></summary>
 
-### **Install Container Runtime**
+Bash
 
-**Easy Way (Recommended):**
+# config-templates/small-production.conf
+INDEXER_COUNT=2
+SEARCH_HEAD_COUNT=1
+ENABLE_MONITORING=true
+CPU_INDEXER="2"
+MEMORY_INDEXER="4G"
+CPU_SEARCH_HEAD="1"
+MEMORY_SEARCH_HEAD="2G"
+</details>
 
-```bash
+<details>
+<summary><strong>Medium (medium-production.conf)</strong></summary>
+
+Bash
+
+# config-templates/medium-production.conf
+INDEXER_COUNT=3
+SEARCH_HEAD_COUNT=1
+ENABLE_MONITORING=true
+CPU_INDEXER="4"
+MEMORY_INDEXER="8G"
+CPU_SEARCH_HEAD="2"
+MEMORY_SEARCH_HEAD="4G"
+</details>
+
+<details>
+<summary><strong>Large (large-production.conf)</strong></summary>
+
+Bash
+
+# config-templates/large-production.conf
+INDEXER_COUNT=5
+SEARCH_HEAD_COUNT=2
+ENABLE_MONITORING=true
+CPU_INDEXER="8"
+MEMORY_INDEXER="16G"
+CPU_SEARCH_HEAD="4"
+MEMORY_SEARCH_HEAD="8G"
+</details>
+
+📋 Manual Deployment (Advanced)
+For more granular control, you can run each script individually.
+
+1. Prerequisites
+OS: RHEL/CentOS/Rocky/Fedora, Debian/Ubuntu, macOS
+
+Tools: git, bash ≥ 4.0, sudo
+
+2. Clone Repo
+Bash
+
+git clone https://github.com/example/Easy_Splunk.git
+cd Easy_Splunk
+3. Install Container Runtime
+Bash
+
 ./install-prerequisites.sh
-```
+4. Configure SELinux (RHEL-based)
+Bash
 
-**Manual:**
-
-* **RHEL/Fedora**: `sudo dnf install -y podman podman-compose podman-docker`
-* **Debian/Ubuntu**: `sudo apt-get install -y docker.io docker-compose`
-* **macOS**: `brew install --cask docker`
-
-### **RHEL-Specific SELinux/Firewall Config**
-
-```bash
 sudo ./generate-selinux-helpers.sh
-```
+5. Deploy Manually
+Bash
 
----
-
-## **3. Cluster Sizing & Configuration**
-
-Choose a config template based on your use case. Copy it to `cluster_config.env` before running `orchestrator.sh`.
-
-### **development.conf**
-
-```bash
-ENABLE_MONITORING="true"
-GENERATE_MGMT_SCRIPTS="false"
-APP_PORT="8080"
-DATA_DIR="./dev-data"
-APP_CPU_LIMIT="1"
-APP_MEM_LIMIT="1G"
-```
-
-### **small-production.conf**
-
-```bash
-ENABLE_MONITORING="true"
-GENERATE_MGMT_SCRIPTS="true"
-APP_PORT="80"
-DATA_DIR="/var/lib/my-app"
-APP_CPU_LIMIT="2"
-APP_MEM_LIMIT="4G"
-REDIS_CPU_LIMIT="0.5"
-REDIS_MEM_LIMIT="1G"
-PROMETHEUS_CPU_LIMIT="1"
-PROMETHEUS_MEM_LIMIT="1G"
-GRAFANA_CPU_LIMIT="0.5"
-GRAFANA_MEM_LIMIT="512M"
-```
-
-### **medium-production.conf**
-
-```bash
-ENABLE_MONITORING="true"
-GENERATE_MGMT_SCRIPTS="true"
-APP_PORT="80"
-DATA_DIR="/var/lib/my-app"
-APP_CPU_LIMIT="4"
-APP_MEM_LIMIT="8G"
-REDIS_CPU_LIMIT="1"
-REDIS_MEM_LIMIT="2G"
-PROMETHEUS_CPU_LIMIT="1.5"
-PROMETHEUS_MEM_LIMIT="2G"
-GRAFANA_CPU_LIMIT="1"
-GRAFANA_MEM_LIMIT="1G"
-```
-
-### **large-production.conf**
-
-```bash
-ENABLE_MONITORING="true"
-GENERATE_MGMT_SCRIPTS="true"
-APP_PORT="80"
-DATA_DIR="/var/lib/my-app"
-APP_CPU_LIMIT="8"
-APP_MEM_LIMIT="16G"
-REDIS_CPU_LIMIT="2"
-REDIS_MEM_LIMIT="4G"
-PROMETHEUS_CPU_LIMIT="2"
-PROMETHEUS_MEM_LIMIT="4G"
-GRAFANA_CPU_LIMIT="1"
-GRAFANA_MEM_LIMIT="1G"
-```
-
----
-
-## **4. Deployment**
-
-```bash
 # Generate credentials
 yes | ./generate-credentials.sh
 
-# Deploy with chosen config
-cp config-templates/medium-production.conf cluster_config.env
-./orchestrator.sh
+# Select config
+cp config-templates/small-production.conf config/active.conf
 
-# Optional: enable monitoring explicitly
+# Run orchestrator
 ./orchestrator.sh --with-monitoring
-```
 
----
-
-## **5. Verification**
-
-```bash
+# Check health
 ./health_check.sh
-```
 
-* App: [http://localhost:8080](http://localhost:8080) (or port from config)
-* Grafana: [http://localhost:3000](http://localhost:3000)
-* Prometheus: [http://localhost:9090](http://localhost:9090)
+# Create index
+./generate-splunk-configs.sh --index-name manual_index
+🐛 Troubleshooting
+Docker Permission Denied
+Bash
 
----
-
-## **6. Advanced Usage**
-
-* **Air-Gapped Deployments:**
-
-  1. `./resolve-digests.sh`
-  2. `./create-airgapped-bundle.sh`
-  3. Transfer and `./airgapped-quickstart.sh`
-* **Backup/Restore:**
-
-  * Backup: `./backup_cluster.sh --output-dir /path/to/backups --gpg-recipient "key_id"`
-  * Restore: `./restore_cluster.sh --backup-file backup.tar.gz.gpg --rollback-gpg-recipient "key_id"`
-
----
-
-## **7. Troubleshooting**
-
-**Docker Permission Denied:**
-
-```bash
 sudo usermod -aG docker $USER
-```
+(You must log out and log back in for this to take effect.)
 
-(Log out & back in)
+SELinux Volume Errors
+Bash
 
-**SELinux Volume Access Denied:**
-
-```bash
 sudo ./generate-selinux-helpers.sh
-```
+Check Service Health
+Bash
 
-**Compose Command Not Found:**
-Ensure `docker-compose` or `podman-compose` is installed.
-
-**App Not Reachable:**
-
-```bash
 ./health_check.sh
-docker compose logs <service>
-```
+docker compose logs <service_name>
+📌 Notes for RHEL 8 ARM
+Works if container images exist for linux/arm64.
 
----
+Podman is recommended; ensure podman-compose supports ARM.
 
-## **📜 License**
-
-MIT License
-
----
-
-If you want, I can also **link the configuration templates to auto-load with `--size small|medium|large|dev` flags in orchestrator.sh**, so users won’t need to copy files manually. That would make deployment even smoother.
-
-Do you want me to implement that next?
+You may need to rebuild Splunk images if official ARM builds aren't available.
