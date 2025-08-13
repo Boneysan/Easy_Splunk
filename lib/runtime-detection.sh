@@ -26,13 +26,33 @@
 #   compose <args...>   -> runs the right compose implementation
 #
 # Dependencies: lib/core.sh (log_*, die, have_cmd, is_true)
-# Optional:     lib/validation.sh
+# Optional:     lib/validation.sh (detect_container_runtime, validate_docker_daemon)
+#               lib/error-handling.sh (with_retry)
+#               versions.env (for version parsing)
+# Version: 1.0.0
+#
+# Usage Examples:
+#   detect_container_runtime
+#   compose up -d
+#   has_capability secrets && echo "Secrets supported"
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
 if ! command -v log_info >/dev/null 2>&1; then
   echo "FATAL: lib/core.sh must be sourced before lib/runtime-detection.sh" >&2
   exit 1
+fi
+if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "lib/runtime-detection.sh requires core.sh version >= 1.0.0"
+fi
+if command -v with_retry >/dev/null 2>&1; then
+  source error-handling.sh
+fi
+if command -v detect_container_runtime >/dev/null 2>&1; then
+  source validation.sh
+fi
+if [[ -f versions.env ]]; then
+  source versions.env
 fi
 
 # ---- Globals -------------------------------------------------------------------
@@ -141,7 +161,7 @@ __check_compose_version_compat() {
   fi
   local version
   version="$(echo "$version_output" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-  if [[ -n "$version" ]]; then
+  if [[ -n "$version" && "$version" =~ ${VERSION_PATTERN_SEMVER:-^[0-9]+\.[0-9]+\.[0-9]+$} ]]; then
     log_debug "Detected compose version: $version"
     return 0
   fi
@@ -175,19 +195,29 @@ __detect_network_capabilities() {
 __tcp_reachable() {
   # usage: __tcp_reachable host port
   local host="$1" port="$2"
-  # Try bash /dev/tcp
-  if ( : >/dev/tcp/"$host"/"$port" ) >/dev/null 2>&1; then
+  # Check for forced air-gapped mode
+  if is_true "${FORCE_AIR_GAPPED:-0}"; then
+    log_info "Air-gapped mode forced by FORCE_AIR_GAPPED"
+    return 1
+  fi
+  # Try bash /dev/tcp with retry
+  if with_retry --retries 3 -- bash -c ': >/dev/tcp/'"$host"'/'"$port" 2>/dev/null; then
     return 0
   fi
   # Try curl connect-only
   if command -v curl >/dev/null 2>&1; then
-    curl --connect-timeout 4 -sS "https://${host}/" >/dev/null 2>&1 && return 0
+    with_retry --retries 3 -- curl --connect-timeout 4 -sS "https://${host}/" >/dev/null 2>&1 && return 0
   fi
   return 1
 }
 
 # Air-gapped environment detection (best effort)
 detect_air_gapped_mode() {
+  if is_true "${FORCE_AIR_GAPPED:-0}"; then
+    AIR_GAPPED_MODE=1
+    log_info "Air-gapped mode forced by FORCE_AIR_GAPPED"
+    return
+  fi
   local registries=(docker.io quay.io registry.redhat.io ghcr.io)
   local reachable=0
   for r in "${registries[@]}"; do
@@ -212,9 +242,7 @@ detect_rootless_mode() {
       if [[ $(id -u) -ne 0 ]] && podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null | grep -q true; then
         CONTAINER_ROOTLESS=1
         log_info "Running in rootless Podman mode"
-        if [[ -n "${SPLUNK_WEB_PORT:-}" ]] && [[ "${SPLUNK_WEB_PORT}" -lt 1024 ]]; then
-          log_warn "Rootless mode cannot bind to privileged ports (<1024). Consider using port 8000 instead of ${SPLUNK_WEB_PORT}"
-        fi
+        log_warn "Rootless mode may restrict binding to ports <1024"
       else
         CONTAINER_ROOTLESS=0
       fi
@@ -286,9 +314,21 @@ runtime_summary() {
 detect_container_runtime() {
   log_info "🔎 Detecting container runtime and compose implementation..."
 
-  # --- Prefer Podman + native compose plugin
-  if command -v podman >/dev/null 2>&1; then
-    CONTAINER_RUNTIME="podman"
+  # Use validation.sh's detect_container_runtime if available
+  if command -v detect_container_runtime >/dev/null 2>&1; then
+    CONTAINER_RUNTIME="$(detect_container_runtime)" || die "${E_MISSING_DEP}" "No container runtime detected"
+  else
+    if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+      CONTAINER_RUNTIME="podman"
+    elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+      CONTAINER_RUNTIME="docker"
+    else
+      die "${E_MISSING_DEP}" "No container runtime found. Install Podman (preferred) or Docker."
+    fi
+  fi
+
+  # --- Podman path
+  if [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
     __check_podman_socket
 
     # Native plugin: "podman compose"
@@ -348,15 +388,13 @@ detect_container_runtime() {
   fi
 
   # --- Docker path
-  if command -v docker >/dev/null 2>&1; then
-    CONTAINER_RUNTIME="docker"
-
+  if [[ "$CONTAINER_RUNTIME" == "docker" ]]; then
     if ! docker info >/dev/null 2>&1; then
       # Helpful hint for macOS/Colima users if docker is installed but not running
-      if command -v colima >/div/null 2>&1; then
+      if command -v colima >/dev/null 2>&1; then
         log_warn "Docker CLI found but daemon unreachable. If you use Colima, run: colima start"
       fi
-      die "${E_MISSING_DEP:-3}" "Docker is installed, but the Docker daemon is not running."
+      die "${E_MISSING_DEP}" "Docker is installed, but the Docker daemon is not running."
     fi
 
     # Prefer v2 plugin: "docker compose"
@@ -405,11 +443,10 @@ detect_container_runtime() {
       return 0
     fi
 
-    die "${E_MISSING_DEP:-3}" "Docker found, but no Compose implementation ('docker compose' or 'docker-compose') is available."
+    die "${E_MISSING_DEP}" "Docker found, but no Compose implementation ('docker compose' or 'docker-compose') is available."
   fi
 
-  # --- No runtime at all
-  die "${E_MISSING_DEP:-3}" "No container runtime found. Install Podman (preferred) or Docker."
+  die "${E_MISSING_DEP}" "No container runtime found. Install Podman (preferred) or Docker."
 }
 
 # ---- Additional Utility Functions ----------------------------------------------
@@ -466,3 +503,7 @@ get_runtime_recommendations() {
     done
   fi
 }
+
+# ==============================================================================
+# End of lib/runtime-detection.sh
+# ==============================================================================
