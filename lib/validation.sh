@@ -5,7 +5,15 @@
 #
 # Dependencies: lib/core.sh (log_*, die, is_empty, is_number, have_cmd,
 #                            get_total_memory, get_cpu_cores, is_true)
-# Optional:     lib/error-handling.sh (for atomic helpers; not required here)
+# Optional:     lib/error-handling.sh (for atomic helpers; used for retries)
+#               versions.env (for version validation)
+# Version: 1.0.0
+#
+# Usage Examples:
+#   enforce_system_resources 8192 4
+#   validate_or_prompt_for_dir DATA_DIR "Splunk data"
+#   validate_port_free 8000
+#   validate_versions_env
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
@@ -72,13 +80,14 @@ validate_disk_space() {
 
   local available_gb=""
   if have_cmd df; then
-    # Prefer a portable, unit-normalized parse
+    # Try POSIX-ish -P for portability, -k for KB; convert to GiB
     if df -P -k "$path" >/dev/null 2>&1; then
-      # POSIX-ish: -P for portability, -k for KB; convert to GiB
       available_gb="$(df -P -k "$path" | awk 'NR==2 {printf "%d", $4/1024/1024}')"
-    else
-      # Fallback to GB flag where supported
-      available_gb="$(df -BG "$path" 2>/dev/null | awk 'NR==2 {gsub(/G/, "", $4); print $4}')"
+    # Fallback to BSD-style or GB flag
+    elif df -k "$path" >/dev/null 2>&1; then
+      available_gb="$(df -k "$path" | awk 'NR==2 {printf "%d", $4/1024/1024}')"
+    elif df -BG "$path" >/dev/null 2>&1; then
+      available_gb="$(df -BG "$path" | awk 'NR==2 {gsub(/G/, "", $4); print $4}')"
     fi
   else
     log_warn "df command not available; skipping disk space check for $path"
@@ -272,7 +281,7 @@ prompt_for_dir() {
   local varname="${1:?varname required}" purpose="${2:-directory}"
   if (( NON_INTERACTIVE == 1 )); then
     log_error "NON_INTERACTIVE=1; cannot prompt for ${purpose}"
-    return 1
+    die "${E_INVALID_INPUT}" "Cannot prompt for ${purpose} in non-interactive mode"
   fi
 
   local try=1 input
@@ -281,7 +290,7 @@ prompt_for_dir() {
       read -r -p "Enter path for ${purpose}: " input </dev/tty || input=""
     else
       log_error "Not a TTY; cannot prompt for ${purpose}"
-      return 1
+      die "${E_INVALID_INPUT}" "Cannot prompt for ${purpose} without a TTY"
     fi
     if [[ -n "${input}" && -d "${input}" ]]; then
       _set_var_by_name "${varname}" "${input}"
@@ -291,7 +300,7 @@ prompt_for_dir() {
     log_warn "Invalid path: '${input}' (attempt ${try}/${INPUT_ATTEMPTS})"
     ((try++))
   done
-  return 1
+  die "${E_INVALID_INPUT}" "Failed to provide valid ${purpose} path after ${INPUT_ATTEMPTS} attempts"
 }
 
 # validate_or_prompt_for_dir <varname> <purpose>
@@ -370,16 +379,17 @@ validate_port_free() {
   else
     log_warn "No ss/lsof/netstat found; attempting bind test for ${host}:${port}"
     if have_cmd python3; then
-      if ! python3 - <<PY
+      if ! with_retry --retries 3 -- python3 - <<PY
 import socket,sys
-s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-try:
-    s.bind(("${host}", ${port}))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()
+for af in socket.AF_INET, socket.AF_INET6:
+    s=socket.socket(af, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("${host}", ${port}))
+    except OSError:
+        sys.exit(1)
+    finally:
+        s.close()
 PY
       then
         log_error "Port ${port} appears to be in use."
@@ -434,6 +444,11 @@ validate_splunk_license() {
     return 1
   fi
 
+  # Stricter XML validation if xmllint is available
+  if have_cmd xmllint; then
+    xmllint --noout "$license_file" 2>/dev/null || { log_error "Invalid XML in Splunk license: $license_file"; return 1; }
+  fi
+
   log_info "✔ Splunk license file format appears valid"
   return 0
 }
@@ -468,18 +483,35 @@ validate_splunk_cluster_size() {
 }
 
 # ==============================================================================
+# Version validation
+# ==============================================================================
+
+# validate_versions_env
+# Validates key variables in versions.env
+validate_versions_env() {
+  if [[ ! -f versions.env ]]; then
+    log_error "versions.env not found"
+    return 1
+  fi
+  source versions.env || { log_error "Failed to source versions.env"; return 1; }
+  [[ "${VERSION_FILE_SCHEMA}" =~ ^[0-9]+$ ]] || { log_error "Invalid VERSION_FILE_SCHEMA: ${VERSION_FILE_SCHEMA}"; return 1; }
+  [[ "${SPLUNK_VERSION}" =~ ${VERSION_PATTERN_SEMVER} ]] || { log_error "Invalid SPLUNK_VERSION: ${SPLUNK_VERSION}"; return 1; }
+  [[ "${SPLUNK_IMAGE_DIGEST}" =~ ${DIGEST_PATTERN_SHA256} ]] || { log_error "Invalid SPLUNK_IMAGE_DIGEST: ${SPLUNK_IMAGE_DIGEST}"; return 1; }
+  [[ "${SPLUNK_UF_VERSION}" =~ ${VERSION_PATTERN_SEMVER} ]] || { log_error "Invalid SPLUNK_UF_VERSION: ${SPLUNK_UF_VERSION}"; return 1; }
+  [[ "${PROMETHEUS_VERSION}" =~ ${VERSION_PATTERN_PROMETHEUS} ]] || { log_error "Invalid PROMETHEUS_VERSION: ${PROMETHEUS_VERSION}"; return 1; }
+  log_info "✔ versions.env validated"
+  return 0
+}
+
+# ==============================================================================
 # High-level compatibility surface (project-specific)
 # ==============================================================================
 
 # validate_configuration_compatibility
-# Add concrete checks here as features evolve.
 validate_configuration_compatibility() {
   log_info "Performing configuration compatibility checks..."
-  # Example toggles:
-  # if is_true "${ENABLE_ADVANCED_LOGGING:-}" && ! is_true "${ENABLE_LOGGING:-}"; then
-  #   log_error "Advanced logging requires logging to be enabled."
-  #   return 1
-  # fi
+  validate_versions_env || return 1
+  # Add more project-specific checks here as needed
   log_success "Configuration compatibility checks passed."
   return 0
 }
