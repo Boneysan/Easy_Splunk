@@ -5,7 +5,7 @@
 # atomic file operations, and resumable progress tracking.
 #
 # Dependencies: lib/core.sh (expects: log_*, die, E_*, register_cleanup, have_cmd)
-# Version: 1.0.2
+# Version: 1.0.3
 #
 # Usage Examples:
 #   with_retry --retries 3 --base-delay 2 -- curl -f https://example.com
