@@ -72,3 +72,72 @@ verify_versions_env() {
 
   return "${ok}"
 }
+
+# load_versions_file [path]
+# Sources versions.env (or specified file) and validates it.
+load_versions_file() {
+  local versions_file="${1:-versions.env}"
+  
+  if [[ ! -f "${versions_file}" ]]; then
+    die "${E_INVALID_INPUT}" "Versions file not found: ${versions_file}"
+  fi
+  
+  # Validate syntax in subshell first
+  if ! (set -e; . "${versions_file}") >/dev/null 2>&1; then
+    die "${E_INVALID_INPUT}" "Invalid syntax in versions file: ${versions_file}"
+  fi
+  
+  # Source it for real
+  . "${versions_file}"
+  
+  # Validate schema if present
+  if [[ -n "${VERSION_FILE_SCHEMA:-}" ]]; then
+    log_debug "Loaded versions from ${versions_file} (schema ${VERSION_FILE_SCHEMA})"
+  else
+    log_debug "Loaded versions from ${versions_file} (no schema version)"
+  fi
+  
+  # Validate all loaded versions
+  if ! verify_versions_env; then
+    die "${E_INVALID_INPUT}" "Version validation failed for ${versions_file}"
+  fi
+  
+  log_success "Versions loaded and validated: ${versions_file}"
+}
+
+# get_image_repo <image_ref>
+# Extracts repository from repo@digest or repo:tag format
+get_image_repo() {
+  local image="${1:?image required}"
+  echo "${image}" | cut -d@ -f1 | cut -d: -f1
+}
+
+# get_image_digest <image_ref>
+# Extracts digest from repo@digest format (empty if tag format)
+get_image_digest() {
+  local image="${1:?image required}"
+  if [[ "${image}" == *@* ]]; then
+    echo "${image}" | cut -d@ -f2
+  fi
+}
+
+# get_image_tag <image_ref>
+# Extracts tag from repo:tag format (empty if digest format)
+get_image_tag() {
+  local image="${1:?image required}"
+  if [[ "${image}" == *:* && "${image}" != *@* ]]; then
+    echo "${image}" | cut -d: -f2
+  fi
+}
+
+# list_all_images
+# Lists all *_IMAGE variables currently defined
+list_all_images() {
+  env | grep '_IMAGE=' | cut -d= -f1 | sort
+}
+
+# list_all_versions
+# Lists all *_VERSION variables currently defined
+list_all_versions() {
+  env | grep '_VERSION=' | cut -d= -f1 | sort
+}

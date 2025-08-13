@@ -1,87 +1,199 @@
 #!/usr/bin/env bash
+#
 # ==============================================================================
 # lib/core.sh
-# Foundational utilities for all scripts (logging, errors, sysinfo, predicates,
-# path helpers, dependency checks, and cleanup registry).
+# ------------------------------------------------------------------------------
+# ⭐⭐⭐⭐⭐
 #
-# - No side effects beyond defining functions/vars and installing an EXIT trap.
-# - Strict mode is opt-in via STRICT_MODE=1 (default on); callers can override.
-# - Logging supports levels (debug/info/warn/error/silent) and JSON output.
+# Provides the absolute core functionalities required by every other script in
+# this project. This library includes standardized logging, centralized error
+# codes, system information utilities, and type-checking functions.
+#
+# It has no dependencies and must be sourced by any script that needs to
+# perform logging or basic system checks.
+#
+# Dependencies: None
+# Required by:  Everything
+#
 # ==============================================================================
 
-# --- Strict Mode (opt-in/override) ------------------------------------------------
-: "${STRICT_MODE:=1}"    # 1=enable set -euo pipefail, 0=caller will control
-if [[ "${STRICT_MODE}" == "1" ]]; then
-  set -euo pipefail
-fi
+# --- Strict Mode ---
+# Ensures that scripts exit on error, treat unset variables as an error,
+# and that pipeline failures are not ignored.
+set -euo pipefail
 
-# --- Defaults / Tunables ----------------------------------------------------------
-: "${LOG_LEVEL:=info}"         # debug|info|warn|error|silent
-: "${LOG_FORMAT:=text}"        # text|json
-: "${LOG_TS_FMT:='+%Y-%m-%d %H:%M:%S'}"  # date(1) format
-: "${LOG_STREAM:=stderr}"      # stdout|stderr
-: "${DEBUG:=false}"            # legacy toggle (still honored by log_debug)
-
-# If explicitly silent, force DEBUG off
-if [[ "${LOG_LEVEL,,}" == "silent" ]]; then
-  DEBUG=false
-fi
-
-# --- Color Handling ---------------------------------------------------------------
-_use_color=false
-if [[ -z "${NO_COLOR:-}" ]]; then
-  if [[ "${LOG_STREAM}" == "stdout" && -t 1 ]] || [[ "${LOG_STREAM}" == "stderr" && -t 2 ]] || [[ "${FORCE_COLOR:-}" == "1" ]]; then
-    _use_color=true
-  fi
-fi
-
-if $_use_color; then
-  readonly COLOR_RESET=$'\033[0m'
-  readonly COLOR_RED=$'\033[0;31m'
-  readonly COLOR_GREEN=$'\033[0;32m'
-  readonly COLOR_YELLOW=$'\033[0;33m'
-  readonly COLOR_BLUE=$'\033[0;34m'
-  readonly COLOR_GRAY=$'\033[0;90m'
+# --- Logging & Colors ---
+# Define color codes for standardized, readable log output.
+# These will be disabled if the script is not running in an interactive terminal.
+if [[ -t 1 ]]; then
+    readonly COLOR_RESET="\033[0m"
+    readonly COLOR_RED="\033[0;31m"
+    readonly COLOR_GREEN="\033[0;32m"
+    readonly COLOR_YELLOW="\033[0;33m"
+    readonly COLOR_BLUE="\033[0;34m"
+    readonly COLOR_GRAY="\033[0;90m"
 else
-  readonly COLOR_RESET='' COLOR_RED='' COLOR_GREEN='' COLOR_YELLOW='' COLOR_BLUE='' COLOR_GRAY=''
+    readonly COLOR_RESET=""
+    readonly COLOR_RED=""
+    readonly COLOR_GREEN=""
+    readonly COLOR_YELLOW=""
+    readonly COLOR_BLUE=""
+    readonly COLOR_GRAY=""
 fi
 
-# --- Internal helpers -------------------------------------------------------------
-__lvl_num() {
-  case "${1,,}" in
-    debug)  echo 10 ;;
-    info)   echo 20 ;;
-    warn)   echo 30 ;;
-    error)  echo 40 ;;
-    silent) echo 50 ;;
-    *)      echo 20 ;;
-  esac
-}
-__LOG_THRESHOLD="$(__lvl_num "${LOG_LEVEL}")"
-
-__out() {
-  if [[ "${LOG_STREAM}" == "stdout" ]]; then cat; else cat >&2; fi
+# Base logging function that other loggers will call.
+# Prints a message with a timestamp and a given log level color.
+# Usage: _log <color> <level> <message>
+_log() {
+    local color="$1"
+    local level="$2"
+    local message="$3"
+    # shellcheck disable=SC2059
+    printf "${color}[%s] [%-5s] %b${COLOR_RESET}\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$message"
 }
 
-__json_escape() {
-  # Minimal JSON string escaper (no control chars beyond \n \r \t)
-  local s="${1-}"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\r'/\\r}"
-  s="${s//$'\t'/\\t}"
-  printf '%s' "${s}"
+# Public logging functions for different severity levels.
+log_info() { _log "${COLOR_BLUE}" "INFO" "$1"; }
+log_success() { _log "${COLOR_GREEN}" "OK" "$1"; }
+log_warn() { _log "${COLOR_YELLOW}" "WARN" "$1"; }
+log_error() { _log "${COLOR_RED}" "ERROR" "$1" >&2; } # Errors go to stderr
+log_debug() {
+    # Only print debug messages if the DEBUG variable is set to "true"
+    if [[ "${DEBUG:-false}" == "true" ]]; then
+        _log "${COLOR_GRAY}" "DEBUG" "$1"
+    fi
 }
 
-# _emit <level> <color> <message...>
-_emit() {
-  local level="${1}"; shift
-  local color="${1}"; shift
-  local msg="${*:-}"
-  local now; now="$(date "${LOG_TS_FMT}")"
+# Utility function to print an error and exit the script.
+# Usage: die <exit_code> <error_message>
+die() {
+    local exit_code=$1
+    local message=$2
+    log_error "$message"
+    exit "$exit_code"
+}
 
-  local lvln="$(__lvl_num "${level}")"
-  if (( lvln < __LOG_THRESHOLD )); then return 0; fi
 
-  if [[ "${LOG_FORMAT}"_]()]()
+# --- Error Codes ---
+# Centralized error codes for consistent exit statuses across all scripts.
+readonly E_GENERAL=1          # Generic error
+readonly E_INVALID_INPUT=2    # Incorrect user input or arguments
+readonly E_MISSING_DEP=3      # A required dependency is not found (e.g., docker)
+readonly E_INSUFFICIENT_MEM=4 # Not enough system memory
+readonly E_PERMISSION=5       # Permission denied
+
+
+# --- System Information Functions ---
+# Functions to gather basic information about the host system.
+
+# get_os determines the operating system (linux or darwin).
+get_os() {
+    case "$(uname -s)" in
+        Linux*)   echo "linux";;
+        Darwin*)  echo "darwin";;
+        *)        echo "unsupported";;
+    esac
+}
+
+# get_cpu_cores returns the number of available CPU cores.
+get_cpu_cores() {
+    local os
+    os=$(get_os)
+    if [[ "$os" == "linux" ]]; then
+        nproc
+    elif [[ "$os" == "darwin" ]]; then
+        sysctl -n hw.ncpu
+    else
+        echo "1" # Default for unsupported OS
+    fi
+}
+
+# get_total_memory returns the total system memory in megabytes (MB).
+get_total_memory() {
+    local os
+    os=$(get_os)
+    if [[ "$os" == "linux" ]]; then
+        grep MemTotal /proc/meminfo | awk '{print int($2/1024)}'
+    elif [[ "$os" == "darwin" ]]; then
+        sysctl -n hw.memsize | awk '{print int($1/1024/1024)}'
+    else
+        echo "0" # Default for unsupported OS
+    fi
+}
+
+# --- Boolean and Type Checking ---
+# Utility functions for validating variable types and states.
+
+# is_true checks if a value is considered "true".
+# Accepts "true", "yes", or "1". Case-insensitive.
+is_true() {
+    local value
+    value=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+    [[ "$value" == "true" || "$value" == "yes" || "$value" == "1" ]]
+}
+
+# is_number checks if a value is a valid integer.
+is_number() {
+    [[ "$1" =~ ^-?[0-9]+$ ]]
+}
+
+# is_empty checks if a variable is null or contains only whitespace.
+is_empty() {
+    [[ -z "${1// }" ]]
+}
+
+# --- Command Utilities ---
+# Utility functions for command existence and execution.
+
+# have_cmd checks if a command exists and is executable.
+have_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# --- Cleanup Management ---
+# System for registering cleanup functions that run on script exit.
+
+declare -a CLEANUP_COMMANDS=()
+CLEANUP_REGISTERED=false
+
+# register_cleanup adds a command to be executed on script exit.
+# Commands are executed in reverse order (LIFO) to ensure proper cleanup sequence.
+# Usage: register_cleanup "command_to_run_on_exit"
+register_cleanup() {
+    local cmd="$1"
+    CLEANUP_COMMANDS+=("$cmd")
+    
+    # Set up trap only on first registration to avoid multiple traps
+    if [[ "$CLEANUP_REGISTERED" == "false" ]]; then
+        trap 'run_cleanup' EXIT INT TERM
+        CLEANUP_REGISTERED=true
+    fi
+}
+
+# run_cleanup executes all registered cleanup commands in reverse order.
+# This function is automatically called on script exit via trap.
+run_cleanup() {
+    local cmd
+    # Run cleanup commands in reverse order (LIFO)
+    for ((i=${#CLEANUP_COMMANDS[@]}-1; i>=0; i--)); do
+        cmd="${CLEANUP_COMMANDS[i]}"
+        eval "$cmd" 2>/dev/null || true
+    done
+    CLEANUP_COMMANDS=()
+}
+
+# unregister_cleanup removes a specific cleanup command from the list.
+# Usage: unregister_cleanup "exact_command_to_remove"
+unregister_cleanup() {
+    local target_cmd="$1"
+    local new_commands=()
+    local cmd
+    
+    for cmd in "${CLEANUP_COMMANDS[@]}"; do
+        if [[ "$cmd" != "$target_cmd" ]]; then
+            new_commands+=("$cmd")
+        fi
+    done
+    
+    CLEANUP_COMMANDS=("${new_commands[@]}")
+}

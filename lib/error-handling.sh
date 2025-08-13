@@ -15,9 +15,9 @@ fi
 
 # ---- Defaults / Tunables -------------------------------------------------------
 : "${RETRY_MAX:=5}"           # default retry attempts
-: "${RETRY_BASE_DELAY:=1}"    # base backoff seconds
+: "${RETRY_BASE_DELAY:=1}"    # base backoff seconds (float ok)
 : "${RETRY_MAX_DELAY:=30}"    # max backoff seconds
-: "${RETRY_JITTER_MS:=250}"   # +/- jitter in milliseconds
+: "${RETRY_JITTER_MS:=250}"   # +/- jitter in milliseconds (0..250)
 # Space-separated exit codes that are retryable; empty = retry on any nonzero
 : "${RETRY_ON_CODES:=}"
 
@@ -36,19 +36,21 @@ chmod 700 "${STATE_DIR}" 2>/dev/null || true
 # _sleep_s <seconds>  — sleeps fractional seconds if supported
 _sleep_s() {
   local sec="${1:-0}"
-  # perl is very common; fallback to busybox/awk if needed
+  # perl is common; falls back to sleep (integer seconds)
   if have_cmd perl; then
     perl -e "select(undef, undef, undef, ${sec});"
   else
-    # bash sleep handles integers fine; fractions may be truncated
-    sleep "$(printf '%.0f' "${sec}")"
+    # Bash sleep truncates to int; keep a minimum of 1 when non-zero fractional
+    local whole
+    whole="$(printf '%.0f' "${sec}")"
+    if [[ "${whole}" -eq 0 && "${sec}" != "0" ]]; then whole=1; fi
+    sleep "${whole}"
   fi
 }
 
 # _rand_ms  — random 0..999 millisecond value
 _rand_ms() {
-  # $RANDOM is 0..32767; scale to 0..999
-  printf '%d' "$(( RANDOM % 1000 ))"
+  printf '%d\n' "$(( RANDOM % 1000 ))"
 }
 
 # with_retry [--retries N] [--base-delay S] [--max-delay S] [--jitter-ms MS] [--retry-on "codes"]
@@ -82,11 +84,10 @@ with_retry() {
   local delay="${base}"
 
   while true; do
-    # shellcheck disable=SC2145
-    log_debug "with_retry: attempt ${attempt}/${retries}: ${cmd[@]}"
-    # Execute
+    log_debug "with_retry: attempt ${attempt}/${retries}: ${cmd[*]}"
     "${cmd[@]}"
     local rc=$?
+
     if [[ $rc -eq 0 ]]; then
       log_debug "with_retry: success on attempt ${attempt}"
       return 0
@@ -96,6 +97,7 @@ with_retry() {
     local should_retry=true
     if [[ -n "${retry_codes}" ]]; then
       should_retry=false
+      local c
       for c in ${retry_codes}; do
         if [[ "$rc" -eq "$c" ]]; then should_retry=true; break; fi
       done
@@ -107,17 +109,29 @@ with_retry() {
     fi
 
     # Exponential backoff with jitter
-    local jms="$((_rand_ms))"
+    local jms="$(_rand_ms)"
+    local span=$(( jitter_ms > 0 ? jitter_ms : 0 ))
     local sign=$(( (RANDOM % 2) == 0 ? 1 : -1 ))
-    local jitter_adj_ms=$(( sign * (jms % jitter_ms) ))
-    # delay' = min(maxd, delay*2) + jitter
-    local next_delay
-    next_delay="$(awk -v d="${delay}" -v m="${maxd}" 'BEGIN { n=d*2; if (n>m) n=m; printf "%.3f\n", n }')"
-    local delay_s
-    delay_s="$(awk -v n="${next_delay}" -v j="${jitter_adj_ms}" 'BEGIN { printf "%.3f\n", n + (j/1000.0) }')"
-    if [[ "${delay_s:0:1}" == "-" ]]; then delay_s="0.100"; fi
+    local jitter_adj_ms=$(( sign * (jms % (span == 0 ? 1 : span)) ))
 
-    log_warn "with_retry: rc=${rc}; retrying in ${delay_s}s (attempt ${attempt}/${retries})"
+    # delay' = min(maxd, delay*2) + jitter
+    # Use awk for simple float math; if awk missing, fall back to integers
+    local next_delay delay_s
+    if have_cmd awk; then
+      next_delay="$(awk -v d="${delay}" -v m="${maxd}" 'BEGIN { n=d*2; if (n>m) n=m; printf "%.3f\n", n }')"
+      delay_s="$(awk -v n="${next_delay}" -v j="${jitter_adj_ms}" 'BEGIN { printf "%.3f\n", n + (j/1000.0) }')"
+    else
+      # integer fallback
+      local d_int m_int
+      d_int="$(printf '%.0f' "${delay}")"
+      m_int="$(printf '%.0f' "${maxd}")"
+      next_delay=$(( d_int * 2 )); (( next_delay > m_int )) && next_delay="${m_int}"
+      delay_s=$(( next_delay + (jitter_adj_ms/1000) ))
+    fi
+    # never negative; set a small floor if jitter pushed below zero
+    if [[ "${delay_s:0:1}" == "-" || "${delay_s}" == "0" ]]; then delay_s="0.100"; fi
+
+    log_warn "with_retry: rc=${rc}; retrying in ${delay_s}s (next attempt $((attempt+1))/${retries})"
     _sleep_s "${delay_s}"
     delay="${next_delay}"
     ((attempt++))
@@ -143,31 +157,42 @@ deadline_run() {
     return $?
   fi
 
-  # Fallback manual timeout using a subshell and background watchdog
-  local pid
+  # Fallback: run the command in its own process group and watchdog it.
+  # Prefer setsid to create a new session/process group; otherwise, bash builtin.
+  local pgid child watchdog status
+  if have_cmd setsid; then
+    setsid bash -c 'exec "$@"' _ "${cmd[@]}" &
+  else
+    # Start normally; not perfect for grand-children, but better than nothing
+    bash -c 'exec "$@"' _ "${cmd[@]}" &
+  fi
+  child=$!
+
+  # Try to get the process group id (pgid == pid if it's a group leader)
+  pgid="$(ps -o pgid= -p "${child}" 2>/dev/null | tr -d ' ' || echo "${child}")"
+
   (
-    "${cmd[@]}" &
-    pid=$!
-    echo "${pid}"
-    wait "${pid}"
-    exit $?
+    # Watchdog
+    _sleep_s "${timeout_s}"
+    # On timeout: TERM the entire group, then KILL if needed
+    kill -TERM -"${pgid}" 2>/dev/null || kill -TERM "${child}" 2>/dev/null || true
+    _sleep_s 5
+    kill -KILL -"${pgid}" 2>/dev/null || kill -KILL "${child}" 2>/dev/null || true
   ) &
-  local runner=$!
-  local elapsed=0
-  while kill -0 "${runner}" 2>/dev/null; do
-    _sleep_s 0.2
-    elapsed=$((elapsed + 1))
-    if (( elapsed >= (timeout_s * 5) )); then
-      # Try gentle then hard kill of entire process group
-      kill -TERM -"${runner}" 2>/dev/null || true
-      _sleep_s 1
-      kill -KILL -"${runner}" 2>/dev/null || true
-      wait "${runner}" 2>/dev/null || true
-      return 124
-    fi
-  done
-  wait "${runner}"
-  return $?
+  watchdog=$!
+
+  # Wait for the child
+  wait "${child}"; status=$?
+
+  # If child finished first, stop the watchdog
+  kill "${watchdog}" 2>/dev/null || true
+  wait "${watchdog}" 2>/dev/null || true
+
+  if [[ ${status} -eq 143 || ${status} -eq 137 ]]; then
+    # 143=SIGTERM, 137=SIGKILL -> treat as timeout for parity with `timeout`
+    return 124
+  fi
+  return "${status}"
 }
 
 # deadline_retry <timeout_s> [with_retry args...] -- <command ...>
@@ -184,14 +209,13 @@ deadline_retry() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --) shift; break;;
-      *) wr_opts+=("$1"); shift;;
+      *)  wr_opts+=("$1"); shift;;
     esac
   done
   local -a cmd=( "$@" )
   [[ ${#cmd[@]} -gt 0 ]] || die "${E_INVALID_INPUT}" "deadline_retry: command required"
 
   while true; do
-    # Compute remaining time
     end_ts="$(date +%s)"
     local elapsed=$(( end_ts - start_ts ))
     local remaining=$(( timeout_s - elapsed ))
@@ -199,15 +223,14 @@ deadline_retry() {
       log_error "deadline_retry: timed out after ${timeout_s}s: ${cmd[*]}"
       return 124
     fi
-    # Run one attempt with a per-attempt cap (remaining)
+    # One attempt bounded by remaining time
     deadline_run "${remaining}" -- with_retry "${wr_opts[@]}" -- "${cmd[@]}"
     local rc=$?
-    if [[ $rc -eq 0 ]]; then return 0; fi
-    if [[ $rc -eq 124 ]]; then
-      log_error "deadline_retry: timed out while retrying: ${cmd[*]}"
-      return 124
-    fi
-    # Non-timeout failure: loop continues, with_retry already slept/backed off
+    case "${rc}" in
+      0)   return 0 ;;
+      124) log_error "deadline_retry: timed out while retrying: ${cmd[*]}"; return 124 ;;
+      *)   ;; # continue; with_retry already handled sleep/backoff
+    esac
   done
 }
 
@@ -217,20 +240,33 @@ deadline_retry() {
 
 # atomic_write_file <src> <dest> [mode]
 # Moves a prepared file into place atomically; optional chmod mode.
+# Guarantees atomicity by staging into the destination directory first to avoid cross-FS rename.
 atomic_write_file() {
   local src="${1:?src required}"
   local dest="${2:?dest required}"
   local mode="${3:-}"
 
-  local dest_dir; dest_dir="$(dirname -- "${dest}")"
-  mkdir -p -- "${dest_dir}"
-
-  # Ensure src exists
   [[ -f "${src}" ]] || die "${E_INVALID_INPUT}" "atomic_write_file: source not found: ${src}"
 
-  # Move into place atomically
-  mv -f -- "${src}" "${dest}"
-  if [[ -n "${mode}" ]]; then chmod "${mode}" "${dest}" || true; fi
+  local dest_dir; dest_dir="$(dirname -- "${dest}")"
+  local base; base="$(basename -- "${dest}")"
+  mkdir -p -- "${dest_dir}"
+
+  # Stage a temp file in the destination directory to ensure same-FS rename
+  local tmp
+  tmp="$(mktemp "${dest_dir}/.${base}.tmp.XXXXXX")" || die "${E_GENERAL}" "atomic_write_file: mktemp failed"
+  register_cleanup "rm -f '${tmp}'"
+
+  # Use install or cp to copy content, then optional chmod, then atomic rename
+  if have_cmd install; then
+    install -m "${mode:-0644}" -p -- "${src}" "${tmp}" 2>/dev/null || cp -p -- "${src}" "${tmp}"
+    [[ -n "${mode}" ]] && chmod "${mode}" "${tmp}" || true
+  else
+    cp -p -- "${src}" "${tmp}"
+    [[ -n "${mode}" ]] && chmod "${mode}" "${tmp}" || true
+  fi
+
+  mv -f -- "${tmp}" "${dest}"
 }
 
 # atomic_write <dest> [mode]  (reads content from stdin to a temp file first)
@@ -238,15 +274,15 @@ atomic_write() {
   local dest="${1:?dest required}"
   local mode="${2:-}"
   local dest_dir; dest_dir="$(dirname -- "${dest}")"
+  local base; base="$(basename -- "${dest}")"
   mkdir -p -- "${dest_dir}"
 
   local tmp
-  tmp="$(mktemp "${dest}.tmp.XXXXXX")"
-  # Ensure temp file is cleaned if we exit before move
+  tmp="$(mktemp "${dest_dir}/.${base}.tmp.XXXXXX")" || die "${E_GENERAL}" "atomic_write: mktemp failed"
   register_cleanup "rm -f '${tmp}'"
 
   cat > "${tmp}"
-  if [[ -n "${mode}" ]]; then chmod "${mode}" "${tmp}" || true; fi
+  [[ -n "${mode}" ]] && chmod "${mode}" "${tmp}" || true
 
   mv -f -- "${tmp}" "${dest}"
 }
@@ -256,12 +292,14 @@ atomic_write() {
 # ==============================================================================
 
 # begin_step <name>  — creates a marker file; registers auto-complete on exit
+# NOTE: This marks completion on *any* script exit. If you only want completion
+# on success, call `complete_step` explicitly at the end of your workflow.
 begin_step() {
   local name="${1:?step name required}"
   local f="${STATE_DIR}/${name}.state"
   log_debug "begin_step: ${name} -> ${f}"
   : > "${f}"
-  # auto-complete when script exits normally
+  # auto-complete when the script exits (any status)
   register_cleanup "complete_step '${name}'"
 }
 
@@ -272,7 +310,7 @@ complete_step() {
   [[ -f "${f}" ]] && rm -f -- "${f}" || true
 }
 
-# step_incomplete <name>  — returns 0 if marker exists (i.e., previously started but not completed)
+# step_incomplete <name>  — returns 0 if marker exists (i.e., started but not completed)
 step_incomplete() {
   local name="${1:?step name required}"
   [[ -f "${STATE_DIR}/${name}.state" ]]
