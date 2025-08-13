@@ -3,8 +3,6 @@
 # ==============================================================================
 # start_cluster.sh
 # ------------------------------------------------------------------------------
-# ⭐⭐⭐⭐
-#
 # Starts the application cluster and verifies that all services are healthy.
 # Adds CLI flags, resilient startup, health/port checks, and better failure
 # diagnostics.
@@ -111,12 +109,12 @@ _container_health() {
 }
 
 _all_services_healthy() {
-  local ok=0
+  local not_ok=0
   for svc in "${HEALTH_CHECK_SERVICES[@]}"; do
     local cid; cid="$(_get_container_id "${svc}")"
     if [[ -z "${cid}" ]]; then
       log_debug "Service '${svc}': container not created yet."
-      ok=1; continue
+      not_ok=1; continue
     fi
     local st; st="$(_container_state "${cid}")"
     local he; he="$(_container_health "${cid}")"
@@ -124,10 +122,10 @@ _all_services_healthy() {
       log_debug "Service '${svc}': OK (state=${st}, health=${he:-n/a})."
     else
       log_debug "Service '${svc}': not ready (state=${st:-n/a}, health=${he:-n/a})."
-      ok=1
+      not_ok=1
     fi
   done
-  (( ok == 0 ))
+  (( not_ok == 0 ))
 }
 
 _show_recent_logs_for_unhealthy() {
@@ -137,12 +135,47 @@ _show_recent_logs_for_unhealthy() {
     [[ -z "${cid}" ]] && continue
     local st; st="$(_container_state "${cid}")"
     local he; he="$(_container_health "${cid}")"
-    if [[ "${he}" != "healthy" && "${st}" != "running" ]]; then
+    # Show logs if unhealthy OR not running
+    if [[ "${he}" != "healthy" || "${st}" != "running" ]]; then
       echo
       log_error "---- ${svc} (state=${st:-n/a}, health=${he:-n/a}) ----"
       "${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" logs --no-color --tail=50 "${svc}" || true
     fi
   done
+}
+
+_discover_present_services() {
+  # Populate PRESENT_SERVICES with the services defined in compose
+  local out
+  out="$("${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" config --services 2>/dev/null || true)"
+  mapfile -t PRESENT_SERVICES <<< "${out:-}"
+}
+
+_filter_services_to_present() {
+  # Filter HEALTH_CHECK_SERVICES to those that actually exist in the compose file
+  [[ ${#PRESENT_SERVICES[@]:-0} -eq 0 ]] && return 0
+  local filtered=() wanted_missing=()
+  local want
+  for want in "${HEALTH_CHECK_SERVICES[@]}"; do
+    local found=0 s
+    for s in "${PRESENT_SERVICES[@]}"; do
+      if [[ "$want" == "$s" ]]; then found=1; filtered+=("$want"); break; fi
+    done
+    (( found == 0 )) && wanted_missing+=("$want")
+  done
+
+  if (( ${#filtered[@]} > 0 )); then
+    HEALTH_CHECK_SERVICES=("${filtered[@]}")
+    if (( ${#wanted_missing[@]} > 0 )); then
+      log_warn "Ignoring non-existent service(s): ${wanted_missing[*]}"
+    fi
+  else
+    # If user requested only services that don't exist, just wait on all present
+    if (( ${#wanted_missing[@]} > 0 )); then
+      log_warn "Requested service list not found in compose; waiting on all services instead."
+    fi
+    HEALTH_CHECK_SERVICES=("${PRESENT_SERVICES[@]}")
+  fi
 }
 
 main() {
@@ -155,6 +188,13 @@ main() {
   log_info "Using runtime: ${CONTAINER_RUNTIME}"
   log_info "Compose cmd:   ${COMPOSE_COMMAND}"
   log_info "Compose file:  ${COMPOSE_FILE}"
+
+  # Only wait for services that actually exist in this compose
+  _discover_present_services
+  _filter_services_to_present
+  if (( ${#HEALTH_CHECK_SERVICES[@]} == 0 )); then
+    die "${E_GENERAL:-1}" "No services discovered in compose. Check your ${COMPOSE_FILE}."
+  fi
   log_info "Services:      ${HEALTH_CHECK_SERVICES[*]}"
   log_info "Timeout/poll:  ${STARTUP_TIMEOUT}s / ${POLL_INTERVAL}s"
 
@@ -196,7 +236,7 @@ main() {
     fi
     printf "."; sleep "${POLL_INTERVAL}"
   done
-  echo
+  printf "\n"
 
   log_error "❌ Timeout: Some services did not become healthy."
   "${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" ps || true
