@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # orchestrator.sh
@@ -7,8 +8,8 @@
 # Dependencies:
 # lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
 # lib/validation.sh, lib/runtime-detection.sh, lib/compose-generator.sh,
-# parse-args.sh
-# Version: 1.0.0
+# lib/security.sh, parse-args.sh
+# Version: 1.0.1
 #
 # Usage Examples:
 #   ./orchestrator.sh --with-splunk --indexers 3 --splunk-password secret
@@ -24,7 +25,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
-# versions: keep env data separate from helpers
+# shellcheck source=lib/security.sh
+source "${SCRIPT_DIR}/lib/security.sh"
 # shellcheck source=versions.env
 source "${SCRIPT_DIR}/versions.env"
 # shellcheck source=lib/versions.sh
@@ -45,7 +47,9 @@ fi
 if [[ "${ERROR_HANDLING_VERSION:-0.0.0}" < "1.0.4" ]]; then
   die "${E_GENERAL}" "orchestrator.sh requires error-handling.sh version >= 1.0.4"
 fi
-
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "orchestrator.sh requires security.sh version >= 1.0.0"
+fi
 verify_versions_env || die "${E_INVALID_INPUT}" "versions.env contains invalid values"
 
 # --- Defaults / Tunables --------------------------------------------------------
@@ -81,29 +85,23 @@ EOF
 
 _preflight() {
   log_info "🔎 Running comprehensive preflight checks..."
-
   # System resources with Splunk-appropriate minimums
   local min_ram=4096
   local min_cores=2
-
   # Increase requirements for Splunk clusters
   if is_true "${ENABLE_SPLUNK}"; then
     min_ram=$((8192 * INDEXER_COUNT + 4096 * SEARCH_HEAD_COUNT))
     min_cores=$((2 * INDEXER_COUNT + SEARCH_HEAD_COUNT))
     log_info "Splunk cluster detected: requiring ${min_ram}MB RAM, ${min_cores} CPU cores"
   fi
-
   enforce_system_resources "${min_ram}" "${min_cores}"
-
   # Disk space validation
   validate_disk_space "${DATA_DIR}" 10
   if is_true "${ENABLE_SPLUNK}"; then
     validate_disk_space "${SPLUNK_DATA_DIR}" $((20 * INDEXER_COUNT))
   fi
-
   # Kernel parameters for production workloads
   enforce_vm_max_map_count 262144
-
   # Port availability checks
   log_info "Checking port availability..."
   if ! validate_port_free "${APP_PORT}"; then
@@ -134,16 +132,15 @@ _preflight() {
       die "${E_INVALID_INPUT}" "Grafana port 3000 is in use"
     fi
   fi
-
   # Container runtime validation
   validate_docker_daemon "${CONTAINER_RUNTIME}"
-
+  # Security audit
+  audit_security_configuration "${WORKDIR}/security-audit.txt"
   log_success "All preflight checks passed"
 }
 
 _setup_directories() {
   log_info "🗂️ Setting up directory structure..."
-
   # Create required directories with proper permissions
   local dirs=(
     "${DATA_DIR}"
@@ -164,32 +161,27 @@ _setup_directories() {
       "${WORKDIR}/config/grafana-provisioning/dashboards"
     )
   fi
-
   for dir in "${dirs[@]}"; do
     if [[ ! -d "$dir" ]]; then
       mkdir -p "$dir"
       log_debug "Created directory: $dir"
     fi
   done
-
   # Set appropriate permissions
   chmod 755 "${DATA_DIR}"
   if is_true "${ENABLE_SPLUNK}"; then
     chmod 755 "${SPLUNK_DATA_DIR}"
   fi
   chmod 700 "${WORKDIR}/secrets"
-
   log_success "Directory structure ready"
 }
 
 _generate_secrets() {
   if is_true "${ENABLE_SECRETS}" && has_capability "secrets"; then
     log_info "📝 Generating secrets files..."
-    mkdir -p "${WORKDIR}/secrets"
-    secure_store_password "splunk_password" "${SPLUNK_PASSWORD}" >/dev/null
-    secure_store_password "splunk_secret" "${SPLUNK_SECRET}" >/dev/null
+    setup_splunk_secrets "${SPLUNK_PASSWORD}" "${SPLUNK_SECRET}" "${WORKDIR}/secrets"
     if is_true "${ENABLE_MONITORING}"; then
-      secure_store_password "grafana_admin_password" "${GRAFANA_ADMIN_PASSWORD:-admin}" >/dev/null
+      write_secret_file "${WORKDIR}/secrets/grafana_admin_password.txt" "${GRAFANA_ADMIN_PASSWORD:-admin}" "Grafana admin password"
     fi
     log_success "Secrets files generated in ${WORKDIR}/secrets"
   fi
@@ -197,19 +189,15 @@ _generate_secrets() {
 
 _generate_supporting_configs() {
   log_info "📝 Generating supporting configuration files..."
-
   # Generate .env file for compose
   generate_env_template "${ENV_FILE}"
-
   # Generate secrets if enabled
   _generate_secrets
-
   # Generate monitoring configs if enabled
   if is_true "${ENABLE_MONITORING}"; then
     _generate_prometheus_config
     _generate_grafana_config
   fi
-
   # Generate Splunk configs if enabled
   if is_true "${ENABLE_SPLUNK}"; then
     _generate_splunk_configs
@@ -282,6 +270,16 @@ Configuration files:
 For production deployments, customize these files according to your
 organizational requirements.
 EOF
+  # Generate SSL certificates for Splunk
+  if is_true "${ENABLE_SPLUNK}"; then
+    generate_splunk_ssl_cert "splunk-cm" "${WORKDIR}/secrets/splunk"
+    for ((i=1; i<=INDEXER_COUNT; i++)); do
+      generate_splunk_ssl_cert "splunk-idx${i}" "${WORKDIR}/secrets/splunk"
+    done
+    for ((i=1; i<=SEARCH_HEAD_COUNT; i++)); do
+      generate_splunk_ssl_cert "splunk-sh${i}" "${WORKDIR}/secrets/splunk"
+    done
+  fi
 }
 
 _generate_compose() {
@@ -441,3 +439,4 @@ _main() {
 
 # --- Entry ----------------------------------------------------------------------
 _main "$@"
+```
