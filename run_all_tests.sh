@@ -9,8 +9,9 @@
 #               lib/security.sh, lib/monitoring.sh, lib/parse-args.sh, lib/air-gapped.sh,
 #               lib/universal-forwarder.sh, lib/platform-helpers.sh, orchestrator.sh,
 #               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped.sh,
-#               airgapped-quickstart.sh, generate-selinux-helpers.sh, tests/unit/test_*.sh
-# Version: 1.0.5
+#               airgapped-quickstart.sh, generate-selinux-helpers.sh, podman-docker-setup.sh,
+#               start_cluster.sh, tests/unit/test_*.sh
+# Version: 1.0.6
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
@@ -90,7 +91,7 @@ run_test_script() {
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies
-    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh; do
+    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh; do
       # shellcheck source=/dev/null
       source "${SCRIPT_DIR}/lib/${dep}"
     done
@@ -112,7 +113,7 @@ run_test_script() {
     compose() { echo "Mock compose: $@" >&2; return 0; }
     docker() { echo "Mock docker: $@" >&2; return 0; }
     podman() { echo "Mock podman: $@" >&2; return 0; }
-    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh
+    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh, start_cluster.sh
     get_total_memory() { echo "8192"; }
     get_cpu_cores() { echo "4"; }
     df() { echo "100GB"; return 0; }
