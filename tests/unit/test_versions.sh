@@ -1,23 +1,22 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/unit/test_versions.sh
-# Unit tests for versions.env, validating version formats and digests.
+# Unit tests for versions.sh, covering version and digest validation, and image ref handling.
 #
-# Dependencies: lib/core.sh, versions.env
+# Dependencies: lib/core.sh, versions.env, lib/versions.sh
 # ==============================================================================
-
 set -euo pipefail
+IFS=$'\n\t'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
-# Ensure dependencies are sourced
-if ! command -v log_info >/dev/null 2>&1; then
-  echo "FATAL: lib/core.sh must be sourced" >&2
-  exit 1
-fi
-if [[ ! -f versions.env ]]; then
-  echo "FATAL: versions.env not found" >&2
-  exit 1
-fi
-source versions.env
+# Source dependencies
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../versions.env"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/versions.sh"
 
 # Test counter and results
 TEST_COUNT=0
@@ -38,44 +37,54 @@ run_test() {
   fi
 }
 
-# Test 1: Validate VERSION_FILE_SCHEMA
-test_version_file_schema() {
-  [[ -n "${VERSION_FILE_SCHEMA}" && "${VERSION_FILE_SCHEMA}" =~ ^[0-9]+$ ]]
+# Test 1: Version format validation
+test_version_format() {
+  validate_version_format "1.2.3" || return 1
+  validate_version_format "v1.2.3" || return 1
+  ! validate_version_format "1.2" || return 1
+  return 0
 }
 
-# Test 2: Validate SPLUNK_VERSION against VERSION_PATTERN_SEMVER
-test_splunk_version() {
-  [[ "${SPLUNK_VERSION}" =~ ${VERSION_PATTERN_SEMVER} ]]
+# Test 2: Digest validation
+test_digest_validation() {
+  is_valid_digest "sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" || return 1
+  ! is_valid_digest "sha256:abc" || return 1
+  return 0
 }
 
-# Test 3: Validate PROMETHEUS_VERSION against VERSION_PATTERN_PROMETHEUS
-test_prometheus_version() {
-  [[ "${PROMETHEUS_VERSION}" =~ ${VERSION_PATTERN_PROMETHEUS} ]]
+# Test 3: Image ref generation
+test_image_ref() {
+  local ref
+  ref=$(image_ref "my-org/app" "sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" "1.2.3")
+  [[ "$ref" == "my-org/app@sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" ]] || return 1
+  ref=$(image_ref "my-org/app" "" "1.2.3")
+  [[ "$ref" == "my-org/app:1.2.3" ]] || return 1
+  return 0
 }
 
-# Test 4: Validate SPLUNK_IMAGE_DIGEST
-test_splunk_digest() {
-  [[ "${SPLUNK_IMAGE_DIGEST}" =~ ${DIGEST_PATTERN_SHA256} ]]
+# Test 4: Versions.env validation
+test_versions_env() {
+  verify_versions_env
 }
 
-# Test 5: Validate SPLUNK_IMAGE_REPO
-test_splunk_repo() {
-  [[ "${SPLUNK_IMAGE_REPO}" =~ ${REPO_PATTERN} ]]
-}
-
-# Test 6: Validate BUNDLE_CREATED_DATE format
-test_bundle_date() {
-  [[ "${BUNDLE_CREATED_DATE}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+# Test 5: Image and version listing
+test_list_images_versions() {
+  local images versions
+  images=$(list_all_images)
+  versions=$(list_all_versions)
+  [[ "$images" =~ APP_IMAGE ]] || return 1
+  [[ "$versions" =~ APP_VERSION ]] || return 1
+  return 0
 }
 
 # Run all tests
-run_test "VERSION_FILE_SCHEMA is a number" test_version_file_schema
-run_test "SPLUNK_VERSION matches SemVer" test_splunk_version
-run_test "PROMETHEUS_VERSION matches Prometheus pattern" test_prometheus_version
-run_test "SPLUNK_IMAGE_DIGEST is SHA-256" test_splunk_digest
-run_test "SPLUNK_IMAGE_REPO matches repo pattern" test_splunk_repo
-run_test "BUNDLE_CREATED_DATE is ISO 8601" test_bundle_date
+run_test "Version format validation" test_version_format
+run_test "Digest validation" test_digest_validation
+run_test "Image ref generation" test_image_ref
+run_test "Versions.env validation" test_versions_env
+run_test "Image and version listing" test_list_images_versions
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
+```
