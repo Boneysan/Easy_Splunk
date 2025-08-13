@@ -11,6 +11,7 @@
 #   • Optional rollback backup (uses backup_cluster.sh)
 #   • Safe volume wipe (no rm -rf /volume_data/.* footgun)
 #   • Works with Docker or Podman; retries on transient errors
+#   • Honors GPG_PASSPHRASE env for non-interactive decryption when possible
 #
 # Examples:
 #   ./restore_cluster.sh --backup-file backups/backup-20250101-120000.tar.gz.gpg \
@@ -26,9 +27,14 @@ IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # deps
+# shellcheck source=lib/core.sh
 source "${SCRIPT_DIR}/lib/core.sh"
+# shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/runtime-detection.sh
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+
+umask 077
 
 # ---- Args ---------------------------------------------------------------------
 BACKUP_FILE=""
@@ -37,6 +43,9 @@ ROLLBACK_GPG_RECIPIENT=""
 ONLY_VOLUMES_CSV=""      # explicit list of target volume names to restore
 MAP_PREFIX=""            # old:new (rename volumes during restore)
 AUTO_YES=0
+
+# Optional env: passphrase for GPG (used when possible)
+: "${GPG_PASSPHRASE:=}"
 
 usage() {
   cat <<'EOF'
@@ -62,14 +71,14 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --backup-file) BACKUP_FILE="${2:?}"; shift 2;;
-    --skip-rollback) SKIP_ROLLBACK="true"; shift;;
-    --rollback-gpg-recipient) ROLLBACK_GPG_RECIPIENT="${2:?}"; shift 2;;
-    --only-volumes) ONLY_VOLUMES_CSV="${2:?}"; shift 2;;
-    --map-prefix) MAP_PREFIX="${2:?old:new}"; shift 2;;
-    -y|--yes) AUTO_YES=1; shift;;
-    -h|--help) usage; exit 0;;
-    *) die "${E_INVALID_INPUT:-2}" "Unknown option: $1";;
+    --backup-file) BACKUP_FILE="${2:?}"; shift 2 ;;
+    --skip-rollback) SKIP_ROLLBACK="true"; shift ;;
+    --rollback-gpg-recipient) ROLLBACK_GPG_RECIPIENT="${2:?}"; shift 2 ;;
+    --only-volumes) ONLY_VOLUMES_CSV="${2:?}"; shift 2 ;;
+    --map-prefix) MAP_PREFIX="${2:?old:new}"; shift 2 ;;
+    -y|--yes) AUTO_YES=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "${E_INVALID_INPUT:-2}" "Unknown option: $1" ;;
   esac
 done
 
@@ -100,9 +109,9 @@ _verify_checksum_if_present() {
     if _have_cmd sha256sum; then
       sha256sum -c "${base}.sha256"
     else
-      # normalize format to "<hash>  <file>"
-      if ! grep -q " ${base}$" "${base}.sha256"; then
-        log_warn "Checksum file format may not match expected 'hash  file' style."
+      # macOS/BSD shasum; tolerate formats without filename if user edited file
+      if ! grep -q " ${base}$" "${base}.sha256" 2>/dev/null; then
+        log_warn "Checksum file may not include the filename; attempting validation anyway."
       fi
       shasum -a 256 -c "${base}.sha256"
     fi
@@ -121,8 +130,15 @@ _decrypt_if_needed() {
     *.gpg)
       _have_cmd gpg || die "${E_MISSING_DEP:-3}" "gpg is required to decrypt ${in}"
       log_info "Decrypting backup..."
-      gpg --quiet --decrypt --output "${out_tgz}" "${in}" \
-        || die "${E_GENERAL:-1}" "GPG decryption failed. Wrong key/passphrase?"
+      if [[ -n "${GPG_PASSPHRASE}" ]]; then
+        # Try loopback pinentry for non-interactive environments
+        gpg --batch --yes --pinentry-mode=loopback --passphrase "${GPG_PASSPHRASE}" \
+            --decrypt --output "${out_tgz}" "${in}" \
+          || die "${E_GENERAL:-1}" "GPG decryption failed (loopback)."
+      else
+        gpg --quiet --decrypt --output "${out_tgz}" "${in}" \
+          || die "${E_GENERAL:-1}" "GPG decryption failed."
+      fi
       echo "${out_tgz}"
       ;;
     *.tar.gz|*.tgz)
@@ -141,19 +157,40 @@ _tar_extract() {
   tar -xzf "${tgz}" -C "${dest}"
 }
 
+# Prefer alpine; fall back to busybox
+TMP_IMAGE_ALPINE="${TMP_IMAGE_ALPINE:-alpine:3.20}"
+TMP_IMAGE_BUSYBOX="${TMP_IMAGE_BUSYBOX:-busybox:1.36}"
+
+ensure_helper_image() {
+  if "${CONTAINER_RUNTIME}" image inspect "${TMP_IMAGE_ALPINE}" >/dev/null 2>&1; then
+    echo "${TMP_IMAGE_ALPINE}"; return 0
+  fi
+  if retry_command 2 3 "${CONTAINER_RUNTIME}" pull "${TMP_IMAGE_ALPINE}"; then
+    echo "${TMP_IMAGE_ALPINE}"; return 0
+  fi
+  log_warn "Could not use ${TMP_IMAGE_ALPINE}; trying ${TMP_IMAGE_BUSYBOX}..."
+  if "${CONTAINER_RUNTIME}" image inspect "${TMP_IMAGE_BUSYBOX}" >/dev/null 2>&1 || \
+     retry_command 2 3 "${CONTAINER_RUNTIME}" pull "${TMP_IMAGE_BUSYBOX}"; then
+    echo "${TMP_IMAGE_BUSYBOX}"; return 0
+  fi
+  die "${E_GENERAL:-1}" "No suitable helper image (alpine/busybox) available."
+}
+
 _safe_wipe_volume() {
-  # Do NOT use rm -rf /volume_data/.* (dangerous).
-  # Use find with -mindepth to avoid . and ..
-  "${CONTAINER_RUNTIME}" run --rm -v "$1:/volume_data" alpine \
+  # Avoid dangerous globs; delete only direct children
+  local vol="$1" helper_image="$2"
+  "${CONTAINER_RUNTIME}" run --rm -v "${vol}:/volume_data" "${helper_image}" \
     sh -c "find /volume_data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +"
 }
 
 _copy_into_volume() {
-  local src_dir="$1" vol="$2"
-  # Preserve perms/mtime/links reasonably via cp -a; Alpine provides it.
-  retry_command 2 3 "${CONTAINER_RUNTIME}" run --rm \
-    -v "${vol}:/volume_data" -v "${src_dir}:/backup_data:ro" \
-    alpine sh -c "cp -a /backup_data/. /volume_data/"
+  local src_dir="$1" vol="$2" helper_image="$3"
+  # Use tar streaming for good fidelity across filesystems
+  retry_command 2 3 bash -c \
+    "'${CONTAINER_RUNTIME}' run --rm -v '${vol}:/volume_data' -v '${src_dir}:/backup_data:ro' ${helper_image} \
+       sh -c \"cd /backup_data && tar -cpf - .\" \
+       | '${CONTAINER_RUNTIME}' run --rm -i -v '${vol}:/volume_data' ${helper_image} \
+         sh -c \"cd /volume_data && tar -xpf -\""
 }
 
 _apply_prefix_map() {
@@ -198,6 +235,7 @@ _discover_volumes_from_manifest_or_dirs() {
 main() {
   log_info "🚀 Starting Cluster Restore"
   detect_container_runtime
+  local helper_image; helper_image="$(ensure_helper_image)"
 
   # 0) Sanity: ask user to confirm containers are stopped
   local running
@@ -211,10 +249,11 @@ main() {
     [[ -n "${ROLLBACK_GPG_RECIPIENT}" ]] || die "${E_INVALID_INPUT:-2}" "Missing --rollback-gpg-recipient (or use --skip-rollback)."
     log_warn "A rollback backup of CURRENT data will be created before restore."
     _confirm_or_exit "Proceed with rollback backup?"
-    mkdir -p rollback_backups
-    ./backup_cluster.sh --output-dir rollback_backups --gpg-recipient "${ROLLBACK_GPG_RECIPIENT}" \
+    mkdir -p "${SCRIPT_DIR}/rollback_backups"
+    "${SCRIPT_DIR}/backup_cluster.sh" --output-dir "${SCRIPT_DIR}/rollback_backups" \
+      --gpg-recipient "${ROLLBACK_GPG_RECIPIENT}" \
       || die "${E_GENERAL:-1}" "Failed to create rollback backup."
-    log_success "Rollback backup created in ./rollback_backups/"
+    log_success "Rollback backup created in ${SCRIPT_DIR}/rollback_backups/"
   else
     log_warn "Skipping rollback backup at user request."
   fi
@@ -224,7 +263,7 @@ main() {
 
   # 3) Decrypt (if needed) and unpack into staging
   local staging; staging="$(mktemp -d -t cluster-restore-XXXXXX)"
-  add_cleanup_task "rm -rf '${staging}'"
+  register_cleanup "rm -rf '${staging}'"
   local tgz; tgz="$(_decrypt_if_needed "${BACKUP_FILE}" "${staging}")"
   _tar_extract "${tgz}" "${staging}"
 
@@ -236,9 +275,7 @@ main() {
     mapfile -t src_vols < <(_discover_volumes_from_manifest_or_dirs "${staging}")
   fi
 
-  if ((${#src_vols[@]}==0)); then
-    die "${E_GENERAL:-1}" "No source volumes discovered in backup."
-  fi
+  ((${#src_vols[@]})) || die "${E_GENERAL:-1}" "No source volumes discovered in backup."
 
   log_info "Volumes to restore (source names): ${src_vols[*]}"
   [[ -n "${MAP_PREFIX}" ]] && log_info "Applying prefix map: ${MAP_PREFIX}"
@@ -258,8 +295,8 @@ main() {
     "${CONTAINER_RUNTIME}" volume create "${dest_vol}" >/dev/null
 
     # Wipe existing content safely, then copy
-    _safe_wipe_volume "${dest_vol}"
-    _copy_into_volume "${src_dir}" "${dest_vol}"
+    _safe_wipe_volume "${dest_vol}" "${helper_image}"
+    _copy_into_volume "${src_dir}" "${dest_vol}" "${helper_image}"
 
     log_success "     Restored volume '${dest_vol}'."
   done
