@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/security.sh
@@ -7,8 +8,10 @@
 # Dependencies: lib/core.sh (log_*, die, have_cmd, register_cleanup, is_true)
 #               lib/error-handling.sh (atomic_write, atomic_write_file)
 #
+# Version: 1.0.0
+#
 # Notes:
-# - Provides safe fallbacks for is_true and error codes if core didn’t define them.
+# - Provides safe fallbacks for is_true if core didn’t define it.
 # - Never logs secret values. Paths and filenames only.
 # - This is a library meant to be sourced; it intentionally avoids `set -e`.
 # ==============================================================================
@@ -19,7 +22,7 @@ if ! command -v atomic_write >/dev/null 2>&1 || ! command -v log_info >/dev/null
   exit 1
 fi
 
-# ---- Fallbacks / Error codes ---------------------------------------------------
+# ---- Fallbacks ----------------------------------------------------------------
 # Minimal is_true fallback if core didn’t define it
 if ! command -v is_true >/dev/null 2>&1; then
   is_true() {
@@ -29,11 +32,6 @@ if ! command -v is_true >/dev/null 2>&1; then
     esac
   }
 fi
-
-# Error code defaults if not provided by core
-: "${E_GENERAL:=1}"
-: "${E_INVALID_INPUT:=2}"
-: "${E_MISSING_DEP:=3}"
 
 # ---- Defaults / Tunables -------------------------------------------------------
 : "${CERT_DEFAULT_DAYS:=3650}"            # ~10 years for internal certs
@@ -57,10 +55,9 @@ fi
 # Internal helpers (kept simple and local)
 # ==============================================================================
 
-# _escape_for_curl_conf STRING -> prints string with " and \ escaped for curl -K files
+# _escape_for_curl_conf STRING -> prints string with special characters escaped for curl -K files
 _escape_for_curl_conf() {
-  # Escape backslashes first, then quotes
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' -e "s/'/\\'/g"
 }
 
 # _have_shuf — some minimal containers lack shuf
@@ -78,7 +75,7 @@ _shuffle_chars() {
         for(i=n;i>=1;i--){ j=int(rand()*i)+1; printf "%s", a[j]; a[j]=a[i] }
       } END{ }
     '
-  fi
+  }
 }
 
 # ==============================================================================
@@ -126,8 +123,24 @@ generate_random_password() {
           | head -c "${length}"
       )"
     fi
-  else
+  elif [[ -r /dev/urandom ]]; then
     LC_ALL=C password="$(tr -dc 'A-Za-z0-9_@#%+=:,.!-?' < /dev/urandom | head -c "${length}")"
+  else
+    # Pure bash fallback for minimal environments
+    local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@#%+=:,.!-?"
+    password=""
+    for ((i=0; i<length; i++)); do
+      password+="${chars:$((RANDOM % ${#chars})):1}"
+    done
+    if is_true "${complexity}"; then
+      # Ensure at least one of each required class
+      local L="abcdefghijklmnopqrstuvwxyz"
+      local U="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      local D="0123456789"
+      local S='@#%+=:,.!-?_'
+      password="${password:0:1}${L:$((RANDOM % ${#L})):1}${U:$((RANDOM % ${#U})):1}${D:$((RANDOM % ${#D})):1}${S:$((RANDOM % ${#S})):1}${password:5}"
+      password="$(printf '%s' "${password}" | _shuffle_chars | head -c "${length}")"
+    fi
   fi
 
   printf '%s\n' "${password}"
@@ -149,7 +162,6 @@ validate_password_strength() {
     [[ "${password}" =~ [a-z] ]] && has_lower=1
     [[ "${password}" =~ [A-Z] ]] && has_upper=1
     [[ "${password}" =~ [0-9] ]] && has_digit=1
-    # Keep '-' last or escaped; include underscore too
     [[ "${password}" =~ [@#%+=:,.!\?_+-] ]] && has_special=1
     local score=$((has_lower + has_upper + has_digit + has_special))
     if [[ "${score}" -lt 3 ]]; then
@@ -184,8 +196,16 @@ generate_splunk_secret() {
   local length="${1:-64}"
   if have_cmd openssl; then
     openssl rand -base64 $((length * 2)) 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c "${length}"
-  else
+  elif [[ -r /dev/urandom ]]; then
     tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "${length}"
+  else
+    # Pure bash fallback
+    local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    local secret=""
+    for ((i=0; i<length; i++)); do
+      secret+="${chars:$((RANDOM % ${#chars})):1}"
+    done
+    printf '%s' "${secret}"
   fi
   echo
 }
@@ -245,7 +265,7 @@ rotate_secret_file() {
 
   # Create new .1
   cp -f -- "${path}" "${path}.1"
-  log_debug "Rotated secret file: $(basename "${path}") -> $(basename "${path}.1}")"
+  log_debug "Rotated secret file: $(basename "${path}") -> $(basename "${path}.1")"
 }
 
 # ==============================================================================
@@ -602,11 +622,12 @@ setup_splunk_secrets() {
   log_success "Splunk secrets configured securely"
 }
 
-# generate_splunk_ssl_cert <splunk_hostname> [cert_dir]
+# generate_splunk_ssl_cert <splunk_hostname> [cert_dir] [extra_sans]
 # Generates SSL certificates for Splunk with appropriate SANs
 generate_splunk_ssl_cert() {
   local hostname="${1:?Splunk hostname required}"
   local cert_dir="${2:-${TLS_DIR}/splunk}"
+  local extra_sans="${3:-}"
 
   ensure_dir_secure "${cert_dir}" 755 "Splunk TLS directory"
 
@@ -618,6 +639,9 @@ generate_splunk_ssl_cert() {
   if [[ "${hostname}" =~ ^splunk-(.+)$ ]]; then
     local service_name="${BASH_REMATCH[1]}"
     splunk_sans+=",${service_name},${service_name}.splunk.local"
+  fi
+  if [[ -n "${extra_sans}" ]]; then
+    splunk_sans+=",${extra_sans}"
   fi
 
   generate_self_signed_cert "${hostname}" "${key_file}" "${cert_file}" "${splunk_sans}"
@@ -676,12 +700,34 @@ audit_security_configuration() {
     audit_results+=("PASS: No certificates expiring within 30 days")
   fi
 
+  # Check Splunk secrets directory permissions
+  if [[ -d "${SPLUNK_SECRETS_DIR}" ]]; then
+    local perms
+    perms=$(stat -c "%a" "${SPLUNK_SECRETS_DIR}" 2>/dev/null || stat -f "%Lp" "${SPLUNK_SECRETS_DIR}" 2>/dev/null || echo "")
+    if [[ "${perms}" != "700" ]]; then
+      audit_results+=("FAIL: Insecure Splunk secrets directory permissions: ${SPLUNK_SECRETS_DIR} (${perms})")
+    else
+      audit_results+=("PASS: Splunk secrets directory permissions secure")
+    fi
+  fi
+
   # Check for weak Splunk password from env (if present; value not logged)
   if [[ -n "${SPLUNK_PASSWORD:-}" ]]; then
     if validate_password_strength "${SPLUNK_PASSWORD}"; then
       audit_results+=("PASS: Splunk password (env) meets complexity requirements")
     else
       audit_results+=("FAIL: Splunk password (env) does not meet complexity requirements")
+    fi
+  fi
+
+  # Check netrc permissions
+  if [[ -f "${NETRC_PATH}" ]]; then
+    local perms
+    perms=$(stat -c "%a" "${NETRC_PATH}" 2>/dev/null || stat -f "%Lp" "${NETRC_PATH}" 2>/dev/null || echo "")
+    if [[ "${perms}" != "600" ]]; then
+      audit_results+=("FAIL: Insecure netrc permissions: ${NETRC_PATH} (${perms})")
+    else
+      audit_results+=("PASS: Netrc permissions secure")
     fi
   fi
 
@@ -726,3 +772,7 @@ export -f generate_random_password validate_password_strength write_secret_file 
           create_netrc curl_auth get_cert_info cert_expires_within \
           generate_ca_cert generate_self_signed_cert setup_splunk_secrets \
           generate_splunk_ssl_cert audit_security_configuration
+
+# Define version
+SECURITY_VERSION="1.0.0"
+```
