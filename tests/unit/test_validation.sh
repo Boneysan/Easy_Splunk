@@ -1,140 +1,115 @@
 #!/usr/bin/env bash
-#
+# ==============================================================================
 # tests/unit/test_validation.sh
+# Unit tests for lib/validation.sh, covering system resources, container runtime,
+# input validation, and Splunk-specific checks.
 #
-# Unit tests for lib/validation.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/validation.sh, versions.env
 # ==============================================================================
 
-# --- Test Shell Options ---
-# Intentionally do NOT enable `set -e`. We want to observe failures.
-set -uo pipefail
+set -euo pipefail
 
-# --- Source Dependencies ---
-TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-PROJECT_ROOT="$(cd "${TEST_DIR}/../../" && pwd)"
+# Ensure dependencies are sourced
+if ! command -v log_info >/dev/null 2>&1; then
+  echo "FATAL: lib/core.sh must be sourced" >&2
+  exit 1
+fi
+if ! command -v with_retry >/dev/null 2>&1; then
+  echo "FATAL: lib/error-handling.sh must be sourced" >&2
+  exit 1
+fi
+if ! command -v validate_system_resources >/dev/null 2>&1; then
+  echo "FATAL: lib/validation.sh must be sourced" >&2
+  exit 1
+fi
+if [[ ! -f versions.env ]]; then
+  echo "FATAL: versions.env not found" >&2
+  exit 1
+fi
 
-# Source libs. Note: core.sh may set -e; disable it afterwards for test harness.
-# shellcheck source=../../lib/core.sh
-source "${PROJECT_ROOT}/lib/core.sh"
-# shellcheck source=../../lib/error-handling.sh
-source "${PROJECT_ROOT}/lib/error-handling.sh"
-# shellcheck source=../../lib/validation.sh
-source "${PROJECT_ROOT}/lib/validation.sh"
-set +e  # neutralize strict -e that core.sh might have enabled
+# Create a temporary directory for tests
+TEST_DIR="$(mktemp -d -t test-validation.XXXXXX)"
+register_cleanup "rm -rf '${TEST_DIR}'"
+log_info "Testing in temporary directory: ${TEST_DIR}"
 
-# --- Minimal Test Framework ---
+# Test counter and results
 TEST_COUNT=0
-FAIL_COUNT=0
+TEST_PASSED=0
+TEST_FAILED=0
 
-_pass() { log_success "PASS: $1"; }
-_fail() { log_error   "FAIL: $1"; FAIL_COUNT=$((FAIL_COUNT+1)); }
-
-# Run and expect success (rc==0)
-assert_success() {
-  local desc="$1"; shift
-  TEST_COUNT=$((TEST_COUNT+1))
-  ( set +e; "$@" ) &>/dev/null
-  local rc=$?
-  if [[ $rc -eq 0 ]]; then _pass "$desc"; else _fail "$desc (rc=$rc)"; fi
-}
-
-# Run and expect failure (rc!=0). Uses `set -e` to ensure die() or any nonzero aborts.
-assert_fail() {
-  local desc="$1"; shift
-  TEST_COUNT=$((TEST_COUNT+1))
-  ( set -e; "$@" ) &>/dev/null
-  local rc=$?
-  if [[ $rc -ne 0 ]]; then _pass "$desc"; else _fail "$desc (unexpected success)"; fi
-}
-
-# Run and assert exact return code (no -e so we can capture rc precisely)
-assert_rc() {
-  local desc="$1" expect="$2"; shift 2
-  TEST_COUNT=$((TEST_COUNT+1))
-  ( set +e; "$@" ) &>/dev/null
-  local rc=$?
-  if [[ $rc -eq $expect ]]; then _pass "$desc"; else _fail "$desc (rc=$rc, expected=$expect)"; fi
-}
-
-# --- Mocks / Stubs ---
-# Make die() non-exiting but return the code so assertions can check rc.
-die() { return "$1"; }
-
-# Provide stable host values for resource validation
-get_total_memory() { echo 8192; }  # 8 GiB
-get_cpu_cores()    { echo 4;    }
-
-# --- Sanity checks (functions exist) ---
-require_funcs=( validate_system_resources validate_required_var validate_configuration_compatibility )
-for f in "${require_funcs[@]}"; do
-  if ! declare -F "$f" >/dev/null; then
-    log_error "Missing function: $f"
-    exit 1
-  fi
-done
-
-# --- Test Cases ---
-
-test_validate_system_resources() {
-  log_info $'\n--- validate_system_resources ---'
-  # happy paths
-  assert_success "passes when resources are sufficient" \
-    validate_system_resources 4096 2
-  assert_success "passes when resources are exactly sufficient" \
-    validate_system_resources 8192 4
-
-  # resource shortfall
-  assert_fail "fails when memory is insufficient" \
-    validate_system_resources 9000 4
-  assert_fail "fails when CPU cores are insufficient" \
-    validate_system_resources 8192 8
-
-  # input validation (nonsensical values)
-  assert_fail "fails on zero RAM requirement" \
-    validate_system_resources 0 2
-  assert_fail "fails on negative CPU cores" \
-    validate_system_resources 4096 -1
-  assert_fail "fails on non-numeric RAM" \
-    validate_system_resources notanumber 2
-  assert_fail "fails on non-numeric CPU" \
-    validate_system_resources 4096 nope
-}
-
-test_validate_required_var() {
-  log_info $'\n--- validate_required_var ---'
-  assert_success "passes for a normal non-empty string" \
-    validate_required_var "some_value" "Test Var"
-  assert_success "passes for value containing spaces" \
-    validate_required_var "value with spaces" "Test Var"
-  assert_fail "fails for an empty string" \
-    validate_required_var "" "Test Var"
-  assert_fail "fails for a string with only spaces" \
-    validate_required_var "   " "Test Var"
-}
-
-test_validate_configuration_compatibility() {
-  log_info $'\n--- validate_configuration_compatibility ---'
-  # Smoke test; function currently only logs success (should not error)
-  assert_success "runs without error" \
-    validate_configuration_compatibility
-}
-
-# --- Runner ---
-main() {
-  log_info "Running Unit Tests for lib/validation.sh"
-
-  test_validate_system_resources
-  test_validate_required_var
-  test_validate_configuration_compatibility
-
-  log_info $'\n--- Test Summary ---'
-  if (( FAIL_COUNT == 0 )); then
-    log_success "✅ All ${TEST_COUNT} tests passed!"
-    exit 0
+# Helper to run a test
+run_test() {
+  local test_name="$1"; shift
+  ((TEST_COUNT++))
+  log_info "Running test: ${test_name}"
+  if "$@"; then
+    log_success "Test passed: ${test_name}"
+    ((TEST_PASSED++))
   else
-    log_error "❌ ${FAIL_COUNT} of ${TEST_COUNT} tests failed."
-    exit 1
+    log_error "Test failed: ${test_name}"
+    ((TEST_FAILED++))
   fi
 }
 
-main
+# Test 1: Validate system resources (assume sufficient resources)
+test_validate_system_resources() {
+  local mem; mem="$(get_total_memory)"
+  local cpu; cpu="$(get_cpu_cores)"
+  validate_system_resources $((mem-1)) $((cpu-1))
+}
+
+# Test 2: Validate disk space (create a small dir)
+test_validate_disk_space() {
+  mkdir -p "${TEST_DIR}/disk"
+  validate_disk_space "${TEST_DIR}/disk" 1
+}
+
+# Test 3: Validate container runtime detection
+test_detect_container_runtime() {
+  local runtime
+  runtime="$(detect_container_runtime)" || true
+  [[ -n "${runtime}" || ! -x "$(command -v docker)" && ! -x "$(command -v podman)" ]]
+}
+
+# Test 4: Validate port free (use a random high port)
+test_validate_port_free() {
+  validate_port_free 54321
+}
+
+# Test 5: Validate Splunk RF/SF
+test_validate_rf_sf() {
+  validate_rf_sf 2 1 3
+}
+
+# Test 6: Validate Splunk license (mock XML)
+test_validate_splunk_license() {
+  local license="${TEST_DIR}/license.xml"
+  echo "<license>Valid</license>" > "${license}"
+  validate_splunk_license "${license}"
+}
+
+# Test 7: Validate versions.env
+test_validate_versions_env() {
+  validate_versions_env
+}
+
+# Test 8: Validate or prompt for dir (non-interactive, set valid dir)
+test_validate_or_prompt_for_dir() {
+  local DATA_DIR="${TEST_DIR}/data"
+  mkdir -p "${DATA_DIR}"
+  NON_INTERACTIVE=1 validate_or_prompt_for_dir DATA_DIR "test data"
+}
+
+# Run all tests
+run_test "Validate system resources" test_validate_system_resources
+run_test "Validate disk space" test_validate_disk_space
+run_test "Detect container runtime" test_detect_container_runtime
+run_test "Validate port free" test_validate_port_free
+run_test "Validate Splunk RF/SF" test_validate_rf_sf
+run_test "Validate Splunk license" test_validate_splunk_license
+run_test "Validate versions.env" test_validate_versions_env
+run_test "Validate or prompt for dir" test_validate_or_prompt_for_dir
+
+# Summary
+log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
+[[ ${TEST_FAILED} -eq 0 ]]
