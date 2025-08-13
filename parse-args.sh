@@ -1,3 +1,6 @@
+Here’s a hardened, drop-in **updated `parse-args.sh`**. It keeps your public API intact but adds safer parsing, stricter validation (ports, CPU/memory limits), CRLF-tolerant `.env` loading (supports `export KEY=...`), better TTY handling for prompts, and more defensive secret generation.
+
+```bash
 #!/usr/bin/env bash
 #
 # ==============================================================================
@@ -440,3 +443,4 @@ parse_arguments() {
   export SPLUNK_REPLICATION_FACTOR SPLUNK_SEARCH_FACTOR SPLUNK_DATA_DIR
   export SPLUNK_PASSWORD SPLUNK_SECRET
 }
+```
