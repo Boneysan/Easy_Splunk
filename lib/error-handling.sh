@@ -1,25 +1,26 @@
-Absolutely—here’s a tightened, drop-in **updated `lib/error-handling.sh`**. It keeps your original behavior but adds a few sturdiness upgrades:
-
-* Optional `RETRY_STRATEGY` (`exp` = your current exponential + jitter, `full_jitter` = AWS-style decorrelated full jitter).
-* Smarter timeout runner (uses `timeout` or `gtimeout` on macOS; otherwise falls back).
-* More portable fractional sleep (perl → python → awk → integer sleep).
-* Small safety tweaks and clearer messages.
-* Hooks cleanly into the updated `lib/core.sh` (still compatible with string-based `register_cleanup`).
-
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/error-handling.sh
 # Robust error handling, retries with backoff+jitter, deadlines/timeouts,
 # atomic file operations, and resumable progress tracking.
 #
-# Dependencies: lib/core.sh  (expects: log_*, die, E_*, register_cleanup, have_cmd)
+# Dependencies: lib/core.sh (expects: log_*, die, E_*, register_cleanup, have_cmd)
+# Version: 1.0.1
+#
+# Usage Examples:
+#   with_retry --retries 3 --base-delay 2 -- curl -f https://example.com
+#   deadline_run 10 -- sleep 5
+#   echo "content" | atomic_write /path/to/file 644
+#   begin_step "install"; ...; complete_step "install"
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
 if ! command -v log_info >/dev/null 2>&1; then
   echo "FATAL: lib/core.sh must be sourced before lib/error-handling.sh" >&2
   exit 1
+fi
+if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "lib/error-handling.sh requires core.sh version >= 1.0.0"
 fi
 
 # ---- Defaults / Tunables -------------------------------------------------------
@@ -36,7 +37,7 @@ STATE_DIR_DEFAULT="${XDG_RUNTIME_DIR:-/tmp}/splunk-pkg-state"
 
 # Ensure state directory exists and is private
 mkdir -p -- "${STATE_DIR}"
-chmod 700 "${STATE_DIR}" 2>/dev/null || true
+chmod 700 "${STATE_DIR}" 2>/dev/null || log_debug "Failed to set permissions on ${STATE_DIR}"
 
 # ==============================================================================
 # Internal utilities
@@ -55,14 +56,13 @@ time.sleep(${sec})
 PY
   elif have_cmd awk; then
     # Use awk to busy-wait (very short periods); prefer integer sleep for larger values
-    # For >0.5s, degrade to integer sleep to avoid high CPU
     if awk 'BEGIN{exit !(('"${sec}"')>0.5)}'; then
       local whole
       whole="$(printf '%.0f' "${sec}")"
       (( whole < 1 )) && whole=1
       sleep "${whole}"
     else
-      awk -v s="${sec}" 'BEGIN{t=systime()+s; while (systime()<t) {}}'
+      awk -v s="${sec}" 'BEGIN{t=systime()+s; while (systime()<t) {}}' && log_debug "_sleep_s: used CPU-intensive awk busy-wait for ${sec}s"
     fi
   else
     local whole
@@ -168,7 +168,7 @@ with_retry() {
           frac="$(awk -v r="$(_rand_u32)" 'BEGIN{srand(r); printf "%.6f\n", rand()}')"
           delay_s="$(awk -v c="${cap}" -v f="${frac}" 'BEGIN{printf "%.6f\n", c*f}')"
         else
-          # integer-ish fallback
+          log_debug "with_retry: falling back to integer delay due to missing awk"
           local a2=$(( attempt < 10 ? (1<<attempt) : 1024 ))
           next_delay=$(( a2 * ${base%.*} ))
           (( next_delay > ${maxd%.*} )) && next_delay="${maxd%.*}"
@@ -177,7 +177,7 @@ with_retry() {
         fi
         ;;
       *)
-        # exp (your original): delay' = min(maxd, delay*2) +/- jitter
+        # exp: delay' = min(maxd, delay*2) +/- jitter
         local jms="$(_rand_ms)"
         local span=$(( jitter_ms > 0 ? jitter_ms : 0 ))
         local sign=$(( (RANDOM % 2) == 0 ? 1 : -1 ))
@@ -186,6 +186,7 @@ with_retry() {
           next_delay="$(awk -v d="${delay}" -v m="${maxd}" 'BEGIN{n=d*2; if (n>m) n=m; printf "%.6f\n", n}')"
           delay_s="$(awk -v n="${next_delay}" -v j="${jitter_adj_ms}" 'BEGIN{printf "%.6f\n", n + (j/1000.0)}')"
         else
+          log_debug "with_retry: falling back to integer delay due to missing awk"
           local d_int m_int
           d_int="$(printf '%.0f' "${delay}")"
           m_int="$(printf '%.0f' "${maxd}")"
@@ -234,27 +235,31 @@ _run_with_timeout() {
     bash -c 'exec "$@"' _ "${cmd[@]}" &
   fi
   child=$!
+  log_debug "_run_with_timeout: starting child (pid=${child})"
 
   # Try to get the process group id (pgid == pid if it's a group leader)
   pgid="$(ps -o pgid= -p "${child}" 2>/dev/null | tr -d ' ' || echo "${child}")"
+  log_debug "_run_with_timeout: child pgid=${pgid}"
 
   (
     _sleep_s "${timeout_s}"
-    kill -TERM -"${pgid}" 2>/dev/null || kill -TERM "${child}" 2>/dev/null || true
+    kill -TERM -"${pgid}" 2>/dev/null || kill -TERM "${child}" 2>/dev/null || log_debug "_run_with_timeout: failed to send SIGTERM to child ${child}"
     _sleep_s 5
-    kill -KILL -"${pgid}" 2>/dev/null || kill -KILL "${child}" 2>/dev/null || true
+    kill -KILL -"${pgid}" 2>/dev/null || kill -KILL "${child}" 2>/dev/null || log_debug "_run_with_timeout: failed to send SIGKILL to child ${child}"
   ) &
   watchdog=$!
+  log_debug "_run_with_timeout: started watchdog (pid=${watchdog})"
 
   # Wait for the child
   wait "${child}"; status=$?
+  log_debug "_run_with_timeout: child exited with status ${status}"
 
   # If child finished first, stop the watchdog
   kill "${watchdog}" 2>/dev/null || true
   wait "${watchdog}" 2>/dev/null || true
 
   if [[ ${status} -eq 143 || ${status} -eq 137 ]]; then
-    # 143=SIGTERM, 137=SIGKILL -> treat as timeout for parity with `timeout`
+    log_debug "_run_with_timeout: mapping exit status ${status} to timeout (124)"
     return 124
   fi
   return "${status}"
@@ -397,6 +402,3 @@ list_incomplete_steps() {
 # ==============================================================================
 # End of lib/error-handling.sh
 # ==============================================================================
-```
-
-If you want, I can also wire a couple of quick unit-ish snippets to validate `with_retry`, `deadline_run`, and the atomic writers (using a temp dir) so you can smoke-test in one go.
