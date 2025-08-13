@@ -100,7 +100,7 @@ install_podman_rhel() {
     log_warn "podman-docker not found. 'docker' shim may not be available on this distro."
   fi
 
-  # Compose support: prefer native 'podman compose' (comes with Podman v4+).
+  # Compose support: prefer native 'podman compose' (Podman v4+).
   if podman compose version >/dev/null 2>&1; then
     log_success "Native 'podman compose' is available."
   else
@@ -116,14 +116,15 @@ install_podman_rhel() {
       else
         log_warn "No compose solution installed (missing podman compose and podman-compose)."
       fi
-    end
+    fi
   fi
 }
 
 install_podman_debian() {
   log_info "Updating APT and installing packages..."
   sudo apt-get update -y
-  sudo apt-get install -y podman || die "${E_MISSING_DEP:-3}" "Failed to install podman"
+  # Podman plus rootless helpers are commonly useful; some may already be pulled in by deps.
+  sudo apt-get install -y podman uidmap slirp4netns fuse-overlayfs || die "${E_MISSING_DEP:-3}" "Failed to install podman"
 
   # docker shim
   if sudo apt-get install -y podman-docker >/dev/null 2>&1; then
@@ -243,7 +244,8 @@ main() {
       log_warn "macOS detected. Recommended:"
       log_warn "  brew install podman"
       log_warn "  podman machine init && podman machine start"
-      log_warn "For Docker CLI compat, use DOCKER_HOST from 'podman machine inspect --format \"{{.ConnectionInfo.PodmanSocket.Path}}\"'"
+      log_warn "For Docker CLI compat, use DOCKER_HOST from:"
+      log_warn "  podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}'"
       exit 0
     fi
     die "${E_GENERAL:-1}" "Unsupported Linux distribution for this automated script."
