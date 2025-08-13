@@ -8,12 +8,13 @@
 # Flags:
 #   --compose-file <path>   Compose file (default: ./docker-compose.yml)
 #   --services <csv>        Only check these services (e.g., app,redis)
-#   --all-services          Discover services from compose and check all RUNNING ones
+#   --all-services          Discover and check all RUNNING ones
 #   --since <dur>           Log scan window (default: 10m) e.g., 30m, 2h
 #   --tail <n>              Lines to show from failing services (default: 50)
 #   --prom-url <url>        Prometheus base URL (default: http://localhost:9090)
 #   --no-prometheus         Skip Prometheus checks
-#   --keywords <regex>      Log scan pattern (default: 'error|exception|fatal|failed')
+#   --keywords <regex>      Log scan pattern (default below)
+#   --keywords-file <path>  Load regex from file for log scanning
 #   --yes, -y               Non-interactive (assume yes where applicable)
 #   -h, --help              Show usage
 #
@@ -39,7 +40,9 @@ LOG_SINCE="${LOG_SINCE:-10m}"
 LOG_TAIL="${LOG_TAIL:-50}"
 PROM_URL="${PROM_URL:-http://localhost:9090}"
 CHECK_PROM=1
-KEYWORDS='error|exception|fatal|failed'
+# Stronger default patterns
+KEYWORDS='error|exception|fatal|fail(ed)?|panic|segfault|oom|killed'
+KEYWORDS_FILE=""
 AUTO_YES=0
 OVERALL_HEALTHY="true"
 USER_SPECIFIED_SERVICES=0
@@ -57,6 +60,7 @@ Options:
   --prom-url <url>        Prometheus base URL (default: ${PROM_URL})
   --no-prometheus         Skip Prometheus target health checks
   --keywords <regex>      Log scan regex (default: ${KEYWORDS})
+  --keywords-file <path>  Load regex from file (overrides --keywords)
   --yes, -y               Non-interactive
   -h, --help              Show this help
 EOF
@@ -65,19 +69,26 @@ EOF
 # --- arg parsing ----------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --compose-file) COMPOSE_FILE="${2:?}"; shift 2;;
-    --services) IFS=',' read -r -a SERVICES_TO_CHECK <<< "${2:?}"; USER_SPECIFIED_SERVICES=1; shift 2;;
-    --all-services) DISCOVER_ALL=1; shift;;
-    --since) LOG_SINCE="${2:?}"; shift 2;;
-    --tail) LOG_TAIL="${2:?}"; shift 2;;
-    --prom-url) PROM_URL="${2:?}"; shift 2;;
-    --no-prometheus) CHECK_PROM=0; shift;;
-    --keywords) KEYWORDS="${2:?}"; shift 2;;
-    -y|--yes) AUTO_YES=1; shift;;
-    -h|--help) usage; exit 0;;
-    *) die "${E_INVALID_INPUT:-2}" "Unknown option: $1";;
+    --compose-file) COMPOSE_FILE="${2:?}"; shift 2 ;;
+    --services) IFS=',' read -r -a SERVICES_TO_CHECK <<< "${2:?}"; USER_SPECIFIED_SERVICES=1; shift 2 ;;
+    --all-services) DISCOVER_ALL=1; shift ;;
+    --since) LOG_SINCE="${2:?}"; shift 2 ;;
+    --tail) LOG_TAIL="${2:?}"; shift 2 ;;
+    --prom-url) PROM_URL="${2:?}"; shift 2 ;;
+    --no-prometheus) CHECK_PROM=0; shift ;;
+    --keywords) KEYWORDS="${2:?}"; shift 2 ;;
+    --keywords-file) KEYWORDS_FILE="${2:?}"; shift 2 ;;
+    -y|--yes) AUTO_YES=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "${E_INVALID_INPUT:-2}" "Unknown option: $1" ;;
   esac
 done
+
+# If a keywords file was provided, load its contents
+if [[ -n "${KEYWORDS_FILE}" ]]; then
+  [[ -r "${KEYWORDS_FILE}" ]] || die "${E_INVALID_INPUT:-2}" "Cannot read --keywords-file: ${KEYWORDS_FILE}"
+  KEYWORDS="$(< "${KEYWORDS_FILE}")"
+fi
 
 # --- helpers --------------------------------------------------------------------
 _have_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -121,14 +132,17 @@ _print_stats() {
 _scan_logs_section() {
   echo
   log_info "📜 === Scanning Logs (Since ${LOG_SINCE}) ==="
+  local rx="${KEYWORDS}"
   for s in "${SERVICES_TO_CHECK[@]}"; do
+    # Binary-safe grep and stable regex behavior via C locale
     local out
-    out="$("${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" logs --since "${LOG_SINCE}" "${s}" 2>&1 | grep -iE "${KEYWORDS}" || true)"
+    out="$("${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" logs --since "${LOG_SINCE}" "${s}" 2>&1 \
+      | LC_ALL=C grep -aEi -- "${rx}" || true)"
     if [[ -z "${out}" ]]; then
-      log_success "  ✔️ ${s}: No recent matches for /${KEYWORDS}/"
+      log_success "  ✔️ ${s}: No recent matches for /${rx}/"
     else
-      log_warn "  ⚠️ ${s}: Found matches for /${KEYWORDS}/"
-      echo "${out}" | sed 's/^/    | /'
+      log_warn "  ⚠️ ${s}: Found matches for /${rx}/"
+      printf '%s\n' "${out}" | sed 's/^/    | /'
     fi
   done
 }
@@ -138,12 +152,15 @@ _check_prometheus() {
   echo
   log_info "📈 === Prometheus Target Health (${PROM_URL}) ==="
   local tmp; tmp="$(mktemp "/tmp/prom-targets.XXXXXX")"
+  # Ensure cleanup even on early return
+  trap 'rm -f "${tmp}"' RETURN
+
   if ! curl -fsS --max-time 5 "${PROM_URL}/api/v1/targets" -o "${tmp}"; then
     log_error "  ❌ Could not query Prometheus at ${PROM_URL}"
     OVERALL_HEALTHY="false"
-    rm -f "${tmp}"
     return 0
   fi
+
   local total=0 up=0
   if _have_cmd jq; then
     total=$(jq '[.data.activeTargets[]?] | length' "${tmp}" 2>/dev/null || echo 0)
@@ -152,7 +169,6 @@ _check_prometheus() {
     total=$(grep -o '"health":"' "${tmp}" | wc -l | tr -d ' ')
     up=$(grep -o '"health":"up"' "${tmp}" | wc -l | tr -d ' ')
   fi
-  rm -f "${tmp}"
 
   if (( total > 0 && up == total )); then
     log_success "  ✔️ ${up}/${total} targets healthy."
