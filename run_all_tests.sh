@@ -6,9 +6,11 @@
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
 #               lib/validation.sh, lib/runtime-detection.sh, lib/compose-generator.sh,
-#               lib/security.sh, parse-args.sh, orchestrator.sh, generate-credentials.sh,
-#               tests/unit/test_*.sh
-# Version: 1.0.3
+#               lib/security.sh, lib/monitoring.sh, lib/parse-args.sh, lib/air-gapped.sh,
+#               lib/universal-forwarder.sh, lib/platform-helpers.sh, orchestrator.sh,
+#               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped.sh,
+#               airgapped-quickstart.sh, generate-selinux-helpers.sh, tests/unit/test_*.sh
+# Version: 1.0.5
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
@@ -88,7 +90,7 @@ run_test_script() {
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies
-    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh parse-args.sh orchestrator.sh generate-credentials.sh; do
+    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh; do
       # shellcheck source=/dev/null
       source "${SCRIPT_DIR}/lib/${dep}"
     done
@@ -110,7 +112,7 @@ run_test_script() {
     compose() { echo "Mock compose: $@" >&2; return 0; }
     docker() { echo "Mock docker: $@" >&2; return 0; }
     podman() { echo "Mock podman: $@" >&2; return 0; }
-    # Mock system commands for validation.sh and security.sh
+    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh
     get_total_memory() { echo "8192"; }
     get_cpu_cores() { echo "4"; }
     df() { echo "100GB"; return 0; }
@@ -118,7 +120,22 @@ run_test_script() {
     openssl() { echo "Mock openssl: $@" >&2; return 0; }
     date() { echo "2025-08-13 12:00:00 UTC"; return 0; }
     stat() { echo "600"; return 0; }
-    read() { echo "y"; } # Auto-confirm for generate-credentials.sh
+    read() { echo "y"; } # Auto-confirm for scripts
+    curl() { echo "Mock curl: $@"; touch "$4"; return 0; }
+    sha256sum() { echo "abc123"; return 0; }
+    uname() { echo "x86_64"; }
+    get_os() { echo "linux"; }
+    firewall-cmd() { echo "Mock firewall-cmd: $@"; return 0; }
+    systemctl() { echo "Mock systemctl: $@"; return 0; }
+    dnf() { echo "Mock dnf: $@"; return 0; }
+    yum() { echo "Mock yum: $@"; return 0; }
+    getenforce() { echo "enforcing"; return 0; }
+    sestatus() { echo "SELinux status: enforcing"; return 0; }
+    setsebool() { echo "Mock setsebool: $@"; return 0; }
+    semanage() { echo "Mock semanage: $@"; return 0; }
+    restorecon() { echo "Mock restorecon: $@"; return 0; }
+    sudo() { "$@"; } # Bypass sudo for mocks
+    cat() { echo "ID=rhel" > /etc/os-release; } # Mock RHEL-like system
     # Run the test script
     if bash "${script}"; then
       complete_step "test_${script_name}"
