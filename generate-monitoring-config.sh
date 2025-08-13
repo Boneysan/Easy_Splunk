@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # generate-monitoring-config.sh
@@ -6,32 +7,26 @@
 # Flags:
 #   --yes, -y                 Run non-interactively (no confirmation)
 #   --root <dir>              Project root to generate into (defaults to CWD)
-#
-#   # Prometheus core
 #   --scrape-interval <dur>   Global scrape interval (e.g., 15s)
 #   --eval-interval <dur>     Global evaluation interval (e.g., 15s)
 #   --prom-port <port>        Prometheus service port (default 9090)
-#
-#   # Primary app metrics
 #   --app-target <host:port>  App metrics target (default app:8081)
 #   --app-path <path>         Metrics path for app (default /metrics)
-#
-#   # Optional exporters / extras (comma-separated host:port lists)
 #   --redis-target <host:port>
 #   --node-targets <list>
 #   --cadvisor-targets <list>
 #   --extra-targets <list>
-#
-#   # Optional Splunk visibility (mgmt port 8089)
 #   --splunk-indexers <N>
 #   --splunk-search-heads <N>
-#
+#   --grafana-password <pass> Grafana admin password (default: auto-generated)
+#   --with-tls                Generate TLS certificates for Prometheus/Grafana
 #   --no-placeholder          Skip creating the placeholder Grafana dashboard
 #   --dry-run                 Show effective settings and exit (no writes)
 #   --verbose                 Enable debug logging
 #   -h, --help                Show usage
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/monitoring.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/monitoring.sh, lib/security.sh
+# Version: 1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -43,31 +38,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/security.sh
+source "${SCRIPT_DIR}/lib/security.sh"
 # shellcheck source=lib/monitoring.sh
 source "${SCRIPT_DIR}/lib/monitoring.sh"
 
+# --- Version Checks ------------------------------------------------------------
+if [[ "${MONITORING_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "generate-monitoring-config.sh requires monitoring.sh version >= 1.0.0"
+fi
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "generate-monitoring-config.sh requires security.sh version >= 1.0.0"
+fi
+
+# --- Defaults ------------------------------------------------------------------
 AUTO_YES=0
 DRY_RUN=0
 VERBOSE=0
 ROOT_DIR=""
 SKIP_PLACEHOLDER=0
+WITH_TLS=0
+GRAFANA_ADMIN_PASSWORD=""
 
 # Defaults (match lib/monitoring.sh)
 PROMETHEUS_SCRAPE_INTERVAL="${PROMETHEUS_SCRAPE_INTERVAL:-15s}"
 PROMETHEUS_EVAL_INTERVAL="${PROMETHEUS_EVAL_INTERVAL:-15s}"
 PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
-
 APP_METRICS_TARGET="${APP_METRICS_TARGET:-app:8081}"
 APP_METRICS_PATH="${APP_METRICS_PATH:-/metrics}"
-
 REDIS_METRICS_TARGET="${REDIS_METRICS_TARGET:-}"
 NODE_EXPORTER_TARGETS="${NODE_EXPORTER_TARGETS:-}"
 CADVISOR_TARGETS="${CADVISOR_TARGETS:-}"
 EXTRA_STATIC_TARGETS="${EXTRA_STATIC_TARGETS:-}"
-
 SPLUNK_INDEXER_COUNT="${SPLUNK_INDEXER_COUNT:-}"
 SPLUNK_SEARCH_HEAD_COUNT="${SPLUNK_SEARCH_HEAD_COUNT:-}"
+SECRETS_DIR="${SECRETS_DIR:-./config/secrets}"
 
+# --- CLI parsing ----------------------------------------------------------------
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
@@ -80,27 +87,28 @@ Generates default monitoring configs:
   - ./config/grafana-provisioning/dashboards/app-overview.json
 
 Options:
-  --yes, -y
-  --root <dir>
-  --scrape-interval <dur>
-  --eval-interval <dur>
-  --prom-port <port>
-  --app-target <host:port>
-  --app-path <path>
+  --yes, -y                 Run non-interactively (no confirmation)
+  --root <dir>              Project root to generate into (defaults to CWD)
+  --scrape-interval <dur>   Global scrape interval (e.g., 15s)
+  --eval-interval <dur>     Global evaluation interval (e.g., 15s)
+  --prom-port <port>        Prometheus service port (default 9090)
+  --app-target <host:port>  App metrics target (default app:8081)
+  --app-path <path>         Metrics path for app (default /metrics)
   --redis-target <host:port>
   --node-targets <h1:p1,h2:p2,...>
   --cadvisor-targets <h1:p1,h2:p2,...>
   --extra-targets <h1:p1,h2:p2,...>
   --splunk-indexers <N>
   --splunk-search-heads <N>
-  --no-placeholder
-  --dry-run
-  --verbose
-  -h, --help
+  --grafana-password <pass> Grafana admin password (default: auto-generated)
+  --with-tls                Generate TLS certificates for Prometheus/Grafana
+  --no-placeholder          Skip creating the placeholder Grafana dashboard
+  --dry-run                 Show effective settings and exit (no writes)
+  --verbose                 Enable debug logging
+  -h, --help                Show usage
 EOF
 }
 
-# --- CLI parsing ----------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -y|--yes) AUTO_YES=1; shift ;;
@@ -116,6 +124,8 @@ while [[ $# -gt 0 ]]; do
     --extra-targets) EXTRA_STATIC_TARGETS="${2:?}"; shift 2 ;;
     --splunk-indexers) SPLUNK_INDEXER_COUNT="${2:?}"; shift 2 ;;
     --splunk-search-heads) SPLUNK_SEARCH_HEAD_COUNT="${2:?}"; shift 2 ;;
+    --grafana-password) GRAFANA_ADMIN_PASSWORD="${2:?}"; shift 2 ;;
+    --with-tls) WITH_TLS=1; shift ;;
     --no-placeholder) SKIP_PLACEHOLDER=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --verbose) VERBOSE=1; DEBUG="true"; export DEBUG; shift ;;
@@ -159,12 +169,21 @@ _validate_inputs() {
   if [[ -n "${SPLUNK_SEARCH_HEAD_COUNT}" ]] && ! _is_int "${SPLUNK_SEARCH_HEAD_COUNT}"; then
     die "${E_INVALID_INPUT}" "--splunk-search-heads must be an integer"
   fi
+  # Grafana password
+  if [[ -n "${GRAFANA_ADMIN_PASSWORD}" ]]; then
+    if ! validate_password_strength "${GRAFANA_ADMIN_PASSWORD}"; then
+      die "${E_INVALID_INPUT}" "Grafana admin password does not meet security requirements"
+    fi
+  fi
 }
 
 # --- Main -----------------------------------------------------------------------
 main() {
   log_info "📊 This will (re)generate Prometheus & Grafana configs under '${ROOT_DIR:-$PWD}/config'."
   log_warn "Existing files may be overwritten."
+  if (( WITH_TLS == 1 )); then
+    log_info "TLS certificates will be generated for Prometheus and Grafana."
+  fi
   confirm_or_exit "Continue?"
 
   _validate_inputs
@@ -188,7 +207,8 @@ main() {
   export PROMETHEUS_SCRAPE_INTERVAL PROMETHEUS_EVAL_INTERVAL PROMETHEUS_PORT
   export APP_METRICS_TARGET APP_METRICS_PATH
   export REDIS_METRICS_TARGET NODE_EXPORTER_TARGETS CADVISOR_TARGETS EXTRA_STATIC_TARGETS
-  export SPLUNK_INDEXER_COUNT SPLUNK_SEARCH_HEAD_COUNT
+  export SPLUNK_INDEXER_COUNT SPLUNK_SEARCH_HEAD_COUNT GRAFANA_ADMIN_PASSWORD
+  export SECRETS_DIR
 
   # Optionally skip placeholder by shadowing the function
   if (( SKIP_PLACEHOLDER == 1 )); then
@@ -211,18 +231,35 @@ cAdvisor Targets:      ${CADVISOR_TARGETS}
 Extra Targets:         ${EXTRA_STATIC_TARGETS}
 Splunk Indexers:       ${SPLUNK_INDEXER_COUNT}
 Splunk Search Heads:   ${SPLUNK_SEARCH_HEAD_COUNT}
+Grafana Password:      ${GRAFANA_ADMIN_PASSWORD:+(set, not shown)}
+TLS Enabled:           ${WITH_TLS}
 Placeholder Dashboard: $(( SKIP_PLACEHOLDER == 1 ? 0 : 1 ))
+Secrets Dir:           ${SECRETS_DIR}
 (No files were written.)
 EOF
     return 0
   fi
 
+  # Generate TLS certificates if requested
+  if (( WITH_TLS == 1 )); then
+    generate_self_signed_cert "prometheus" "${SECRETS_DIR}/prometheus.key" "${SECRETS_DIR}/prometheus.crt" "prometheus,localhost,127.0.0.1"
+    generate_self_signed_cert "grafana" "${SECRETS_DIR}/grafana.key" "${SECRETS_DIR}/grafana.crt" "grafana,localhost,127.0.0.1"
+  fi
+
   generate_monitoring_config
+
+  # Run security audit
+  audit_security_configuration "${SECRETS_DIR}/security-audit.txt"
 
   log_success "✅ Monitoring configuration generation complete!"
   local base="${ROOT_DIR:-$PWD}"
   log_info "Prometheus: ${base}/config/prometheus.yml, ${base}/config/alert.rules.yml"
   log_info "Grafana:    ${base}/config/grafana-provisioning/{datasources,dashboards}/"
+  if (( WITH_TLS == 1 )); then
+    log_info "TLS:        ${SECRETS_DIR}/{prometheus,grafana}.{key,crt}"
+  fi
+  log_info "Secrets:    ${SECRETS_DIR}/grafana_admin_password.txt"
 }
 
 main "$@"
+```

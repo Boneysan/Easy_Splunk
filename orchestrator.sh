@@ -8,8 +8,8 @@
 # Dependencies:
 # lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
 # lib/validation.sh, lib/runtime-detection.sh, lib/compose-generator.sh,
-# lib/security.sh, parse-args.sh
-# Version: 1.0.1
+# lib/security.sh, lib/monitoring.sh, parse-args.sh
+# Version: 1.0.2
 #
 # Usage Examples:
 #   ./orchestrator.sh --with-splunk --indexers 3 --splunk-password secret
@@ -27,6 +27,8 @@ source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 # shellcheck source=lib/security.sh
 source "${SCRIPT_DIR}/lib/security.sh"
+# shellcheck source=lib/monitoring.sh
+source "${SCRIPT_DIR}/lib/monitoring.sh"
 # shellcheck source=versions.env
 source "${SCRIPT_DIR}/versions.env"
 # shellcheck source=lib/versions.sh
@@ -49,6 +51,9 @@ if [[ "${ERROR_HANDLING_VERSION:-0.0.0}" < "1.0.4" ]]; then
 fi
 if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
   die "${E_GENERAL}" "orchestrator.sh requires security.sh version >= 1.0.0"
+fi
+if [[ "${MONITORING_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "orchestrator.sh requires monitoring.sh version >= 1.0.0"
 fi
 verify_versions_env || die "${E_INVALID_INPUT}" "versions.env contains invalid values"
 
@@ -195,53 +200,12 @@ _generate_supporting_configs() {
   _generate_secrets
   # Generate monitoring configs if enabled
   if is_true "${ENABLE_MONITORING}"; then
-    _generate_prometheus_config
-    _generate_grafana_config
+    SPLUNK_INDEXER_COUNT="${INDEXER_COUNT}" SPLUNK_SEARCH_HEAD_COUNT="${SEARCH_HEAD_COUNT}" generate_monitoring_config
   fi
   # Generate Splunk configs if enabled
   if is_true "${ENABLE_SPLUNK}"; then
     _generate_splunk_configs
   fi
-}
-
-_generate_prometheus_config() {
-  local config_file="${WORKDIR}/config/prometheus.yml"
-  log_info "Generating Prometheus configuration: ${config_file}"
-  cat > "${config_file}" <<EOF
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-scrape_configs:
-  - job_name: 'app'
-    static_configs:
-      - targets: ['app:8080']
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:6379']
-EOF
-  if is_true "${ENABLE_SPLUNK}"; then
-    cat >> "${config_file}" <<EOF
-  - job_name: 'splunk-cluster'
-    static_configs:
-      - targets:
-$(for ((i=1; i<=INDEXER_COUNT; i++)); do echo "        - 'splunk-idx${i}:8089'"; done)
-$(for ((i=1; i<=SEARCH_HEAD_COUNT; i++)); do echo "        - 'splunk-sh${i}:8089'"; done)
-EOF
-  fi
-}
-
-_generate_grafana_config() {
-  local datasource_file="${WORKDIR}/config/grafana-provisioning/datasources/prometheus.yml"
-  log_info "Generating Grafana datasource configuration: ${datasource_file}"
-  cat > "${datasource_file}" <<EOF
-apiVersion: 1
-datasources:
-  - name: Prometheus
-    type: prometheus
-    access: proxy
-    url: http://prometheus:9090
-    isDefault: true
-EOF
 }
 
 _generate_splunk_configs() {
@@ -323,6 +287,39 @@ _detect_ps_json_support() {
     COMPOSE_PS_JSON_SUPPORTED=0
   fi
   log_debug "compose ps --format json supported: ${COMPOSE_PS_JSON_SUPPORTED}"
+}
+
+_start_stack() {
+  log_info "🚀 Starting the application stack..."
+  begin_step "start_stack"
+  # Build compose profiles based on enabled services
+  local profiles=()
+  if is_true "${ENABLE_MONITORING}"; then
+    profiles+=("monitoring")
+  fi
+  if is_true "${ENABLE_SPLUNK}"; then
+    profiles+=("splunk")
+  fi
+  # Set up environment for compose
+  local compose_env=()
+  if [[ ${#profiles[@]} -gt 0 ]]; then
+    local profile_list
+    profile_list=$(IFS=,; echo "${profiles[*]}")
+    compose_env=("COMPOSE_PROFILES=${profile_list}")
+  fi
+  # Check for dry run
+  if is_true "${DRY_RUN}"; then
+    log_warn "DRY RUN: Would execute: ${compose_env[*]} compose -f '${COMPOSE_FILE}' up -d --remove-orphans"
+    complete_step "start_stack"
+    return 0
+  fi
+  # Start services with retry logic
+  log_info "Starting services with profiles: ${profiles[*]:-none}"
+  deadline_retry "${STARTUP_DEADLINE}" -- \
+    --retries "${RETRIES}" --base-delay "${RETRY_BASE_DELAY}" --max-delay "${RETRY_MAX_DELAY}" -- \
+    env "${compose_env[@]}" compose -f "${COMPOSE_FILE}" up -d --remove-orphans
+  complete_step "start_stack"
+  log_success "Stack startup completed"
 }
 
 _wait_for_health() {
