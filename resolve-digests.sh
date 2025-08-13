@@ -1,12 +1,35 @@
 #!/usr/bin/env bash
 # resolve-digests.sh — pin tags in versions.env to immutable digests
+#
+# What this does
+#  - Reads image repo + version pairs from versions.env (e.g., FOO_IMAGE_REPO + FOO_VERSION)
+#  - Pulls <repo>:<version> with the detected container runtime (docker or podman)
+#  - Resolves the image’s immutable digest (sha256:…)
+#  - Updates/creates:
+#       <PREFIX>_IMAGE_DIGEST="sha256:…"
+#       <PREFIX>_IMAGE="<repo>@sha256:…"
+#  - Creates versions.env.bak and sed sidecar backups
+#
+# Requirements
+#  - lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh (in ./lib)
+#  - Docker or Podman available to pull/inspect images
+#
+# Notes
+#  - Handles registries with ports (e.g., registry:5000/ns/app:tag)
+#  - If pull/inspect fails for a particular image, that image is skipped (others still processed)
+#  - Idempotent: safe to re-run; it’ll refresh DIGEST/IMAGE lines
+#
 
 set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# deps
+# shellcheck source=lib/core.sh
 source "${SCRIPT_DIR}/lib/core.sh"
+# shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/runtime-detection.sh
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 
 readonly VERSIONS_FILE="versions.env"
@@ -22,69 +45,109 @@ Creates backups: ${VERSIONS_FILE}.bak (full) and sed sidecars as needed.
 EOF
 }
 
-# Portable in-place sed
+# Portable in-place sed (GNU/BSD); takes a full sed script and a file
 _sed_inplace() {
-  # _sed_inplace <pattern> <replacement> <file>
-  # expects a full sed script in arg1; uses .sibak temp
+  # _sed_inplace "<script>" <file>
   local script="$1" file="$2"
   if sed --version >/dev/null 2>&1; then
-    # GNU sed
     sed -i.sibak -e "${script}" "${file}"
   else
-    # BSD sed
     sed -i .sibak -e "${script}" "${file}"
   fi
 }
 
-# Resolve digest for a given <repo>:<tag> and ensure it matches that repo.
+# Split an image reference "<name>:<tag>" safely, even with registry ports.
+# Outputs two lines: <repo>  and  <tag>   (tag may be empty if not present)
+_split_repo_tag() {
+  local ref="$1"
+  # If already pinned with @, treat everything before @ as repo, after @ as digest (tag empty)
+  if [[ "$ref" == *"@"* ]]; then
+    printf '%s\n' "${ref%%@*}"
+    printf '%s\n' ""
+    return 0
+  fi
+  # Determine if the last path segment contains ':' (that would be the tag separator)
+  local after_slash="${ref##*/}"
+  if [[ "$after_slash" == *":"* ]]; then
+    printf '%s\n' "${ref%:*}"   # repo
+    printf '%s\n' "${ref##*:}"  # tag
+  else
+    printf '%s\n' "${ref}"      # repo
+    printf '%s\n' ""            # no tag
+  fi
+}
+
+# Resolve digest for a given "<repo>:<tag>" (or "<repo>@<digest>" -> returns digest immediately)
+# Prints "sha256:…" to stdout
 _get_digest_for_image() {
-  local image_tag="$1" repo="${image_tag%%:*}"
+  local image_ref="$1"
 
-  log_info "  -> Pulling ${image_tag} (to read manifest/digest)…"
-  if ! "${CONTAINER_RUNTIME}" pull "${image_tag}" &>/dev/null; then
-    log_error "     pull failed for ${image_tag}"
+  # Fast-path: already a digest reference
+  if [[ "$image_ref" == *"@"* ]]; then
+    printf '%s\n' "${image_ref##*@}"
+    return 0
+  fi
+
+  # Pull (ensure local manifest present)
+  log_info "  -> Pulling ${image_ref} (to read manifest/digest)…"
+  if ! "${CONTAINER_RUNTIME}" pull "${image_ref}" &>/dev/null; then
+    log_error "     pull failed for ${image_ref}"
     return 1
   fi
 
-  # Collect all RepoDigests, pick the one whose repo matches (exactly or with default registry)
-  local digests match
-  if ! digests="$("${CONTAINER_RUNTIME}" image inspect "${image_tag}" \
-      --format '{{join .RepoDigests "\n"}}' 2>/dev/null)"; then
-    log_error "     inspect failed for ${image_tag}"
+  # Inspect RepoDigests (use template that works on docker & podman)
+  local digests
+  if ! digests="$("${CONTAINER_RUNTIME}" image inspect "${image_ref}" \
+        --format '{{range .RepoDigests}}{{println .}}{{end}}' 2>/dev/null)"; then
+    log_error "     inspect failed for ${image_ref}"
+    return 1
+  fi
+  digests="$(printf '%s\n' "$digests" | sed '/^[[:space:]]*$/d')"
+
+  if [[ -z "${digests}" ]]; then
+    log_error "     no RepoDigests found for ${image_ref}"
     return 1
   fi
 
-  # Try exact repo match first, then fallback to first digest.
+  # Try to pick the digest that matches our repo (normalize common docker.io/library case)
+  local repo tag; read -r repo; read -r tag < <(_split_repo_tag "${image_ref}")
+  local match
+  # exact match
   match="$(printf '%s\n' "${digests}" | grep -E "^${repo}@" || true)"
   if [[ -z "${match}" ]]; then
-    # Docker may normalize to docker.io/library/<name>
+    # docker.io/library normalization when repo has no slash (e.g., "nginx")
     if [[ "${repo}" != */* ]]; then
       match="$(printf '%s\n' "${digests}" | grep -E "^(docker\.io/)?library/${repo}@" || true)"
     fi
   fi
+  # fallback: first digest
   match="${match:-$(printf '%s\n' "${digests}" | head -n1)}"
 
   local digest="${match##*@}"
   if [[ -z "${digest}" ]]; then
-    log_error "     could not determine digest for ${image_tag}"
+    log_error "     could not determine digest for ${image_ref}"
     return 1
   fi
+
   printf '%s\n' "${digest}"
 }
 
 main() {
   if [[ $# -gt 0 ]]; then usage; exit 0; fi
   [[ -f "${VERSIONS_FILE}" ]] || die "${E_MISSING_DEP:-3}" "File not found: ${VERSIONS_FILE}"
-  detect_container_runtime
 
+  detect_container_runtime
+  log_info "Using container runtime: ${CONTAINER_RUNTIME}"
+
+  # Safeguard backup
   cp -f "${VERSIONS_FILE}" "${VERSIONS_FILE}.bak"
   log_info "Backup created: ${VERSIONS_FILE}.bak"
 
-  # Load once (we only read), before we start editing the file.
-  # shellcheck source=/dev/null
+  # Load for indirect variable expansion
+  # shellcheck disable=SC1090
   source "${VERSIONS_FILE}"
 
-  # Collect prefixes robustly (ignore comments/whitespace)
+  # Collect prefixes from readonly FOO_IMAGE_REPO=…
   mapfile -t PREFIXES < <(awk '
     /^[[:space:]]*readonly[[:space:]]+[A-Z_]+_IMAGE_REPO=/{ 
       match($0,/readonly[[:space:]]+([A-Z_]+)_IMAGE_REPO=/,m); 
@@ -112,13 +175,13 @@ main() {
       continue
     fi
 
-    local tag="${repo}:${ver}"
+    local ref="${repo}:${ver}"
     local digest
-    if ! digest="$(_get_digest_for_image "${tag}")"; then
-      log_warn "  -> Skipping ${prefix}: digest resolution failed for ${tag}"
+    if ! digest="$(_get_digest_for_image "${ref}")"; then
+      log_warn "  -> Skipping ${prefix}: digest resolution failed for ${ref}"
       continue
     fi
-    log_success "  -> ${tag} -> ${digest}"
+    log_success "  -> ${ref} -> ${digest}"
 
     # 1) Update/insert DIGEST line
     if grep -qE "^[[:space:]]*readonly[[:space:]]+${dig_var}=" "${VERSIONS_FILE}"; then
@@ -135,14 +198,14 @@ readonly ${dig_var}=\"${digest}\"
     if grep -qE "^[[:space:]]*readonly[[:space:]]+${img_var}=" "${VERSIONS_FILE}"; then
       _sed_inplace "s|^[[:space:]]*readonly[[:space:]]\\+${img_var}=.*|readonly ${img_var}=\"${new_image}\"|" "${VERSIONS_FILE}"
     else
-      # If not present, add it right after DIGEST (or after VERSION if DIGEST also newly added)
+      # Add it right after DIGEST (or after VERSION if DIGEST also newly added)
       _sed_inplace "/^[[:space:]]*readonly[[:space:]]\\+${dig_var}=.*/a\\
 readonly ${img_var}=\"${new_image}\"
 " "${VERSIONS_FILE}"
     fi
   done
 
-  # Clean sidecar backups from sed
+  # Clean sed sidecars
   rm -f "${VERSIONS_FILE}.sibak" 2>/dev/null || true
 
   log_success "✅ ${VERSIONS_FILE} updated with resolved digests and IMAGE pins."
