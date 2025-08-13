@@ -5,13 +5,14 @@
 # atomic file operations, and resumable progress tracking.
 #
 # Dependencies: lib/core.sh (expects: log_*, die, E_*, register_cleanup, have_cmd)
-# Version: 1.0.1
+# Version: 1.0.2
 #
 # Usage Examples:
 #   with_retry --retries 3 --base-delay 2 -- curl -f https://example.com
 #   deadline_run 10 -- sleep 5
 #   echo "content" | atomic_write /path/to/file 644
 #   begin_step "install"; ...; complete_step "install"
+#   pkg_install_retry apt-get podman
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
@@ -30,6 +31,7 @@ fi
 : "${RETRY_JITTER_MS:=250}"     # +/- jitter in milliseconds (0..250)
 : "${RETRY_ON_CODES:=}"         # space-separated exit codes; empty = retry any nonzero
 : "${RETRY_STRATEGY:=exp}"      # exp | full_jitter
+: "${PKG_INSTALL_RETRIES:=5}"   # retries for package installations
 
 # State directory for step tracking (overrideable)
 STATE_DIR_DEFAULT="${XDG_RUNTIME_DIR:-/tmp}/splunk-pkg-state"
@@ -203,6 +205,17 @@ with_retry() {
     delay="${next_delay:-$delay}"
     ((attempt++))
   done
+}
+
+# pkg_install_retry <manager> <args...>
+# Specialized retry for package installations with higher retry count
+pkg_install_retry() {
+  local mgr="${1:?pkg mgr required}"; shift
+  log_info "Installing packages with ${mgr} $*"
+  if [[ "${mgr}" == "apt-get" ]]; then
+    with_retry --retries "${PKG_INSTALL_RETRIES}" -- sudo apt-get update -y
+  fi
+  with_retry --retries "${PKG_INSTALL_RETRIES}" -- sudo "${mgr}" install -y "$@"
 }
 
 # ==============================================================================
