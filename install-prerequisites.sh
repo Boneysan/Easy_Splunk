@@ -7,7 +7,7 @@
 # Fallbacks: Docker + "docker compose", then podman-compose/python, then docker-compose v1
 #
 # Usage:
-#   ./install-prerequisites.sh [--yes] [--runtime auto|podman|docker]
+#   ./install-prerequisites.sh [--yes] [--runtime auto|podman|docker] [--air-gapped DIR]
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh
 # ==============================================================================
@@ -26,22 +26,34 @@ source "${SCRIPT_DIR}/lib/error-handling.sh"
 : "${RUNTIME_PREF:=auto}"   # auto|podman|docker
 AUTO_YES=0                  # 1 = no prompts
 OS_FAMILY=""                # debian|rhel|mac|other
+OS_VERSION=""               # OS version info
+AIR_GAPPED_DIR=""          # Directory with local packages for air-gapped install
+ROLLBACK_ON_FAILURE=0      # 1 = rollback on failure
 
 # --- CLI parsing ----------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -y|--yes) AUTO_YES=1; shift;;
     --runtime) RUNTIME_PREF="${2:-auto}"; shift 2;;
+    --air-gapped) AIR_GAPPED_DIR="$2"; shift 2;;
+    --rollback-on-failure) ROLLBACK_ON_FAILURE=1; shift;;
     -h|--help)
       cat <<EOF
-Usage: $(basename "$0") [--yes] [--runtime auto|podman|docker]
+Usage: $(basename "$0") [OPTIONS]
 
 Installs a container runtime and compose implementation, then validates by detection.
 
 Options:
-  --yes, -y         Run non-interactive (assume "yes" to package installs)
-  --runtime VALUE   Choose 'auto' (default), 'podman', or 'docker'
-  --help            Show this help and exit
+  --yes, -y              Run non-interactive (assume "yes" to package installs)
+  --runtime VALUE        Choose 'auto' (default), 'podman', or 'docker'
+  --air-gapped DIR       Install from local packages in DIR (for air-gapped environments)
+  --rollback-on-failure  Remove packages if installation verification fails
+  --help                 Show this help and exit
+
+Examples:
+  $(basename "$0")                           # Interactive installation with auto-detection
+  $(basename "$0") --yes --runtime podman   # Automated Podman installation
+  $(basename "$0") --air-gapped /opt/pkgs   # Install from local packages
 EOF
       exit 0
       ;;
@@ -51,7 +63,7 @@ EOF
   esac
 done
 
-# --- Helpers --------------------------------------------------------------------
+# --- Enhanced Helpers -----------------------------------------------------------
 need_confirm() {
   local prompt="${1:-Proceed?}"
   if (( AUTO_YES == 1 )); then
@@ -67,6 +79,13 @@ need_confirm() {
   done
 }
 
+require_cmd() {
+  local cmd="$1"
+  if ! have_cmd "$cmd"; then
+    die "${E_MISSING_DEP}" "Required command not found: $cmd"
+  fi
+}
+
 pkg_install() {
   # pkg_install <manager> <args...>
   local mgr="${1:?pkg mgr required}"; shift
@@ -76,6 +95,34 @@ pkg_install() {
   fi
   # shellcheck disable=SC2086
   sudo "${mgr}" install -y "$@"
+}
+
+# Enhanced OS detection with version info
+detect_os_version() {
+  case "${OS_FAMILY}" in
+    debian)
+      if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        OS_VERSION="${ID}:${VERSION_ID}"
+      else
+        OS_VERSION="debian:unknown"
+      fi
+      ;;
+    rhel)
+      if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        OS_VERSION="${ID}:${VERSION_ID}"
+      else
+        OS_VERSION="rhel:unknown"
+      fi
+      ;;
+    mac)
+      OS_VERSION=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
+      ;;
+    *)
+      OS_VERSION="unknown"
+      ;;
+  esac
 }
 
 detect_os_family() {
@@ -89,12 +136,193 @@ detect_os_family() {
     darwin) OS_FAMILY="mac" ;;
     *)      OS_FAMILY="other" ;;
   esac
+  
+  detect_os_version
+  log_info "Detected OS: ${OS_FAMILY} (${OS_VERSION})"
 }
 
-# --- Installers -----------------------------------------------------------------
+# Check for package manager availability and sudo access
+validate_prerequisites() {
+  log_info "Validating installation prerequisites..."
+  
+  # Check sudo access
+  if ! sudo -n true 2>/dev/null; then
+    log_warn "This script requires sudo access. You may be prompted for your password."
+    if ! sudo true; then
+      die "${E_PERMISSION}" "Sudo access required for package installation"
+    fi
+  fi
+  
+  # Validate package manager
+  case "${OS_FAMILY}" in
+    debian)
+      if ! have_cmd apt-get; then
+        die "${E_MISSING_DEP}" "apt-get not found on Debian-based system"
+      fi
+      ;;
+    rhel)
+      if ! have_cmd yum && ! have_cmd dnf; then
+        die "${E_MISSING_DEP}" "Neither yum nor dnf found on RHEL-based system"
+      fi
+      ;;
+    mac)
+      if ! have_cmd brew; then
+        die "${E_MISSING_DEP}" "Homebrew required on macOS. Install from https://brew.sh"
+      fi
+      ;;
+  esac
+  
+  log_success "Prerequisites validation passed"
+}
+
+# Check system requirements before installation
+check_system_requirements() {
+  log_info "Checking system requirements..."
+  
+  # Memory check (container runtime needs some overhead)
+  local min_memory=1024  # 1GB minimum
+  local available_memory
+  available_memory=$(get_total_memory)
+  
+  if [[ $available_memory -lt $min_memory ]]; then
+    log_warn "System has ${available_memory}MB RAM, recommended minimum is ${min_memory}MB"
+    if ! need_confirm "Continue with limited memory?"; then
+      die "${E_INSUFFICIENT_MEM}" "Insufficient memory for container runtime"
+    fi
+  fi
+  
+  # Disk space check
+  local required_space=2  # 2GB for container runtime and initial images
+  local available_space
+  available_space=$(df / | awk 'NR==2 {print int($4/1024/1024)}')
+  
+  if [[ $available_space -lt $required_space ]]; then
+    log_warn "Available disk space: ${available_space}GB, recommended minimum: ${required_space}GB"
+    if ! need_confirm "Continue with limited disk space?"; then
+      die "${E_GENERAL}" "Insufficient disk space"
+    fi
+  fi
+  
+  log_success "System requirements check passed"
+}
+
+# Enhanced Docker repository setup for enterprise environments
+setup_docker_repo_rhel() {
+  log_info "Setting up Docker CE repository..."
+  
+  if [[ ! -f /etc/yum.repos.d/docker-ce.repo ]]; then
+    if ! need_confirm "Add Docker CE repository?"; then
+      return 1
+    fi
+    
+    sudo tee /etc/yum.repos.d/docker-ce.repo > /dev/null <<EOF
+[docker-ce-stable]
+name=Docker CE Stable - \$basearch
+baseurl=https://download.docker.com/linux/centos/\$releasever/\$basearch/stable
+enabled=1
+gpgcheck=1
+gpgkey=https://download.docker.com/linux/centos/gpg
+
+[docker-ce-stable-debuginfo]
+name=Docker CE Stable - Debuginfo \$basearch
+baseurl=https://download.docker.com/linux/centos/\$releasever/debug/\$basearch/stable
+enabled=0
+gpgcheck=1
+gpgkey=https://download.docker.com/linux/centos/gpg
+
+[docker-ce-stable-source]
+name=Docker CE Stable - Sources
+baseurl=https://download.docker.com/linux/centos/\$releasever/source/stable
+enabled=0
+gpgcheck=1
+gpgkey=https://download.docker.com/linux/centos/gpg
+EOF
+    log_success "Docker CE repository added"
+  else
+    log_info "Docker CE repository already configured"
+  fi
+}
+
+# Air-gapped installation support
+install_air_gapped_packages() {
+  local package_dir="${1:?package_dir required}"
+  
+  if [[ ! -d "$package_dir" ]]; then
+    die "${E_INVALID_INPUT}" "Package directory not found: $package_dir"
+  fi
+  
+  log_info "Installing from local packages in $package_dir"
+  
+  case "${OS_FAMILY}" in
+    debian)
+      if ls "$package_dir"/*.deb >/dev/null 2>&1; then
+        sudo dpkg -i "$package_dir"/*.deb || true
+        sudo apt-get install -f -y  # Fix dependencies
+      else
+        die "${E_INVALID_INPUT}" "No .deb packages found in $package_dir"
+      fi
+      ;;
+    rhel)
+      if ls "$package_dir"/*.rpm >/dev/null 2>&1; then
+        local pmgr="yum"
+        command -v dnf >/dev/null 2>&1 && pmgr="dnf"
+        sudo "$pmgr" localinstall -y "$package_dir"/*.rpm
+      else
+        die "${E_INVALID_INPUT}" "No .rpm packages found in $package_dir"
+      fi
+      ;;
+    *)
+      die "${E_GENERAL}" "Air-gapped installation not supported on this OS"
+      ;;
+  esac
+}
+
+# Rollback functionality
+rollback_installation() {
+  log_warn "Rolling back installation..."
+  
+  case "${RUNTIME_PREF}" in
+    podman)
+      case "${OS_FAMILY}" in
+        debian)
+          sudo apt-get remove -y podman podman-plugins podman-compose 2>/dev/null || true
+          ;;
+        rhel)
+          local pmgr="yum"
+          command -v dnf >/dev/null 2>&1 && pmgr="dnf"
+          sudo "$pmgr" remove -y podman podman-plugins podman-compose 2>/dev/null || true
+          ;;
+      esac
+      ;;
+    docker)
+      case "${OS_FAMILY}" in
+        debian)
+          sudo apt-get remove -y docker.io docker-ce docker-ce-cli 2>/dev/null || true
+          sudo gpasswd -d "${USER}" docker 2>/dev/null || true
+          ;;
+        rhel)
+          local pmgr="yum"
+          command -v dnf >/dev/null 2>&1 && pmgr="dnf"
+          sudo "$pmgr" remove -y docker docker-ce moby-engine 2>/dev/null || true
+          sudo gpasswd -d "${USER}" docker 2>/dev/null || true
+          sudo systemctl disable docker 2>/dev/null || true
+          ;;
+      esac
+      ;;
+  esac
+  
+  log_info "Rollback completed. Some configuration files may remain."
+}
+
+# --- Enhanced Installers --------------------------------------------------------
 
 install_podman_debian() {
-  log_info "Detected Debian/Ubuntu."
+  log_info "Installing Podman on Debian/Ubuntu..."
+  if [[ -n "$AIR_GAPPED_DIR" ]]; then
+    install_air_gapped_packages "$AIR_GAPPED_DIR"
+    return 0
+  fi
+  
   if ! need_confirm "Install Podman + podman-plugins via apt-get?"; then
     die "${E_GENERAL}" "User cancelled."
   fi
@@ -113,7 +341,12 @@ install_podman_debian() {
 }
 
 install_podman_rhel() {
-  log_info "Detected RHEL/Rocky/CentOS/Fedora."
+  log_info "Installing Podman on RHEL/Rocky/CentOS/Fedora..."
+  if [[ -n "$AIR_GAPPED_DIR" ]]; then
+    install_air_gapped_packages "$AIR_GAPPED_DIR"
+    return 0
+  fi
+  
   if ! need_confirm "Install Podman + podman-plugins via dnf/yum?"; then
     die "${E_GENERAL}" "User cancelled."
   fi
@@ -145,7 +378,12 @@ install_podman_rhel() {
 }
 
 install_docker_debian() {
-  log_info "Detected Debian/Ubuntu."
+  log_info "Installing Docker on Debian/Ubuntu..."
+  if [[ -n "$AIR_GAPPED_DIR" ]]; then
+    install_air_gapped_packages "$AIR_GAPPED_DIR"
+    return 0
+  fi
+  
   if ! need_confirm "Install Docker Engine + Compose via apt-get?"; then
     die "${E_GENERAL}" "User cancelled."
   fi
@@ -162,7 +400,12 @@ install_docker_debian() {
 }
 
 install_docker_rhel() {
-  log_info "Detected RHEL/Rocky/CentOS/Fedora."
+  log_info "Installing Docker on RHEL/Rocky/CentOS/Fedora..."
+  if [[ -n "$AIR_GAPPED_DIR" ]]; then
+    install_air_gapped_packages "$AIR_GAPPED_DIR"
+    return 0
+  fi
+  
   if ! need_confirm "Install Docker Engine (Moby) + Compose plugin via dnf/yum?"; then
     die "${E_GENERAL}" "User cancelled."
   fi
@@ -170,17 +413,22 @@ install_docker_rhel() {
   local pmgr="yum"
   command -v dnf >/dev/null 2>&1 && pmgr="dnf"
 
-  # Many RHEL-family distros use moby-engine from extras; try that first
+  # Basic tooling first
   pkg_install "${pmgr}" curl git
 
+  # Try different package sources in order of preference
   if "${pmgr}" info moby-engine >/dev/null 2>&1; then
     pkg_install "${pmgr}" moby-engine moby-cli moby-compose || true
   elif "${pmgr}" info docker-ce >/dev/null 2>&1; then
     log_warn "Installing Docker CE from repos; ensure Docker CE repo is configured."
     pkg_install "${pmgr}" docker-ce docker-ce-cli docker-compose-plugin || true
   else
-    log_warn "Could not find Docker packages automatically. Consider enabling extras or Docker CE repo."
-    pkg_install "${pmgr}" docker docker-compose || true
+    log_warn "Docker CE repo not found. Setting up official Docker repository..."
+    setup_docker_repo_rhel
+    pkg_install "${pmgr}" docker-ce docker-ce-cli docker-compose-plugin || {
+      log_warn "Docker CE installation failed. Trying fallback packages..."
+      pkg_install "${pmgr}" docker docker-compose || true
+    }
   fi
 
   log_info "Adding current user to 'docker' group (you may need to log out/in)."
@@ -192,7 +440,7 @@ install_docker_rhel() {
 }
 
 install_on_macos() {
-  log_info "Detected macOS."
+  log_info "Installing on macOS..."
   if ! command -v brew >/dev/null 2>&1; then
     die "${E_MISSING_DEP}" "Homebrew is required. Install from https://brew.sh and re-run."
   fi
@@ -223,19 +471,95 @@ install_on_macos() {
   esac
 }
 
+# Verify installation with more detailed checks
+verify_installation_detailed() {
+  log_info "Performing detailed installation verification..."
+  
+  # shellcheck source=lib/runtime-detection.sh
+  source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+  
+  # Re-run detection
+  if ! detect_container_runtime; then
+    return 1
+  fi
+  
+  # Test basic functionality
+  log_info "Testing basic container operations..."
+  
+  case "${CONTAINER_RUNTIME}" in
+    podman)
+      # Test podman info first
+      if ! podman info >/dev/null 2>&1; then
+        log_error "Podman info command failed"
+        return 1
+      fi
+      
+      # Test compose functionality
+      if has_capability "secrets"; then
+        log_success "Podman Compose supports secrets"
+      else
+        log_warn "Podman Compose does not support secrets (using fallback implementation)"
+      fi
+      
+      if has_capability "rootless"; then
+        log_info "Running in rootless mode - optimal for security"
+      fi
+      ;;
+    docker)
+      # Test docker info
+      if ! docker info >/dev/null 2>&1; then
+        log_error "Docker info command failed - daemon may not be running"
+        return 1
+      fi
+      
+      # Check docker group membership
+      if groups | grep -q docker; then
+        log_success "User is in docker group"
+      else
+        log_warn "User not in docker group - logout/login may be required"
+      fi
+      ;;
+  esac
+  
+  # Test compose command
+  if ! compose version >/dev/null 2>&1; then
+    log_error "Compose command failed"
+    return 1
+  fi
+  
+  log_success "Installation verification completed successfully"
+  return 0
+}
+
 # --- Main -----------------------------------------------------------------------
 main() {
-  log_info "🚀 Checking for an existing container runtime..."
+  log_info "🚀 Container Runtime Installation Script"
+  log_info "Runtime preference: ${RUNTIME_PREF}"
+  [[ -n "$AIR_GAPPED_DIR" ]] && log_info "Air-gapped mode: ${AIR_GAPPED_DIR}"
+  
+  # Detect OS and validate prerequisites
+  detect_os_family
+  validate_prerequisites
+  check_system_requirements
+  
+  log_info "Checking for existing container runtime..."
   # shellcheck source=lib/runtime-detection.sh
   source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 
   if detect_container_runtime &>/dev/null; then
-    log_success "✅ Prerequisites already satisfied. Runtime='${CONTAINER_RUNTIME}', Compose='${COMPOSE_IMPL}'."
-    runtime_summary
+    log_success "✅ Prerequisites already satisfied."
+    enhanced_runtime_summary
     exit 0
   fi
 
-  detect_os_family
+  log_info "No suitable container runtime found. Proceeding with installation..."
+  
+  # Set up cleanup on failure if requested
+  if [[ "$ROLLBACK_ON_FAILURE" == "1" ]]; then
+    register_cleanup "rollback_installation"
+  fi
+
+  # Install based on OS family and runtime preference
   case "${OS_FAMILY}" in
     debian)
       case "${RUNTIME_PREF}" in
@@ -255,18 +579,34 @@ main() {
       install_on_macos
       ;;
     *)
-      die "${E_GENERAL}" "Unsupported OS. Please install Podman (preferred) or Docker manually."
+      die "${E_GENERAL}" "Unsupported OS family: ${OS_FAMILY}. Please install Podman (preferred) or Docker manually."
       ;;
   esac
 
   log_info "🔁 Validating installation..."
-  if detect_container_runtime; then
-    log_success "✅ Installation verified. Runtime='${CONTAINER_RUNTIME}', Compose='${COMPOSE_IMPL}'."
-    runtime_summary
+  if verify_installation_detailed; then
+    log_success "✅ Installation completed successfully!"
+    enhanced_runtime_summary
+    
+    # Cancel rollback since installation succeeded
+    if [[ "$ROLLBACK_ON_FAILURE" == "1" ]]; then
+      unregister_cleanup "rollback_installation"
+    fi
+    
+    log_info ""
+    log_info "Next steps:"
+    log_info "• If you installed Docker, you may need to log out and back in for group changes to take effect"
+    log_info "• Test the installation: '${CONTAINER_RUNTIME} run hello-world'"
+    log_info "• Run your deployment script to continue with cluster setup"
     exit 0
   else
-    log_error "Installation appears incomplete. If you installed Docker, you may need to log out/in for group changes."
-    die "${E_GENERAL}" "Prerequisite validation failed."
+    log_error "Installation verification failed."
+    if [[ "$ROLLBACK_ON_FAILURE" == "1" ]]; then
+      log_warn "Rollback will be performed due to --rollback-on-failure flag"
+    else
+      log_info "Run with --rollback-on-failure to automatically remove packages on verification failure"
+    fi
+    die "${E_GENERAL}" "Installation verification failed. Check the logs above for details."
   fi
 }
 
