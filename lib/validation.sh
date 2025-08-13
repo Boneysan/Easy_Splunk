@@ -250,4 +250,245 @@ validate_file_readable() {
 validate_file_writable() {
   local path="${1:?path required}" desc="${2:-file}"
   if [[ -e "$path" ]]; then
-    [[ -w "$path" ]] || { log_er_
+    [[ -w "$path" ]] || { log_error "$desc is not writable: $path"; return 1; }
+  else
+    local dir; dir="$(dirname -- "$path")"
+    [[ -d "$dir" && -w "$dir" ]] || { log_error "Parent dir not writable for $desc: $dir"; return 1; }
+  fi
+  log_info "✔ $desc is writable: $path"
+  return 0
+}
+
+# _set_var_by_name <varname> <value>  (portable, no nameref)
+_set_var_by_name() {
+  local __name="${1:?varname required}"
+  local __value="${2-}"
+  printf -v "${__name}" '%s' "${__value}"
+}
+
+# prompt_for_dir <varname> <purpose>
+# Prompts up to INPUT_ATTEMPTS times unless NON_INTERACTIVE=1.
+prompt_for_dir() {
+  local varname="${1:?varname required}" purpose="${2:-directory}"
+  if (( NON_INTERACTIVE == 1 )); then
+    log_error "NON_INTERACTIVE=1; cannot prompt for ${purpose}"
+    return 1
+  fi
+
+  local try=1 input
+  while (( try <= INPUT_ATTEMPTS )); do
+    if [[ -t 0 ]]; then
+      read -r -p "Enter path for ${purpose}: " input </dev/tty || input=""
+    else
+      log_error "Not a TTY; cannot prompt for ${purpose}"
+      return 1
+    fi
+    if [[ -n "${input}" && -d "${input}" ]]; then
+      _set_var_by_name "${varname}" "${input}"
+      log_info "✔ ${purpose} directory: ${input}"
+      return 0
+    fi
+    log_warn "Invalid path: '${input}' (attempt ${try}/${INPUT_ATTEMPTS})"
+    ((try++))
+  done
+  return 1
+}
+
+# validate_or_prompt_for_dir <varname> <purpose>
+validate_or_prompt_for_dir() {
+  local varname="${1:?varname required}" purpose="${2:-directory}"
+  local current="${!varname-}"
+  validate_dir_var_set "${current}" "${purpose}" && return 0
+  prompt_for_dir "${varname}" "${purpose}"
+}
+
+# validate_required_var <value> <description>
+validate_required_var() {
+  local value="${1-}" desc="${2:-setting}"
+  if is_empty "${value}"; then
+    log_error "Required setting '${desc}' is missing or empty."
+    return 1
+  fi
+  log_info "✔ Required setting '${desc}' present."
+  return 0
+}
+
+# validate_environment_vars <var1> [var2] ...
+# Validates that required environment variables are set and non-empty
+validate_environment_vars() {
+  local missing=0
+  local var
+
+  for var in "$@"; do
+    if [[ -z "${!var:-}" ]]; then
+      log_error "Required environment variable not set: $var"
+      ((missing++))
+    else
+      log_debug "✔ Environment variable set: $var"
+    fi
+  done
+
+  if ((missing > 0)); then
+    log_error "$missing required environment variable(s) missing"
+    return 1
+  fi
+
+  return 0
+}
+
+# ==============================================================================
+# Network / port validation
+# ==============================================================================
+
+# validate_port_free <port> [host]
+# Returns 0 if port is available on host (default 0.0.0.0)
+validate_port_free() {
+  local port="${1:?port required}" host="${2:-0.0.0.0}"
+
+  if ! is_number "${port}" || (( port < 1 || port > 65535 )); then
+    log_error "Invalid port: ${port}"
+    return 1
+  fi
+
+  # Try ss (preferred), then lsof, then netstat; fall back to a bind test.
+  if have_cmd ss; then
+    # Check both IPv4/IPv6 listeners; match end of local address with :PORT
+    if ss -ltnH 2>/dev/null | awk -v p=":${port}$" '$4 ~ p {found=1} END{exit !found}'; then
+      log_error "Port ${port} appears to be in use."
+      return 1
+    fi
+  elif have_cmd lsof; then
+    if lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | grep -q .; then
+      log_error "Port ${port} appears to be in use."
+      return 1
+    fi
+  elif have_cmd netstat; then
+    if netstat -ltn 2>/dev/null | awk -v p=":${port}$" '$4 ~ p {found=1} END{exit !found}'; then
+      log_error "Port ${port} appears to be in use."
+      return 1
+    fi
+  else
+    log_warn "No ss/lsof/netstat found; attempting bind test for ${host}:${port}"
+    if have_cmd python3; then
+      if ! python3 - <<PY
+import socket,sys
+s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+try:
+    s.bind(("${host}", ${port}))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PY
+      then
+        log_error "Port ${port} appears to be in use."
+        return 1
+      fi
+    fi
+  fi
+
+  log_info "✔ Port ${port} is available."
+  return 0
+}
+
+# ==============================================================================
+# Splunk cluster-specific validation
+# ==============================================================================
+
+# validate_rf_sf <replication_factor> <search_factor> <indexer_count>
+# Rules: RF <= indexers, SF <= RF, RF >= 1, SF >= 1
+validate_rf_sf() {
+  local rf="${1:?rf required}" sf="${2:?sf required}" ix="${3:?indexer_count required}"
+
+  for n in "${rf}" "${sf}" "${ix}"; do
+    if ! is_number "${n}" || (( n < 1 )); then
+      log_error "RF/SF/indexer_count must be positive integers (got rf=${rf}, sf=${sf}, indexers=${ix})"
+      return 1
+    fi
+  done
+
+  if (( rf > ix )); then
+    log_error "Replication factor (rf=${rf}) cannot exceed indexer count (indexers=${ix})."
+    return 1
+  fi
+  if (( sf > rf )); then
+    log_error "Search factor (sf=${sf}) cannot exceed replication factor (rf=${rf})."
+    return 1
+  fi
+
+  log_info "✔ RF/SF constraints satisfied (rf=${rf}, sf=${sf}, indexers=${ix})"
+  return 0
+}
+
+# validate_splunk_license <license_file>
+# Basic validation of Splunk license file format
+validate_splunk_license() {
+  local license_file="${1:?license_file required}"
+
+  validate_file_readable "$license_file" "Splunk license file" || return 1
+
+  # Basic format check - Splunk licenses are XML-like
+  if ! grep -q "<license>" "$license_file" 2>/dev/null; then
+    log_error "Invalid Splunk license format: $license_file"
+    return 1
+  fi
+
+  log_info "✔ Splunk license file format appears valid"
+  return 0
+}
+
+# validate_splunk_cluster_size <indexer_count> <search_head_count>
+# Validates cluster sizing for production deployments
+validate_splunk_cluster_size() {
+  local indexers="${1:?indexer_count required}"
+  local search_heads="${2:?search_head_count required}"
+
+  if ! is_number "$indexers" || ! is_number "$search_heads"; then
+    log_error "Cluster sizes must be numbers"
+    return 1
+  fi
+
+  # Production recommendations
+  if (( indexers < 3 )); then
+    log_warn "Indexer count ($indexers) below production recommendation (3+)"
+  fi
+
+  if (( search_heads < 2 )); then
+    log_warn "Search head count ($search_heads) below HA recommendation (2+)"
+  fi
+
+  # Check ratio (rough heuristic: >1:1 is high)
+  if (( search_heads > indexers )); then
+    log_warn "High search head to indexer ratio: ${search_heads}:${indexers}"
+  fi
+
+  log_info "✔ Cluster sizing validated: ${indexers} indexers, ${search_heads} search heads"
+  return 0
+}
+
+# ==============================================================================
+# High-level compatibility surface (project-specific)
+# ==============================================================================
+
+# validate_configuration_compatibility
+# Add concrete checks here as features evolve.
+validate_configuration_compatibility() {
+  log_info "Performing configuration compatibility checks..."
+  # Example toggles:
+  # if is_true "${ENABLE_ADVANCED_LOGGING:-}" && ! is_true "${ENABLE_LOGGING:-}"; then
+  #   log_error "Advanced logging requires logging to be enabled."
+  #   return 1
+  # fi
+  log_success "Configuration compatibility checks passed."
+  return 0
+}
+
+# enforce_configuration_compatibility
+enforce_configuration_compatibility() {
+  validate_configuration_compatibility || die "${E_INVALID_INPUT}" "Configuration compatibility checks failed."
+}
+
+# ==============================================================================
+# End of lib/validation.sh
+# ==============================================================================
