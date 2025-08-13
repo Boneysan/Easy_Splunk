@@ -13,11 +13,21 @@
 # - Backward-compatible cleanup API, with safer function-based variant
 #
 # Dependencies: None
-# Required by:  Everything
+# Required by: Everything
+# Version: 1.0.0
+#
+# Usage Examples:
+#   log_info "Starting process"                # Log informational message
+#   require_cmd "docker"                      # Ensure command exists
+#   register_cleanup_func cleanup_temp_files  # Register cleanup function
+#   if confirm "Proceed with deployment?"; then ...; fi  # User confirmation
 # ==============================================================================
 
 # --- Strict Mode ---------------------------------------------------------------
 set -euo pipefail
+
+# --- Version Information -------------------------------------------------------
+readonly CORE_VERSION="1.0.0"
 
 # --- Logging & Colors ----------------------------------------------------------
 # Colors are enabled only when stdout is a TTY and NO_COLOR is not set.
@@ -76,7 +86,7 @@ readonly E_PERMISSION=5        # Permission denied
 
 # --- System Information --------------------------------------------------------
 get_os() {
-    # Returns: linux | darwin | wsl | unsupported
+    # Returns: linux | wsl | darwin | freebsd | openbsd | unsupported
     local kernel
     kernel="$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo unknown)"
     case "$kernel" in
@@ -87,30 +97,37 @@ get_os() {
                 echo "linux"
             fi
             ;;
-        darwin*) echo "darwin" ;;
-        *)       echo "unsupported" ;;
+        darwin*)  echo "darwin" ;;
+        freebsd*) echo "freebsd" ;;
+        openbsd*) echo "openbsd" ;;
+        *)        log_warn "Unsupported OS detected: $kernel"; echo "unsupported" ;;
     esac
 }
 
 get_cpu_cores() {
     case "$(get_os)" in
-        linux|wsl)  nproc ;;
-        darwin)     sysctl -n hw.ncpu ;;
+        linux|wsl)  nproc 2>/dev/null || echo "1" ;;
+        darwin)     sysctl -n hw.ncpu 2>/dev/null || echo "1" ;;
+        freebsd)    sysctl -n hw.ncpu 2>/dev/null || echo "1" ;;
+        openbsd)    sysctl -n hw.ncpu 2>/dev/null || echo "1" ;;
         *)          echo "1" ;;
     esac
 }
 
 get_total_memory() {
-    # Returns total memory (MB)
+    # Returns total memory (MB), rounded to nearest integer
     case "$(get_os)" in
-        linux|wsl)  grep MemTotal /proc/meminfo | awk '{print int($2/1024)}' ;;
-        darwin)     sysctl -n hw.memsize | awk '{print int($1/1024/1024)}' ;;
+        linux|wsl)  grep MemTotal /proc/meminfo 2>/dev/null | awk '{printf "%.0f", $2/1024}' || echo "0" ;;
+        darwin)     sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f", $1/1024/1024}' || echo "0" ;;
+        freebsd)    sysctl -n hw.physmem 2>/dev/null | awk '{printf "%.0f", $1/1024/1024}' || echo "0" ;;
+        openbsd)    sysctl -n hw.physmem 2>/dev/null | awk '{printf "%.0f", $1/1024/1024}' || echo "0" ;;
         *)          echo "0" ;;
     esac
 }
 
 # --- Predicates / Type Checks --------------------------------------------------
 # Case-insensitive truthy: true|yes|1
+# Usage: if is_true "$value"; then ...; fi
 is_true() {
     local v="${1:-}"
     v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
@@ -118,40 +135,57 @@ is_true() {
 }
 
 # Integer (allow negative)
+# Usage: if is_number "$value"; then ...; fi
 is_number() {
     [[ "${1:-}" =~ ^-?[0-9]+$ ]]
 }
 
 # Empty or whitespace-only
+# Usage: if is_empty "$value"; then ...; fi
 is_empty() {
     [[ -z "${1//[[:space:]]/}" ]]
 }
 
 # --- Command Utilities ---------------------------------------------------------
+# Check if a command exists
+# Usage: if have_cmd "docker"; then ...; fi
 have_cmd() {
     command -v "${1:-}" >/dev/null 2>&1
 }
 
+# Require a command or exit
+# Usage: require_cmd "docker"
 require_cmd() {
     local cmd="${1:-}"
     have_cmd "$cmd" || die "$E_MISSING_DEP" "Required command '$cmd' not found in PATH"
 }
 
-# Optional helpers that scripts may use
+# Check if running as root
+# Usage: if is_root; then ...; fi
 is_root() {
     [[ "${EUID:-$(id -u)}" -eq 0 ]]
 }
 
+# Require root privileges or exit
+# Usage: require_root
 require_root() {
     is_root || die "$E_PERMISSION" "This action requires root privileges"
 }
 
 # --- Confirmation Prompt -------------------------------------------------------
 # Usage: if confirm "Proceed?"; then ...; fi
+# Returns true for y/Y/yes/YES, false otherwise; assumes 'no' in non-interactive mode
 confirm() {
     local prompt="${1:-Are you sure?} [y/N] "
     local response
-    read -r -p "$prompt" response || true
+    if [[ ! -t 0 ]]; then
+        log_debug "Non-interactive mode; assuming 'no' for confirmation"
+        return 1
+    fi
+    read -r -t 30 -p "$prompt" response || {
+        log_debug "Confirmation prompt timed out after 30 seconds"
+        return 1
+    }
     [[ "$response" =~ ^([yY]([eE][sS])?)$ ]]
 }
 
@@ -160,7 +194,7 @@ confirm() {
 #  1) Backward-compatible string commands: register_cleanup "rm -f /tmp/x"
 #  2) Safer function-based: define a function and register_cleanup_func my_fn
 #
-# All cleanups run LIFO on EXIT, INT, TERM. Failures are ignored.
+# All cleanups run LIFO on EXIT, INT, TERM. Failures are logged at debug level.
 
 # Legacy string commands (kept for backward compatibility)
 declare -a CLEANUP_COMMANDS_STR=()
@@ -196,7 +230,8 @@ register_cleanup_func() {
     fi
 }
 
-# Optional convenience: exact removal of a previously registered string command
+# Optional: exact removal of a previously registered string command
+# Usage: unregister_cleanup "rm -f /tmp/x"
 unregister_cleanup() {
     local target="${1:-}"
     local out=()
@@ -209,6 +244,7 @@ unregister_cleanup() {
 }
 
 # Optional: unregister a function by name
+# Usage: unregister_cleanup_func close_temp_files
 unregister_cleanup_func() {
     local target="${1:-}"
     local out=()
@@ -220,19 +256,23 @@ unregister_cleanup_func() {
     CLEANUP_FUNCTIONS=("${out[@]}")
 }
 
+# Run cleanups in LIFO order, logging failures at debug level
 run_cleanup() {
     # Run function-based cleanups first (safer), then legacy strings
     local i
     for (( i=${#CLEANUP_FUNCTIONS[@]}-1; i>=0; i-- )); do
         local fname="${CLEANUP_FUNCTIONS[i]}"
-        # Call function; ignore errors
         if [[ "$(type -t "$fname" 2>/dev/null)" == "function" ]]; then
-            "$fname" || true
+            "$fname" || log_debug "Cleanup function '$fname' failed"
+        else
+            log_debug "Cleanup function '$fname' not found"
         fi
     done
     for (( i=${#CLEANUP_COMMANDS_STR[@]}-1; i>=0; i-- )); do
         # Execute legacy string in a subshell without 'eval' to reduce risk
-        ( set +euo pipefail; bash -c "${CLEANUP_COMMANDS_STR[i]}" ) >/dev/null 2>&1 || true
+        ( set +euo pipefail; bash -c "${CLEANUP_COMMANDS_STR[i]}" ) >/dev/null 2>&1 || {
+            log_debug "Cleanup command '${CLEANUP_COMMANDS_STR[i]}' failed"
+        }
     done
     # Clear arrays
     CLEANUP_FUNCTIONS=()
