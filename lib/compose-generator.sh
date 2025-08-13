@@ -48,11 +48,13 @@ EOF
 }
 
 _generate_app_service() {
-  cat <<EOF
+  # NOTE: We expand image refs here (from versions.env), but keep Compose
+  # variables like \${COMPOSE_PROJECT_NAME} literal for runtime interpolation.
+  cat <<'EOF'
 services:
   # Main application service
   app:
-    image: "${APP_IMAGE}"
+    image: "APP_IMAGE_PLACEHOLDER"
     container_name: "${COMPOSE_PROJECT_NAME:-myapp}_app"
     restart: unless-stopped
     ports:
@@ -60,21 +62,24 @@ services:
     environment:
       APP_MODE: "production"
       REDIS_HOST: "redis"
-      LOG_LEVEL: "\${LOG_LEVEL:-info}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
     networks:
       - app-net
     volumes:
       - app-data:/app/data
       - app-logs:/app/logs
-$( if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then cat <<'HC'
+EOF
+  if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then
+    cat <<'EOF'
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
       interval: 15s
       timeout: 3s
       retries: 8
       start_period: 10s
-HC
-fi )
+EOF
+  fi
+  cat <<'EOF'
     deploy:
       resources:
         limits:
@@ -92,13 +97,18 @@ fi )
         max-size: "10m"
         max-file: "3"
 EOF
+
+  # Attach secrets if supported/enabled (Grafana handled inside its block)
+  if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
+    : # app has no secret needs by default; left as example hook
+  fi
 }
 
 _generate_redis_service() {
-  cat <<EOF
+  cat <<'EOF'
   # Redis caching service
   redis:
-    image: "${REDIS_IMAGE}"
+    image: "REDIS_IMAGE_PLACEHOLDER"
     container_name: "${COMPOSE_PROJECT_NAME:-myapp}_redis"
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
@@ -106,15 +116,18 @@ _generate_redis_service() {
       - app-net
     volumes:
       - redis-data:/data
-$( if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then cat <<'HC'
+EOF
+  if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then
+    cat <<'EOF'
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 15s
       timeout: 3s
       retries: 10
       start_period: 5s
-HC
-fi )
+EOF
+  fi
+  cat <<'EOF'
     deploy:
       resources:
         limits:
@@ -134,12 +147,14 @@ EOF
 _generate_splunk_indexer_service() {
   local instance_num="${1:-1}"
   local hostname="splunk-idx${instance_num}"
-  
+
+  # We need a mixed heredoc to substitute instance-specific values but keep
+  # Compose variables literal. We'll expand bash variables, escape \${...}.
   cat <<EOF
   # Splunk Indexer ${instance_num}
   ${hostname}:
     image: "${SPLUNK_IMAGE}"
-    container_name: "${COMPOSE_PROJECT_NAME:-splunk}_${hostname}"
+    container_name: "\${COMPOSE_PROJECT_NAME:-splunk}_${hostname}"
     hostname: "${hostname}"
     restart: unless-stopped
     ports:
@@ -160,15 +175,18 @@ _generate_splunk_indexer_service() {
       - splunk-idx${instance_num}-etc:/opt/splunk/etc
       - splunk-idx${instance_num}-var:/opt/splunk/var
     profiles: ["splunk"]
-$( if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then cat <<HC
+EOF
+  if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then
+    cat <<'EOF'
     healthcheck:
-      test: ["CMD-SHELL", "\$SPLUNK_HOME/bin/splunk status || exit 1"]
+      test: ["CMD-SHELL", "$SPLUNK_HOME/bin/splunk status || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 10
       start_period: 120s
-HC
-fi )
+EOF
+  fi
+  cat <<'EOF'
     deploy:
       resources:
         limits:
@@ -186,18 +204,25 @@ fi )
         max-size: "50m"
         max-file: "5"
 EOF
+  if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
+    cat <<'EOF'
+    secrets:
+      - splunk_password
+      - splunk_secret
+EOF
+  fi
 }
 
 _generate_splunk_search_head_service() {
   local instance_num="${1:-1}"
   local hostname="splunk-sh${instance_num}"
   local web_port=$((8000 + instance_num - 1))
-  
+
   cat <<EOF
   # Splunk Search Head ${instance_num}
   ${hostname}:
     image: "${SPLUNK_IMAGE}"
-    container_name: "${COMPOSE_PROJECT_NAME:-splunk}_${hostname}"
+    container_name: "\${COMPOSE_PROJECT_NAME:-splunk}_${hostname}"
     hostname: "${hostname}"
     restart: unless-stopped
     ports:
@@ -216,15 +241,18 @@ _generate_splunk_search_head_service() {
       - splunk-sh${instance_num}-etc:/opt/splunk/etc
       - splunk-sh${instance_num}-var:/opt/splunk/var
     profiles: ["splunk"]
-$( if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then cat <<HC
+EOF
+  if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then
+    cat <<'EOF'
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/en-US/account/login || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/en-US/account/login >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 10
       start_period: 120s
-HC
-fi )
+EOF
+  fi
+  cat <<'EOF'
     deploy:
       resources:
         limits:
@@ -242,6 +270,13 @@ fi )
         max-size: "50m"
         max-file: "5"
 EOF
+  if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
+    cat <<'EOF'
+    secrets:
+      - splunk_password
+      - splunk_secret
+EOF
+  fi
 }
 
 _generate_splunk_cluster_master_service() {
@@ -249,7 +284,7 @@ _generate_splunk_cluster_master_service() {
   # Splunk Cluster Master
   splunk-cm:
     image: "${SPLUNK_IMAGE}"
-    container_name: "${COMPOSE_PROJECT_NAME:-splunk}_cluster_master"
+    container_name: "\${COMPOSE_PROJECT_NAME:-splunk}_cluster_master"
     hostname: "splunk-cm"
     restart: unless-stopped
     ports:
@@ -268,15 +303,18 @@ _generate_splunk_cluster_master_service() {
       - splunk-cm-etc:/opt/splunk/etc
       - splunk-cm-var:/opt/splunk/var
     profiles: ["splunk"]
-$( if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then cat <<'HC'
+EOF
+  if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then
+    cat <<'EOF'
     healthcheck:
       test: ["CMD-SHELL", "$SPLUNK_HOME/bin/splunk status || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 10
       start_period: 180s
-HC
-fi )
+EOF
+  fi
+  cat <<'EOF'
     deploy:
       resources:
         limits:
@@ -291,13 +329,20 @@ fi )
         max-size: "50m"
         max-file: "5"
 EOF
+  if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
+    cat <<'EOF'
+    secrets:
+      - splunk_password
+      - splunk_secret
+EOF
+  fi
 }
 
 _generate_prometheus_service() {
-  cat <<EOF
+  cat <<'EOF'
   # Prometheus monitoring service
   prometheus:
-    image: "${PROMETHEUS_IMAGE}"
+    image: "PROMETHEUS_IMAGE_PLACEHOLDER"
     container_name: "${COMPOSE_PROJECT_NAME:-myapp}_prometheus"
     restart: unless-stopped
     command:
@@ -316,15 +361,18 @@ _generate_prometheus_service() {
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     profiles: ["monitoring"]
-$( if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then cat <<'HC'
+EOF
+  if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then
+    cat <<'EOF'
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
       interval: 20s
       timeout: 3s
       retries: 10
       start_period: 30s
-HC
-fi )
+EOF
+  fi
+  cat <<'EOF'
     deploy:
       resources:
         limits:
@@ -342,16 +390,16 @@ EOF
 }
 
 _generate_grafana_service() {
-  cat <<EOF
+  cat <<'EOF'
   # Grafana dashboard service
   grafana:
-    image: "${GRAFANA_IMAGE}"
+    image: "GRAFANA_IMAGE_PLACEHOLDER"
     container_name: "${COMPOSE_PROJECT_NAME:-myapp}_grafana"
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: "\${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
       GF_INSTALL_PLUGINS: "grafana-piechart-panel"
     networks:
       - app-net
@@ -360,15 +408,18 @@ _generate_grafana_service() {
       - grafana-data:/var/lib/grafana
       - ./config/grafana-provisioning/:/etc/grafana/provisioning/:ro
     profiles: ["monitoring"]
-$( if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then cat <<'HC'
+EOF
+  if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then
+    cat <<'EOF'
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q 'database.*ok'"]
       interval: 20s
       timeout: 5s
       retries: 10
       start_period: 30s
-HC
-fi )
+EOF
+  fi
+  cat <<'EOF'
     deploy:
       resources:
         limits:
@@ -386,11 +437,17 @@ fi )
         max-size: "10m"
         max-file: "3"
 EOF
+  if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
+    cat <<'EOF'
+    secrets:
+      - grafana_admin_password
+EOF
+  fi
 }
 
 _generate_secrets_block() {
   if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
-    cat <<EOF
+    cat <<'EOF'
 
 secrets:
   splunk_password:
@@ -411,7 +468,6 @@ networks:
     driver: bridge
     name: "${COMPOSE_PROJECT_NAME:-myapp}_app_network"
 EOF
-
   if is_true "${ENABLE_SPLUNK}"; then
     cat <<'EOF'
   splunk-net:
@@ -449,8 +505,6 @@ EOF
   splunk-cm-var:
     name: "${COMPOSE_PROJECT_NAME:-splunk}_cm_var"
 EOF
-
-    # Generate volumes for indexers
     for ((i=1; i<=INDEXER_COUNT; i++)); do
       cat <<EOF
   splunk-idx${i}-etc:
@@ -459,8 +513,6 @@ EOF
     name: "\${COMPOSE_PROJECT_NAME:-splunk}_idx${i}_var"
 EOF
     done
-
-    # Generate volumes for search heads
     for ((i=1; i<=SEARCH_HEAD_COUNT; i++)); do
       cat <<EOF
   splunk-sh${i}-etc:
@@ -480,14 +532,22 @@ EOF
 # Validates configuration before generation
 validate_compose_config() {
   log_info "Validating compose configuration..."
-  
+
+  # Base images must exist
+  local base_required=("APP_IMAGE" "REDIS_IMAGE")
+  local maybe_required=()
+  is_true "${ENABLE_MONITORING}" && maybe_required+=("PROMETHEUS_IMAGE" "GRAFANA_IMAGE")
+  is_true "${ENABLE_SPLUNK}" && maybe_required+=("SPLUNK_IMAGE")
+
+  validate_environment_vars "${base_required[@]}" "${maybe_required[@]}"
+
   # Validate Splunk cluster configuration
   if is_true "${ENABLE_SPLUNK}"; then
-    validate_rf_sf "${SPLUNK_REPLICATION_FACTOR}" "${SPLUNK_SEARCH_FACTOR}" "${INDEXER_COUNT}"
-    validate_splunk_cluster_size "${INDEXER_COUNT}" "${SEARCH_HEAD_COUNT}"
+    validate_rf_sf "${SPLUNK_REPLICATION_FACTOR}" "${SPLUNK_SEARCH_FACTOR}" "${INDEXER_COUNT}" || return 1
+    validate_splunk_cluster_size "${INDEXER_COUNT}" "${SEARCH_HEAD_COUNT}" || return 1
   fi
-  
-  # Check required environment variables
+
+  # Check required secrets (env or files)
   local required_vars=()
   if is_true "${ENABLE_SPLUNK}"; then
     required_vars+=("SPLUNK_PASSWORD" "SPLUNK_SECRET")
@@ -495,11 +555,10 @@ validate_compose_config() {
   if is_true "${ENABLE_MONITORING}"; then
     required_vars+=("GRAFANA_ADMIN_PASSWORD")
   fi
-  
   if [[ ${#required_vars[@]} -gt 0 ]]; then
     validate_environment_vars "${required_vars[@]}"
   fi
-  
+
   log_success "Compose configuration validation passed"
 }
 
@@ -526,17 +585,17 @@ generate_compose_file() {
   # Splunk cluster services
   if is_true "${ENABLE_SPLUNK}"; then
     log_info "  -> Splunk cluster enabled: ${INDEXER_COUNT} indexers, ${SEARCH_HEAD_COUNT} search heads"
-    
+
     # Cluster Master (required for multi-node)
     if [[ "${SPLUNK_CLUSTER_MODE}" == "cluster" ]] || [[ "${INDEXER_COUNT}" -gt 1 ]]; then
       _generate_splunk_cluster_master_service >> "${tmp}"
     fi
-    
+
     # Generate indexers
     for ((i=1; i<=INDEXER_COUNT; i++)); do
       _generate_splunk_indexer_service "$i" >> "${tmp}"
     done
-    
+
     # Generate search heads
     for ((i=1; i<=SEARCH_HEAD_COUNT; i++)); do
       _generate_splunk_search_head_service "$i" >> "${tmp}"
@@ -553,14 +612,33 @@ generate_compose_file() {
   fi
 
   # Top-level blocks
-  _generate_secrets_block >> "${tmp}"
+  _generate_secrets_block  >> "${tmp}"
   _generate_networks_block >> "${tmp}"
   _generate_volumes_block  >> "${tmp}"
+
+  # Replace image placeholders with actual refs (safe, local sed)
+  # shellcheck disable=SC2016
+  sed -i.bak \
+    -e "s#APP_IMAGE_PLACEHOLDER#${APP_IMAGE//#/\\#}#g" \
+    -e "s#REDIS_IMAGE_PLACEHOLDER#${REDIS_IMAGE//#/\\#}#g" \
+    -e "s#PROMETHEUS_IMAGE_PLACEHOLDER#${PROMETHEUS_IMAGE:-}${PROMETHEUS_IMAGE:+}#g" \
+    -e "s#GRAFANA_IMAGE_PLACEHOLDER#${GRAFANA_IMAGE:-}${GRAFANA_IMAGE:+}#g" \
+    "${tmp}" 2>/dev/null || {
+      # macOS/BSD sed fallback without -i
+      cp "${tmp}" "${tmp}.work"
+      sed \
+        -e "s#APP_IMAGE_PLACEHOLDER#${APP_IMAGE//#/\\#}#g" \
+        -e "s#REDIS_IMAGE_PLACEHOLDER#${REDIS_IMAGE//#/\\#}#g" \
+        -e "s#PROMETHEUS_IMAGE_PLACEHOLDER#${PROMETHEUS_IMAGE:-}${PROMETHEUS_IMAGE:+}#g" \
+        -e "s#GRAFANA_IMAGE_PLACEHOLDER#${GRAFANA_IMAGE:-}${GRAFANA_IMAGE:+}#g" \
+        "${tmp}.work" > "${tmp}"
+      rm -f "${tmp}.work" "${tmp}.bak" 2>/dev/null || true
+    }
 
   # Atomic move into place
   atomic_write_file "${tmp}" "${out}"
   log_success "✅ Compose file generated: ${out}"
-  
+
   # Report what was generated
   log_info "Generated services:"
   log_info "  • Application stack: app, redis"
@@ -577,8 +655,8 @@ generate_compose_file() {
 generate_env_template() {
   local out="${1:?output file required}"
   log_info "Generating environment template: ${out}"
-  
-  cat > "${out}" <<EOF
+
+  cat > "${out}" <<'EOF'
 # ==============================================================================
 # Environment Configuration Template
 # Generated by lib/compose-generator.sh
