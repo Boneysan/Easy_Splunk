@@ -6,8 +6,9 @@
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
 #               lib/validation.sh, lib/runtime-detection.sh, lib/compose-generator.sh,
-#               lib/security.sh, parse-args.sh, orchestrator.sh, tests/unit/test_*.sh
-# Version: 1.0.2
+#               lib/security.sh, parse-args.sh, orchestrator.sh, generate-credentials.sh,
+#               tests/unit/test_*.sh
+# Version: 1.0.3
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
@@ -82,12 +83,12 @@ run_test_script() {
   local script="$1"
   local script_name
   script_name=$(basename "${script}")
-  log_info "Running test script: ${script_name} ($(date))"
+  log_info "Running test script: ${script_name} ($(date)) at ${script}"
   begin_step "test_${script_name}"
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies
-    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh parse-args.sh orchestrator.sh; do
+    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh parse-args.sh orchestrator.sh generate-credentials.sh; do
       # shellcheck source=/dev/null
       source "${SCRIPT_DIR}/lib/${dep}"
     done
@@ -117,6 +118,7 @@ run_test_script() {
     openssl() { echo "Mock openssl: $@" >&2; return 0; }
     date() { echo "2025-08-13 12:00:00 UTC"; return 0; }
     stat() { echo "600"; return 0; }
+    read() { echo "y"; } # Auto-confirm for generate-credentials.sh
     # Run the test script
     if bash "${script}"; then
       complete_step "test_${script_name}"
