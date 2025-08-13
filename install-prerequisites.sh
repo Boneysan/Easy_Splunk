@@ -9,7 +9,13 @@
 # Usage:
 #   ./install-prerequisites.sh [--yes] [--runtime auto|podman|docker] [--air-gapped DIR]
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/validation.sh, lib/runtime-detection.sh, versions.env
+# Version: 1.0.0
+#
+# Usage Examples:
+#   ./install-prerequisites.sh --yes --runtime podman
+#   ./install-prerequisites.sh --air-gapped /opt/pkgs
+#   ./install-prerequisites.sh --rollback-on-failure
 # ==============================================================================
 
 # --- Strict mode & base env -----------------------------------------------------
@@ -21,6 +27,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/validation.sh
+source "${SCRIPT_DIR}/lib/validation.sh"
+# shellcheck source=lib/runtime-detection.sh
+source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+# shellcheck source=versions.env
+[[ -f "${SCRIPT_DIR}/versions.env" ]] && source "${SCRIPT_DIR}/versions.env"
+
+# --- Dependency version check ---------------------------------------------------
+if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "install-prerequisites.sh requires core.sh version >= 1.0.0"
+fi
 
 # --- Defaults / flags -----------------------------------------------------------
 : "${RUNTIME_PREF:=auto}"   # auto|podman|docker
@@ -96,10 +113,10 @@ pkg_install() {
   local mgr="${1:?pkg mgr required}"; shift
   log_info "Installing packages with ${mgr} $*"
   if [[ "${mgr}" == "apt-get" ]]; then
-    sudo apt-get update -y
+    with_retry --retries 3 -- sudo apt-get update -y
   fi
   # shellcheck disable=SC2086
-  sudo "${mgr}" install -y "$@"
+  with_retry --retries 3 -- sudo "${mgr}" install -y "$@"
 }
 
 # Enhanced OS detection with version info
@@ -182,29 +199,12 @@ validate_prerequisites() {
 check_system_requirements() {
   log_info "Checking system requirements..."
 
-  # Memory check (container runtime needs some overhead)
-  local min_memory=1024  # 1GB minimum
-  local available_memory
-  available_memory="$(get_total_memory)"
-
-  if [[ -n "${available_memory}" ]] && [[ "${available_memory}" -lt ${min_memory} ]]; then
-    log_warn "System has ${available_memory}MB RAM, recommended minimum is ${min_memory}MB"
-    need_confirm "Continue with limited memory?" || die "${E_INSUFFICIENT_MEM}" "Insufficient memory for container runtime"
-  fi
-
-  # Disk space check (portable: POSIX df -P -k; convert KB->GiB)
-  local required_space=2  # 2GB for container runtime and initial images
-  local available_space
-  if df -P -k / >/dev/null 2>&1; then
-    available_space="$(df -P -k / | awk 'NR==2 {printf "%d", $4/1024/1024}')"
-  else
-    available_space="$(df / | awk 'NR==2 {print int($4/1024/1024)}')"
-  fi
-
-  if ! [[ "$available_space" =~ ^[0-9]+$ ]] || (( available_space < required_space )); then
-    log_warn "Available disk space: ${available_space:-unknown}GB, recommended minimum: ${required_space}GB"
+  validate_system_resources 1024 1 || {
+    need_confirm "Continue with limited resources?" || die "${E_INSUFFICIENT_MEM}" "Insufficient system resources"
+  }
+  validate_disk_space / 2 || {
     need_confirm "Continue with limited disk space?" || die "${E_GENERAL}" "Insufficient disk space"
-  fi
+  }
 
   log_success "System requirements check passed"
 }
@@ -254,21 +254,15 @@ install_air_gapped_packages() {
 
   case "${OS_FAMILY}" in
     debian)
-      if ls "$package_dir"/*.deb >/dev/null 2>&1; then
-        sudo dpkg -i "$package_dir"/*.deb || true
-        sudo apt-get install -f -y
-      else
-        die "${E_INVALID_INPUT}" "No .deb packages found in $package_dir"
-      fi
+      ls "$package_dir"/*.deb | grep -q . || die "${E_INVALID_INPUT}" "No .deb packages found in $package_dir"
+      sudo dpkg -i "$package_dir"/*.deb || true
+      sudo apt-get install -f -y
       ;;
     rhel)
-      if ls "$package_dir"/*.rpm >/dev/null 2>&1; then
-        local pmgr="yum"
-        command -v dnf >/dev/null 2>&1 && pmgr="dnf"
-        sudo "$pmgr" localinstall -y "$package_dir"/*.rpm
-      else
-        die "${E_INVALID_INPUT}" "No .rpm packages found in $package_dir"
-      fi
+      ls "$package_dir"/*.rpm | grep -q . || die "${E_INVALID_INPUT}" "No .rpm packages found in $package_dir"
+      local pmgr="yum"
+      command -v dnf >/dev/null 2>&1 && pmgr="dnf"
+      sudo "$pmgr" localinstall -y "$package_dir"/*.rpm
       ;;
     *)
       die "${E_GENERAL}" "Air-gapped installation not supported on this OS"
@@ -290,6 +284,7 @@ rollback_installation() {
           local pmgr="yum"
           command -v dnf >/dev/null 2>&1 && pmgr="dnf"
           sudo "$pmgr" remove -y podman podman-plugins podman-compose 2>/dev/null || true
+          systemctl --user disable podman.socket 2>/dev/null || true
           ;;
       esac
       ;;
@@ -304,6 +299,7 @@ rollback_installation() {
           command -v dnf >/dev/null 2>&1 && pmgr="dnf"
           sudo "$pmgr" remove -y docker docker-ce moby-engine docker-compose-plugin 2>/dev/null || true
           sudo gpasswd -d "${USER}" docker 2>/dev/null || true
+          sudo rm -f /etc/yum.repos.d/docker-ce.repo 2>/dev/null || true
           sudo systemctl disable docker 2>/dev/null || true
           ;;
       esac
@@ -434,6 +430,10 @@ install_on_macos() {
       brew update
       brew install --cask docker
       log_warn "Start Docker Desktop from /Applications before continuing."
+      if ! docker info >/dev/null 2>&1; then
+        log_error "Docker Desktop not running. Start it from /Applications and retry."
+        return 1
+      fi
       ;;
     podman|auto)
       need_confirm "Install Podman + podman-plugins with Homebrew?" || die "${E_GENERAL}" "User cancelled."
@@ -454,13 +454,19 @@ install_on_macos() {
 verify_installation_detailed() {
   log_info "Performing detailed installation verification..."
 
-  # shellcheck source=lib/runtime-detection.sh
-  source "${SCRIPT_DIR}/lib/runtime-detection.sh"
-
-  # Re-run detection
-  if ! detect_container_runtime; then
-    return 1
-  fi
+  # Validate installed runtime version
+  case "${CONTAINER_RUNTIME}" in
+    podman)
+      local version
+      version=$(podman --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+      [[ "$version" =~ ${VERSION_PATTERN_SEMVER:-^[0-9]+\.[0-9]+\.[0-9]+$} ]] || log_warn "Podman version ($version) may be incompatible"
+      ;;
+    docker)
+      local version
+      version=$(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+      [[ "$version" =~ ${VERSION_PATTERN_SEMVER:-^[0-9]+\.[0-9]+\.[0-9]+$} ]] || log_warn "Docker version ($version) may be incompatible"
+      ;;
+  esac
 
   # Test basic functionality
   log_info "Testing basic container operations..."
@@ -509,9 +515,6 @@ main() {
   check_system_requirements
 
   log_info "Checking for existing container runtime..."
-  # shellcheck source=lib/runtime-detection.sh
-  source "${SCRIPT_DIR}/lib/runtime-detection.sh"
-
   if detect_container_runtime &>/dev/null; then
     log_success "✅ Prerequisites already satisfied."
     enhanced_runtime_summary
