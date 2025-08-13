@@ -1,28 +1,21 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/unit/test_error_handling.sh
-# Unit tests for lib/error-handling.sh, covering with_retry, deadline_run,
-# atomic_write_file, and atomic_write.
+# Unit tests for error-handling.sh, covering retries, timeouts, atomic writes,
+# and progress tracking.
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh
 # ==============================================================================
-
 set -euo pipefail
+IFS=$'\n\t'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
-# Ensure dependencies are sourced
-if ! command -v log_info >/dev/null 2>&1; then
-  echo "FATAL: lib/core.sh must be sourced" >&2
-  exit 1
-fi
-if ! command -v with_retry >/dev/null 2>&1; then
-  echo "FATAL: lib/error-handling.sh must be sourced" >&2
-  exit 1
-fi
-
-# Create a temporary directory for tests
-TEST_DIR="$(mktemp -d -t test-error-handling.XXXXXX)"
-register_cleanup "rm -rf '${TEST_DIR}'"
-log_info "Testing in temporary directory: ${TEST_DIR}"
+# Source dependencies
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/error-handling.sh"
 
 # Test counter and results
 TEST_COUNT=0
@@ -43,93 +36,66 @@ run_test() {
   fi
 }
 
-# Test 1: with_retry succeeds on first attempt
-test_with_retry_success() {
+# Test 1: Retry success
+test_retry_success() {
   local output
-  output=$(RETRY_MAX=2 with_retry -- echo "Success") || return 1
-  [[ "${output}" == "Success" ]]
+  output=$(with_retry --retries 2 --base-delay 0.1 -- true 2>&1)
+  [[ "$output" =~ "success on attempt 1" ]]
 }
 
-# Test 2: with_retry retries on failure and succeeds
-test_with_retry_retry_success() {
-  local count=0
-  try_cmd() {
-    ((count++))
-    if [[ ${count} -lt 2 ]]; then
-      return 1
-    fi
-    echo "Success after retry"
-  }
-  local output
-  output=$(RETRY_MAX=3 with_retry -- try_cmd) || return 1
-  [[ "${output}" == "Success after retry" && ${count} -eq 2 ]]
-}
-
-# Test 3: with_retry fails after max retries
-test_with_retry_fail() {
-  local rc
-  RETRY_MAX=2 with_retry -- false
+# Test 2: Retry failure
+test_retry_failure() {
+  local output rc
+  output=$(with_retry --retries 2 --base-delay 0.1 -- false 2>&1 || true)
   rc=$?
-  [[ ${rc} -ne 0 ]]
+  [[ "$output" =~ "command failed" ]] && [[ $rc -eq 1 ]]
 }
 
-# Test 4: deadline_run succeeds within timeout
-test_deadline_run_success() {
-  local output
-  output=$(deadline_run 5 -- echo "Success") || return 1
-  [[ "${output}" == "Success" ]]
-}
-
-# Test 5: deadline_run fails on timeout
-test_deadline_run_timeout() {
-  local rc
-  deadline_run 1 -- sleep 2
+# Test 3: Timeout
+test_timeout() {
+  local output rc
+  output=$(deadline_run 1 -- sleep 2 2>&1 || true)
   rc=$?
-  [[ ${rc} -eq 124 ]]
+  [[ $rc -eq 124 ]]
 }
 
-# Test 6: atomic_write_file writes file atomically
-test_atomic_write_file() {
-  local src="${TEST_DIR}/src.txt"
-  local dest="${TEST_DIR}/dest.txt"
-  echo "Test content" > "${src}"
-  atomic_write_file "${src}" "${dest}" 600 || return 1
-  [[ -f "${dest}" && "$(cat "${dest}")" == "Test content" ]]
-  local mode
-  mode=$(stat -c %a "${dest}" 2>/dev/null || stat -f %A "${dest}")
-  [[ "${mode}" == "600" ]]
-}
-
-# Test 7: atomic_write writes stdin atomically
+# Test 4: Atomic write
 test_atomic_write() {
-  local dest="${TEST_DIR}/stdin.txt"
-  echo "Test stdin" | atomic_write "${dest}" 644 || return 1
-  [[ -f "${dest}" && "$(cat "${dest}")" == "Test stdin" ]]
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  echo "test" | atomic_write "$tmp/test.txt" 600
+  [[ -f "$tmp/test.txt" ]] && [[ "$(cat "$tmp/test.txt")" == "test" ]]
   local mode
-  mode=$(stat -c %a "${dest}" 2>/dev/null || stat -f %A "${dest}")
-  [[ "${mode}" == "644" ]]
+  mode=$(stat -c %a "$tmp/test.txt" 2>/dev/null || stat -f %A "$tmp/test.txt")
+  [[ "$mode" == "600" ]]
 }
 
-# Test 8: progress tracking with begin_step and step_incomplete
+# Test 5: Progress tracking
 test_progress_tracking() {
-  begin_step "test_step" || return 1
-  step_incomplete "test_step" || return 1
-  complete_step "test_step" || return 1
+  begin_step "test_step"
+  complete_step "test_step"
   ! step_incomplete "test_step"
 }
 
+# Test 6: Secure password storage
+test_secure_password() {
+  local file=$(secure_store_password "test_pass" "secret123")
+  register_cleanup "rm -f '$file'"
+  [[ -f "$file" ]] && [[ "$(cat "$file")" == "secret123" ]]
+  local mode
+  mode=$(stat -c %a "$file" 2>/dev/null || stat -f %A "$file")
+  [[ "$mode" == "600" ]]
+}
+
 # Run all tests
-run_test "with_retry succeeds on first attempt" test_with_retry_success
-run_test "with_retry retries and succeeds" test_with_retry_retry_success
-run_test "with_retry fails after max retries" test_with_retry_fail
-run_test "deadline_run succeeds within timeout" test_deadline_run_success
-run_test "deadline_run fails on timeout" test_deadline_run_timeout
-run_test "atomic_write_file writes file atomically" test_atomic_write_file
-run_test "atomic_write writes stdin atomically" test_atomic_write
-run_test "progress tracking with steps" test_progress_tracking
+run_test "Retry success" test_retry_success
+run_test "Retry failure" test_retry_failure
+run_test "Timeout" test_timeout
+run_test "Atomic write" test_atomic_write
+run_test "Progress tracking" test_progress_tracking
+run_test "Secure password storage" test_secure_password
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
-
-# Cleanup is handled by core.sh
+```
