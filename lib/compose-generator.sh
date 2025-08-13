@@ -5,7 +5,13 @@
 #
 # Dependencies: lib/core.sh, lib/validation.sh, lib/error-handling.sh,
 #               lib/runtime-detection.sh, versions.env
-# Required by : orchestrator.sh
+# Required by: orchestrator.sh
+# Version: 1.0.0
+#
+# Usage Examples:
+#   generate_compose_file docker-compose.yml
+#   generate_env_template .env
+#   ENABLE_SPLUNK=true generate_compose_file splunk-compose.yml
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
@@ -13,6 +19,13 @@ if ! command -v log_info >/dev/null 2>&1; then
   echo "FATAL: core libs must be sourced before lib/compose-generator.sh" >&2
   exit 1
 fi
+if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "compose-generator.sh requires core.sh version >= 1.0.0"
+fi
+if [[ "${ERROR_HANDLING_VERSION:-0.0.0}" < "1.0.2" ]]; then
+  die "${E_GENERAL}" "compose-generator.sh requires error-handling.sh version >= 1.0.2"
+fi
+[[ -f versions.env ]] && source versions.env || die "${E_INVALID_INPUT}" "versions.env required"
 
 # Configuration defaults with environment override support
 : "${ENABLE_MONITORING:=false}"
@@ -48,13 +61,11 @@ EOF
 }
 
 _generate_app_service() {
-  # NOTE: We expand image refs here (from versions.env), but keep Compose
-  # variables like \${COMPOSE_PROJECT_NAME} literal for runtime interpolation.
   cat <<'EOF'
 services:
   # Main application service
   app:
-    image: "APP_IMAGE_PLACEHOLDER"
+    image: "${APP_IMAGE}"
     container_name: "${COMPOSE_PROJECT_NAME:-myapp}_app"
     restart: unless-stopped
     ports:
@@ -97,18 +108,13 @@ EOF
         max-size: "10m"
         max-file: "3"
 EOF
-
-  # Attach secrets if supported/enabled (Grafana handled inside its block)
-  if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
-    : # app has no secret needs by default; left as example hook
-  fi
 }
 
 _generate_redis_service() {
   cat <<'EOF'
   # Redis caching service
   redis:
-    image: "REDIS_IMAGE_PLACEHOLDER"
+    image: "${REDIS_IMAGE}"
     container_name: "${COMPOSE_PROJECT_NAME:-myapp}_redis"
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
@@ -148,8 +154,6 @@ _generate_splunk_indexer_service() {
   local instance_num="${1:-1}"
   local hostname="splunk-idx${instance_num}"
 
-  # We need a mixed heredoc to substitute instance-specific values but keep
-  # Compose variables literal. We'll expand bash variables, escape \${...}.
   cat <<EOF
   # Splunk Indexer ${instance_num}
   ${hostname}:
@@ -342,7 +346,7 @@ _generate_prometheus_service() {
   cat <<'EOF'
   # Prometheus monitoring service
   prometheus:
-    image: "PROMETHEUS_IMAGE_PLACEHOLDER"
+    image: "${PROMETHEUS_IMAGE}"
     container_name: "${COMPOSE_PROJECT_NAME:-myapp}_prometheus"
     restart: unless-stopped
     command:
@@ -393,7 +397,7 @@ _generate_grafana_service() {
   cat <<'EOF'
   # Grafana dashboard service
   grafana:
-    image: "GRAFANA_IMAGE_PLACEHOLDER"
+    image: "${GRAFANA_IMAGE}"
     container_name: "${COMPOSE_PROJECT_NAME:-myapp}_grafana"
     restart: unless-stopped
     ports:
@@ -488,7 +492,6 @@ volumes:
   redis-data:
     name: "${COMPOSE_PROJECT_NAME:-myapp}_redis_data"
 EOF
-
   if is_true "${ENABLE_MONITORING}"; then
     cat <<'EOF'
   prometheus-data:
@@ -497,7 +500,6 @@ EOF
     name: "${COMPOSE_PROJECT_NAME:-myapp}_grafana_data"
 EOF
   fi
-
   if is_true "${ENABLE_SPLUNK}"; then
     cat <<'EOF'
   splunk-cm-etc:
@@ -551,9 +553,16 @@ validate_compose_config() {
   local required_vars=()
   if is_true "${ENABLE_SPLUNK}"; then
     required_vars+=("SPLUNK_PASSWORD" "SPLUNK_SECRET")
+    if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
+      validate_file_readable ./secrets/splunk_password.txt "Splunk password secret" || return 1
+      validate_file_readable ./secrets/splunk_secret.txt "Splunk secret key" || return 1
+    fi
   fi
   if is_true "${ENABLE_MONITORING}"; then
     required_vars+=("GRAFANA_ADMIN_PASSWORD")
+    if (( COMPOSE_SUPPORTS_SECRETS == 1 )) && is_true "${ENABLE_SECRETS}"; then
+      validate_file_readable ./secrets/grafana_admin_password.txt "Grafana admin password secret" || return 1
+    fi
   fi
   if [[ ${#required_vars[@]} -gt 0 ]]; then
     validate_environment_vars "${required_vars[@]}"
@@ -566,6 +575,8 @@ validate_compose_config() {
 generate_compose_file() {
   local out="${1:?output file required}"
   log_info "🔥 Generating Docker Compose at: ${out}"
+
+  begin_step "compose-generation"
 
   # Validate configuration first
   validate_compose_config
@@ -616,28 +627,10 @@ generate_compose_file() {
   _generate_networks_block >> "${tmp}"
   _generate_volumes_block  >> "${tmp}"
 
-  # Replace image placeholders with actual refs (safe, local sed)
-  # shellcheck disable=SC2016
-  sed -i.bak \
-    -e "s#APP_IMAGE_PLACEHOLDER#${APP_IMAGE//#/\\#}#g" \
-    -e "s#REDIS_IMAGE_PLACEHOLDER#${REDIS_IMAGE//#/\\#}#g" \
-    -e "s#PROMETHEUS_IMAGE_PLACEHOLDER#${PROMETHEUS_IMAGE:-}${PROMETHEUS_IMAGE:+}#g" \
-    -e "s#GRAFANA_IMAGE_PLACEHOLDER#${GRAFANA_IMAGE:-}${GRAFANA_IMAGE:+}#g" \
-    "${tmp}" 2>/dev/null || {
-      # macOS/BSD sed fallback without -i
-      cp "${tmp}" "${tmp}.work"
-      sed \
-        -e "s#APP_IMAGE_PLACEHOLDER#${APP_IMAGE//#/\\#}#g" \
-        -e "s#REDIS_IMAGE_PLACEHOLDER#${REDIS_IMAGE//#/\\#}#g" \
-        -e "s#PROMETHEUS_IMAGE_PLACEHOLDER#${PROMETHEUS_IMAGE:-}${PROMETHEUS_IMAGE:+}#g" \
-        -e "s#GRAFANA_IMAGE_PLACEHOLDER#${GRAFANA_IMAGE:-}${GRAFANA_IMAGE:+}#g" \
-        "${tmp}.work" > "${tmp}"
-      rm -f "${tmp}.work" "${tmp}.bak" 2>/dev/null || true
-    }
-
   # Atomic move into place
   atomic_write_file "${tmp}" "${out}"
   log_success "✅ Compose file generated: ${out}"
+  complete_step "compose-generation"
 
   # Report what was generated
   log_info "Generated services:"
@@ -656,7 +649,8 @@ generate_env_template() {
   local out="${1:?output file required}"
   log_info "Generating environment template: ${out}"
 
-  cat > "${out}" <<'EOF'
+  begin_step "env-template-generation"
+  cat > "${tmp}" <<'EOF'
 # ==============================================================================
 # Environment Configuration Template
 # Generated by lib/compose-generator.sh
@@ -708,8 +702,9 @@ GRAFANA_MEM_LIMIT=512M
 GRAFANA_CPU_RESERVE=0.2
 GRAFANA_MEM_RESERVE=256M
 EOF
-
+  atomic_write_file "${tmp}" "${out}"
   log_success "Environment template generated: ${out}"
+  complete_step "env-template-generation"
 }
 
 # ==============================================================================
