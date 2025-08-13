@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/platform-helpers.sh
@@ -11,12 +12,14 @@
 #   - Friendly messages + graceful fallbacks on non-RHEL systems
 #
 # Dependencies: lib/core.sh (log_*, die, is_number)
+#               lib/security.sh (audit_security_configuration, generate_self_signed_cert)
 # Optionally:   lib/runtime-detection.sh (not required)
+# Version: 1.0.0
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
-if ! command -v log_info >/dev/null 2>&1; then
-  echo "FATAL: lib/core.sh must be sourced before lib/platform-helpers.sh" >&2
+if ! command -v log_info >/dev/null 2>&1 || ! command -v audit_security_configuration >/dev/null 2>&1; then
+  echo "FATAL: lib/core.sh and lib/security.sh must be sourced before lib/platform-helpers.sh" >&2
   exit 1
 fi
 
@@ -24,10 +27,10 @@ fi
 : "${E_GENERAL:=1}"
 : "${E_INVALID_INPUT:=2}"
 : "${E_MISSING_DEP:=3}"
+: "${SECRETS_DIR:=./secrets}"
 
 # ---- Internals -----------------------------------------------------------------
 
-# Detect RHEL-like family via /etc/os-release first, then redhat-release file.
 _is_rhel_like() {
   if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
@@ -46,7 +49,6 @@ _pkg_mgr() {
 
 _need_root_note() { log_warn "Some operations require elevated privileges (sudo)." ;}
 
-# Preferred or default firewalld zone (env override or detected default)
 _fw_zone() {
   local z="${FIREWALLD_ZONE:-}"
   if [[ -n "$z" ]]; then
@@ -60,7 +62,6 @@ _fw_zone() {
   fi
 }
 
-# Validate proto (tcp/udp/sctp)
 _fw_proto_ok() {
   case "${1:-tcp}" in tcp|udp|sctp) return 0;; *) return 1;; esac
 }
@@ -70,7 +71,6 @@ _firewalld_present()  { command -v firewall-cmd >/dev/null 2>&1; }
 _firewalld_running()  { systemctl is-active --quiet firewalld 2>/dev/null; }
 _firewalld_enabled()  { systemctl is-enabled --quiet firewalld 2>/dev/null; }
 
-# Try to install firewalld if missing (best-effort, may prompt for sudo)
 _install_firewalld_if_possible() {
   local pm; pm="$(_pkg_mgr)"
   if [[ -z "$pm" ]]; then
@@ -91,24 +91,20 @@ ensure_firewalld_running() {
     log_debug "Not a RHEL-like system; skipping firewalld ensure."
     return 1
   fi
-
   if !_firewalld_present; then
     log_warn "firewalld not installed."
     _install_firewalld_if_possible || return 1
   fi
-
   if !_firewalld_running; then
     _need_root_note
     log_info "Starting firewalld..."
     sudo systemctl start firewalld || die "${E_GENERAL}" "Failed to start firewalld."
   fi
-
   if !_firewalld_enabled; then
     _need_root_note
     log_info "Enabling firewalld on boot..."
     sudo systemctl enable firewalld || log_warn "Could not enable firewalld; continuing."
   fi
-
   log_success "firewalld is running."
 }
 
@@ -120,35 +116,28 @@ reload_firewall() {
   log_success "Firewall reloaded."
 }
 
-# Check if a port (or range) is open in the given zone
-# Usage: _is_port_open <zone> "8080/tcp"  OR "3000-3010/udp"
 _is_port_open() {
   local zone="${1:?zone required}" spec="${2:?port[/proto] required}"
   firewall-cmd --zone="${zone}" --query-port="${spec}" &>/dev/null
 }
 
-# Open a single port (or range) in firewalld (permanent). Proto defaults to tcp.
-# Usage: open_firewall_port 8080 [tcp] [zone]
 open_firewall_port() {
   if ! _is_rhel_like || !_firewalld_present; then
     log_warn "firewalld not available; skipping."
     return 1
   fi
   local port="${1:?port required}" proto="${2:-tcp}" zone="${3:-$(_fw_zone)}"
-
   if [[ "${port}" =~ ^[0-9]+(-[0-9]+)?$ ]]; then
     : # numeric or range ok
   else
     die "${E_INVALID_INPUT}" "Invalid port/range '${port}'."
   fi
   _fw_proto_ok "${proto}" || die "${E_INVALID_INPUT}" "Invalid protocol '${proto}'."
-
   local spec="${port}/${proto}"
   if _is_port_open "${zone}" "${spec}"; then
     log_success "Port ${spec} already open in zone '${zone}'."
     return 0
   fi
-
   _need_root_note
   log_info "Opening ${spec} in firewalld (zone='${zone}', permanent)..."
   sudo firewall-cmd --zone="${zone}" --add-port="${spec}" --permanent \
@@ -156,7 +145,6 @@ open_firewall_port() {
   log_success "Rule added for ${spec} in zone '${zone}'."
 }
 
-# Close a single port (or range)
 close_firewall_port() {
   if ! _is_rhel_like || !_firewalld_present; then return 1; fi
   local port="${1:?port required}" proto="${2:-tcp}" zone="${3:-$(_fw_zone)}"
@@ -169,7 +157,6 @@ close_firewall_port() {
   log_success "Rule removed for ${spec} in zone '${zone}'."
 }
 
-# Add/remove a named service (e.g., 'http', 'https')
 add_firewall_service() {
   if ! _is_rhel_like || !_firewalld_present; then return 1; fi
   local service="${1:?service required}" zone="${2:-$(_fw_zone)}"
@@ -190,7 +177,6 @@ remove_firewall_service() {
   log_success "Service '${service}' removed from zone '${zone}'."
 }
 
-# Bulk open: specs like "8080/tcp" "3000-3010/tcp"
 open_firewall_ports_bulk() {
   if ! _is_rhel_like || !_firewalld_present; then return 1; fi
   local zone="${FIREWALLD_ZONE:-$(_fw_zone)}"
@@ -203,8 +189,6 @@ open_firewall_ports_bulk() {
   log_success "Bulk rules added in zone='${zone}'."
 }
 
-# Convenience: open common Splunk/Splunk UF ports (+ app defaults)
-#   8000 (SplunkWeb), 8089 (mgmt), 9997 (idx recv), 8080 (app), 3000 (Grafana), 9090 (Prometheus)
 open_common_splunk_ports() {
   local zone="${1:-$(_fw_zone)}"
   open_firewall_ports_bulk "8000/tcp" "8089/tcp" "9997/tcp" "8080/tcp" "3000/tcp" "9090/tcp"
@@ -221,7 +205,7 @@ selinux_status() {
     return 1
   fi
   if command -v getenforce >/dev/null 2>&1; then
-    getenforce 2>/dev/null | tr '[:upper:]' '[:lower:]'  # enforcing|permissive|disabled
+    getenforce 2>/dev/null | tr '[:upper:]' '[:lower:]'
   else
     local s
     s="$(sestatus 2>/dev/null | awk -F': *' '/SELinux status:/ {print tolower($2)}')"
@@ -239,7 +223,6 @@ check_selinux_status() {
   esac
 }
 
-# Ensure a boolean is set persistently, e.g. container_manage_cgroup=on
 set_selinux_boolean() {
   if ! _is_rhel_like || ! command -v setsebool >/dev/null 2>&1; then return 1; fi
   local name="${1:?boolean required}" state="${2:?on|off}"
@@ -255,17 +238,13 @@ set_selinux_boolean() {
   log_success "Boolean '${name}' set to '${state}'."
 }
 
-# Ensure a directory tree has a context, then apply it with restorecon
-# Usage: set_selinux_file_context "/path" "container_file_t"
 set_selinux_file_context() {
   if ! _is_rhel_like; then return 1; fi
   local path="${1:?path required}" type="${2:?context type required}"
-
   if ! command -v semanage >/dev/null 2>&1 || ! command -v restorecon >/dev/null 2>&1; then
     local pm; pm="$(_pkg_mgr)"
     die "${E_MISSING_DEP}" "'semanage' or 'restorecon' missing. Install: sudo ${pm} install -y policycoreutils policycoreutils-python-utils"
   fi
-
   _need_root_note
   log_info "Labeling '${path}' with context type '${type}' (recursive rule + restorecon)..."
   sudo semanage fcontext -a -t "${type}" "${path}(/.*)?" \
@@ -275,13 +254,11 @@ set_selinux_file_context() {
   log_success "Context '${type}' applied to ${path}."
 }
 
-# Quick recipe for containerized volumes (common types: container_file_t, container_var_lib_t)
 label_container_volume() {
   local dir="${1:?dir required}" ctx="${2:-container_file_t}"
   set_selinux_file_context "${dir}" "${ctx}"
 }
 
-# High-level helper to prep a RHEL host: ensure firewalld, open common ports, reload, report SELinux
 rhel_container_prepare() {
   if ! _is_rhel_like; then
     log_info "Non-RHEL system; nothing to prepare."
@@ -289,12 +266,15 @@ rhel_container_prepare() {
   fi
   ensure_firewalld_running || true
   open_common_splunk_ports || true
+  if is_true "${ENABLE_SPLUNK}"; then
+    generate_self_signed_cert "splunk" "${SECRETS_DIR}/splunk.key" "${SECRETS_DIR}/splunk.crt" "splunk,localhost,127.0.0.1"
+  fi
   reload_firewall || true
   check_selinux_status || true
+  audit_security_configuration "/tmp/security-audit.txt"
   log_info "RHEL container prep complete."
 }
 
-# Show a quick summary of platform security config
 platform_security_summary() {
   if ! _is_rhel_like; then
     log_info "Platform: non-RHEL-like (no firewalld/SELinux helpers applied)."
@@ -318,3 +298,7 @@ export -f add_firewall_service remove_firewall_service open_firewall_ports_bulk
 export -f open_common_splunk_ports selinux_status check_selinux_status set_selinux_boolean
 export -f set_selinux_file_context label_container_volume rhel_container_prepare
 export -f platform_security_summary
+
+# Define version
+PLATFORM_HELPERS_VERSION="1.0.0"
+```
