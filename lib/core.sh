@@ -5,27 +5,23 @@
 # ------------------------------------------------------------------------------
 # ⭐⭐⭐⭐⭐
 #
-# Provides the absolute core functionalities required by every other script in
-# this project. This library includes standardized logging, centralized error
-# codes, system information utilities, and type-checking functions.
+# Absolute core library for logging, errors, system introspection, predicates,
+# command utilities, and cleanup management.
 #
-# It has no dependencies and must be sourced by any script that needs to
-# perform logging or basic system checks.
+# - No external dependencies
+# - Safe for CI/CD (respects NO_COLOR, robust quoting)
+# - Backward-compatible cleanup API, with safer function-based variant
 #
 # Dependencies: None
 # Required by:  Everything
-#
 # ==============================================================================
 
-# --- Strict Mode ---
-# Ensures that scripts exit on error, treat unset variables as an error,
-# and that pipeline failures are not ignored.
+# --- Strict Mode ---------------------------------------------------------------
 set -euo pipefail
 
-# --- Logging & Colors ---
-# Define color codes for standardized, readable log output.
-# These will be disabled if the script is not running in an interactive terminal.
-if [[ -t 1 ]]; then
+# --- Logging & Colors ----------------------------------------------------------
+# Colors are enabled only when stdout is a TTY and NO_COLOR is not set.
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
     readonly COLOR_RESET="\033[0m"
     readonly COLOR_RED="\033[0;31m"
     readonly COLOR_GREEN="\033[0;32m"
@@ -41,159 +37,206 @@ else
     readonly COLOR_GRAY=""
 fi
 
-# Base logging function that other loggers will call.
-# Prints a message with a timestamp and a given log level color.
+# Base logger
 # Usage: _log <color> <level> <message>
 _log() {
-    local color="$1"
-    local level="$2"
-    local message="$3"
+    local color="${1:-}"; shift
+    local level="${1:-INFO}"; shift
+    local message="${*:-}"
     # shellcheck disable=SC2059
-    printf "${color}[%s] [%-5s] %b${COLOR_RESET}\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$message"
+    printf "${color}[%s] [%-5s] %b${COLOR_RESET}\n" \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$message"
 }
 
-# Public logging functions for different severity levels.
-log_info() { _log "${COLOR_BLUE}" "INFO" "$1"; }
-log_success() { _log "${COLOR_GREEN}" "OK" "$1"; }
-log_warn() { _log "${COLOR_YELLOW}" "WARN" "$1"; }
-log_error() { _log "${COLOR_RED}" "ERROR" "$1" >&2; } # Errors go to stderr
+# Public logging helpers (robust against spaces & formatting)
+log_info()    { _log "${COLOR_BLUE}"  "INFO"  "$*"; }
+log_success() { _log "${COLOR_GREEN}" "OK"    "$*"; }
+log_warn()    { _log "${COLOR_YELLOW}" "WARN" "$*"; }
+log_error()   { _log "${COLOR_RED}"   "ERROR" "$*" >&2; }
 log_debug() {
-    # Only print debug messages if the DEBUG variable is set to "true"
     if [[ "${DEBUG:-false}" == "true" ]]; then
-        _log "${COLOR_GRAY}" "DEBUG" "$1"
+        _log "${COLOR_GRAY}" "DEBUG" "$*"
     fi
 }
 
-# Utility function to print an error and exit the script.
-# Usage: die <exit_code> <error_message>
+# Abort helper
+# Usage: die <exit_code> <message...>
 die() {
-    local exit_code=$1
-    local message=$2
-    log_error "$message"
-    exit "$exit_code"
+    local exit_code="${1:-1}"; shift
+    log_error "$*"
+    exit "${exit_code}"
 }
 
+# --- Error Codes ---------------------------------------------------------------
+readonly E_GENERAL=1           # Generic error
+readonly E_INVALID_INPUT=2     # Incorrect user input or arguments
+readonly E_MISSING_DEP=3       # Required dependency not found
+readonly E_INSUFFICIENT_MEM=4  # Not enough system memory
+readonly E_PERMISSION=5        # Permission denied
 
-# --- Error Codes ---
-# Centralized error codes for consistent exit statuses across all scripts.
-readonly E_GENERAL=1          # Generic error
-readonly E_INVALID_INPUT=2    # Incorrect user input or arguments
-readonly E_MISSING_DEP=3      # A required dependency is not found (e.g., docker)
-readonly E_INSUFFICIENT_MEM=4 # Not enough system memory
-readonly E_PERMISSION=5       # Permission denied
-
-
-# --- System Information Functions ---
-# Functions to gather basic information about the host system.
-
-# get_os determines the operating system (linux or darwin).
+# --- System Information --------------------------------------------------------
 get_os() {
-    case "$(uname -s)" in
-        Linux*)   echo "linux";;
-        Darwin*)  echo "darwin";;
-        *)        echo "unsupported";;
+    # Returns: linux | darwin | wsl | unsupported
+    local kernel
+    kernel="$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo unknown)"
+    case "$kernel" in
+        linux*)
+            if grep -qi microsoft /proc/version 2>/dev/null; then
+                echo "wsl"
+            else
+                echo "linux"
+            fi
+            ;;
+        darwin*) echo "darwin" ;;
+        *)       echo "unsupported" ;;
     esac
 }
 
-# get_cpu_cores returns the number of available CPU cores.
 get_cpu_cores() {
-    local os
-    os=$(get_os)
-    if [[ "$os" == "linux" ]]; then
-        nproc
-    elif [[ "$os" == "darwin" ]]; then
-        sysctl -n hw.ncpu
-    else
-        echo "1" # Default for unsupported OS
-    fi
+    case "$(get_os)" in
+        linux|wsl)  nproc ;;
+        darwin)     sysctl -n hw.ncpu ;;
+        *)          echo "1" ;;
+    esac
 }
 
-# get_total_memory returns the total system memory in megabytes (MB).
 get_total_memory() {
-    local os
-    os=$(get_os)
-    if [[ "$os" == "linux" ]]; then
-        grep MemTotal /proc/meminfo | awk '{print int($2/1024)}'
-    elif [[ "$os" == "darwin" ]]; then
-        sysctl -n hw.memsize | awk '{print int($1/1024/1024)}'
-    else
-        echo "0" # Default for unsupported OS
-    fi
+    # Returns total memory (MB)
+    case "$(get_os)" in
+        linux|wsl)  grep MemTotal /proc/meminfo | awk '{print int($2/1024)}' ;;
+        darwin)     sysctl -n hw.memsize | awk '{print int($1/1024/1024)}' ;;
+        *)          echo "0" ;;
+    esac
 }
 
-# --- Boolean and Type Checking ---
-# Utility functions for validating variable types and states.
-
-# is_true checks if a value is considered "true".
-# Accepts "true", "yes", or "1". Case-insensitive.
+# --- Predicates / Type Checks --------------------------------------------------
+# Case-insensitive truthy: true|yes|1
 is_true() {
-    local value
-    value=$(echo "$1" | tr '[:upper:]' '[:lower:]')
-    [[ "$value" == "true" || "$value" == "yes" || "$value" == "1" ]]
+    local v="${1:-}"
+    v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
+    [[ "$v" == "true" || "$v" == "yes" || "$v" == "1" ]]
 }
 
-# is_number checks if a value is a valid integer.
+# Integer (allow negative)
 is_number() {
-    [[ "$1" =~ ^-?[0-9]+$ ]]
+    [[ "${1:-}" =~ ^-?[0-9]+$ ]]
 }
 
-# is_empty checks if a variable is null or contains only whitespace.
+# Empty or whitespace-only
 is_empty() {
-    [[ -z "${1// }" ]]
+    [[ -z "${1//[[:space:]]/}" ]]
 }
 
-# --- Command Utilities ---
-# Utility functions for command existence and execution.
-
-# have_cmd checks if a command exists and is executable.
+# --- Command Utilities ---------------------------------------------------------
 have_cmd() {
-    command -v "$1" >/dev/null 2>&1
+    command -v "${1:-}" >/dev/null 2>&1
 }
 
-# --- Cleanup Management ---
-# System for registering cleanup functions that run on script exit.
+require_cmd() {
+    local cmd="${1:-}"
+    have_cmd "$cmd" || die "$E_MISSING_DEP" "Required command '$cmd' not found in PATH"
+}
 
-declare -a CLEANUP_COMMANDS=()
+# Optional helpers that scripts may use
+is_root() {
+    [[ "${EUID:-$(id -u)}" -eq 0 ]]
+}
+
+require_root() {
+    is_root || die "$E_PERMISSION" "This action requires root privileges"
+}
+
+# --- Confirmation Prompt -------------------------------------------------------
+# Usage: if confirm "Proceed?"; then ...; fi
+confirm() {
+    local prompt="${1:-Are you sure?} [y/N] "
+    local response
+    read -r -p "$prompt" response || true
+    [[ "$response" =~ ^([yY]([eE][sS])?)$ ]]
+}
+
+# --- Cleanup Management --------------------------------------------------------
+# Supports two styles:
+#  1) Backward-compatible string commands: register_cleanup "rm -f /tmp/x"
+#  2) Safer function-based: define a function and register_cleanup_func my_fn
+#
+# All cleanups run LIFO on EXIT, INT, TERM. Failures are ignored.
+
+# Legacy string commands (kept for backward compatibility)
+declare -a CLEANUP_COMMANDS_STR=()
+# Safer function names (no args)
+declare -a CLEANUP_FUNCTIONS=()
 CLEANUP_REGISTERED=false
 
-# register_cleanup adds a command to be executed on script exit.
-# Commands are executed in reverse order (LIFO) to ensure proper cleanup sequence.
-# Usage: register_cleanup "command_to_run_on_exit"
-register_cleanup() {
-    local cmd="$1"
-    CLEANUP_COMMANDS+=("$cmd")
-    
-    # Set up trap only on first registration to avoid multiple traps
+_register_trap_once() {
     if [[ "$CLEANUP_REGISTERED" == "false" ]]; then
-        trap 'run_cleanup' EXIT INT TERM
+        trap run_cleanup EXIT INT TERM
         CLEANUP_REGISTERED=true
     fi
 }
 
-# run_cleanup executes all registered cleanup commands in reverse order.
-# This function is automatically called on script exit via trap.
-run_cleanup() {
-    local cmd
-    # Run cleanup commands in reverse order (LIFO)
-    for ((i=${#CLEANUP_COMMANDS[@]}-1; i>=0; i--)); do
-        cmd="${CLEANUP_COMMANDS[i]}"
-        eval "$cmd" 2>/dev/null || true
-    done
-    CLEANUP_COMMANDS=()
+# Back-compat: register a string to be executed in a subshell
+# Usage: register_cleanup "rm -f \"$tmp\""
+register_cleanup() {
+    local cmd="${1:-}"
+    [[ -z "$cmd" ]] && return 0
+    CLEANUP_COMMANDS_STR+=("$cmd")
+    _register_trap_once
 }
 
-# unregister_cleanup removes a specific cleanup command from the list.
-# Usage: unregister_cleanup "exact_command_to_remove"
+# Preferred: register a function name to be invoked (no args)
+# Usage: register_cleanup_func close_temp_files
+register_cleanup_func() {
+    local fname="${1:-}"
+    if [[ -n "$fname" && "$(type -t "$fname" 2>/dev/null)" == "function" ]]; then
+        CLEANUP_FUNCTIONS+=("$fname")
+        _register_trap_once
+    else
+        log_warn "register_cleanup_func: '$fname' is not a function; ignoring"
+    fi
+}
+
+# Optional convenience: exact removal of a previously registered string command
 unregister_cleanup() {
-    local target_cmd="$1"
-    local new_commands=()
-    local cmd
-    
-    for cmd in "${CLEANUP_COMMANDS[@]}"; do
-        if [[ "$cmd" != "$target_cmd" ]]; then
-            new_commands+=("$cmd")
+    local target="${1:-}"
+    local out=()
+    for cmd in "${CLEANUP_COMMANDS_STR[@]}"; do
+        if [[ "$cmd" != "$target" ]]; then
+            out+=("$cmd")
         fi
     done
-    
-    CLEANUP_COMMANDS=("${new_commands[@]}")
+    CLEANUP_COMMANDS_STR=("${out[@]}")
 }
+
+# Optional: unregister a function by name
+unregister_cleanup_func() {
+    local target="${1:-}"
+    local out=()
+    for fname in "${CLEANUP_FUNCTIONS[@]}"; do
+        if [[ "$fname" != "$target" ]]; then
+            out+=("$fname")
+        fi
+    done
+    CLEANUP_FUNCTIONS=("${out[@]}")
+}
+
+run_cleanup() {
+    # Run function-based cleanups first (safer), then legacy strings
+    local i
+    for (( i=${#CLEANUP_FUNCTIONS[@]}-1; i>=0; i-- )); do
+        local fname="${CLEANUP_FUNCTIONS[i]}"
+        # Call function; ignore errors
+        if [[ "$(type -t "$fname" 2>/dev/null)" == "function" ]]; then
+            "$fname" || true
+        fi
+    done
+    for (( i=${#CLEANUP_COMMANDS_STR[@]}-1; i>=0; i-- )); do
+        # Execute legacy string in a subshell without 'eval' to reduce risk
+        ( set +euo pipefail; bash -c "${CLEANUP_COMMANDS_STR[i]}" ) >/dev/null 2>&1 || true
+    done
+    # Clear arrays
+    CLEANUP_FUNCTIONS=()
+    CLEANUP_COMMANDS_STR=()
+}
+
+# --- End of lib/core.sh --------------------------------------------------------
