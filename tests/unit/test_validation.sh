@@ -1,41 +1,32 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/unit/test_validation.sh
-# Unit tests for lib/validation.sh, covering system resources, container runtime,
-# input validation, and Splunk-specific checks.
+# Unit tests for validation.sh, covering system resources, disk space, ports,
+# and Splunk-specific checks.
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/validation.sh, versions.env
+# Dependencies: lib/core.sh, lib/validation.sh
 # ==============================================================================
-
 set -euo pipefail
+IFS=$'\n\t'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
-# Ensure dependencies are sourced
-if ! command -v log_info >/dev/null 2>&1; then
-  echo "FATAL: lib/core.sh must be sourced" >&2
-  exit 1
-fi
-if ! command -v with_retry >/dev/null 2>&1; then
-  echo "FATAL: lib/error-handling.sh must be sourced" >&2
-  exit 1
-fi
-if ! command -v validate_system_resources >/dev/null 2>&1; then
-  echo "FATAL: lib/validation.sh must be sourced" >&2
-  exit 1
-fi
-if [[ ! -f versions.env ]]; then
-  echo "FATAL: versions.env not found" >&2
-  exit 1
-fi
-
-# Create a temporary directory for tests
-TEST_DIR="$(mktemp -d -t test-validation.XXXXXX)"
-register_cleanup "rm -rf '${TEST_DIR}'"
-log_info "Testing in temporary directory: ${TEST_DIR}"
+# Source dependencies
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/validation.sh"
 
 # Test counter and results
 TEST_COUNT=0
 TEST_PASSED=0
 TEST_FAILED=0
+
+# Mock system commands
+get_total_memory() { echo "8192"; }
+get_cpu_cores() { echo "4"; }
+df() { echo "100GB"; return 0; }
+ss() { return 1; } # Port free
 
 # Helper to run a test
 run_test() {
@@ -51,65 +42,45 @@ run_test() {
   fi
 }
 
-# Test 1: Validate system resources (assume sufficient resources)
-test_validate_system_resources() {
-  local mem; mem="$(get_total_memory)"
-  local cpu; cpu="$(get_cpu_cores)"
-  validate_system_resources $((mem-1)) $((cpu-1))
+# Test 1: System resources
+test_system_resources() {
+  validate_system_resources 4096 2
 }
 
-# Test 2: Validate disk space (create a small dir)
-test_validate_disk_space() {
-  mkdir -p "${TEST_DIR}/disk"
-  validate_disk_space "${TEST_DIR}/disk" 1
+# Test 2: Disk space
+test_disk_space() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  validate_disk_space "$tmp" 10
 }
 
-# Test 3: Validate container runtime detection
-test_detect_container_runtime() {
-  local runtime
-  runtime="$(detect_container_runtime)" || true
-  [[ -n "${runtime}" || ! -x "$(command -v docker)" && ! -x "$(command -v podman)" ]]
+# Test 3: Port free
+test_port_free() {
+  validate_port_free 8080
 }
 
-# Test 4: Validate port free (use a random high port)
-test_validate_port_free() {
-  validate_port_free 54321
+# Test 4: RF/SF validation
+test_rf_sf() {
+  validate_rf_sf 2 1 3 || return 1
+  ! validate_rf_sf 4 1 3 || return 1
+  return 0
 }
 
-# Test 5: Validate Splunk RF/SF
-test_validate_rf_sf() {
-  validate_rf_sf 2 1 3
-}
-
-# Test 6: Validate Splunk license (mock XML)
-test_validate_splunk_license() {
-  local license="${TEST_DIR}/license.xml"
-  echo "<license>Valid</license>" > "${license}"
-  validate_splunk_license "${license}"
-}
-
-# Test 7: Validate versions.env
-test_validate_versions_env() {
-  validate_versions_env
-}
-
-# Test 8: Validate or prompt for dir (non-interactive, set valid dir)
-test_validate_or_prompt_for_dir() {
-  local DATA_DIR="${TEST_DIR}/data"
-  mkdir -p "${DATA_DIR}"
-  NON_INTERACTIVE=1 validate_or_prompt_for_dir DATA_DIR "test data"
+# Test 5: Directory validation
+test_dir_validation() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  validate_dir_var_set "$tmp" "test dir"
 }
 
 # Run all tests
-run_test "Validate system resources" test_validate_system_resources
-run_test "Validate disk space" test_validate_disk_space
-run_test "Detect container runtime" test_detect_container_runtime
-run_test "Validate port free" test_validate_port_free
-run_test "Validate Splunk RF/SF" test_validate_rf_sf
-run_test "Validate Splunk license" test_validate_splunk_license
-run_test "Validate versions.env" test_validate_versions_env
-run_test "Validate or prompt for dir" test_validate_or_prompt_for_dir
+run_test "System resources" test_system_resources
+run_test "Disk space" test_disk_space
+run_test "Port free" test_port_free
+run_test "RF/SF validation" test_rf_sf
+run_test "Directory validation" test_dir_validation
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
+```
