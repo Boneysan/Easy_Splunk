@@ -1,10 +1,11 @@
+```bash
 #!/usr/bin/env bash
 #
 # ==============================================================================
 # generate-management-scripts.sh
 # ------------------------------------------------------------------------------
 # Generates helper scripts that call the app's API using an API key loaded
-# at runtime from a secrets .env file (not embedded at generation time).
+# at runtime from a secrets .env file (NOT embedded at generation time).
 #
 # Flags:
 #   --out-dir <dir>         Where to write scripts (default: ./management-scripts)
@@ -12,6 +13,10 @@
 #   --api-url <url>         Base API URL (default: http://localhost:8080/api/v1)
 #   --key-var <NAME>        Env var name that contains the API key in the .env
 #                           (default: THIRD_PARTY_API_KEY)
+#
+# Notes:
+#   - Scripts are idempotent to regenerate and do not store the API key.
+#   - Placeholders are replaced safely (slashes, ampersands, backslashes escaped).
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh
 # ==============================================================================
@@ -21,7 +26,9 @@ IFS=$'\n\t'
 
 # --- Source Dependencies ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# shellcheck source=lib/core.sh
 source "${SCRIPT_DIR}/lib/core.sh"
+# shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 
 # --- Defaults (overridable by flags) ---
@@ -60,12 +67,21 @@ if [[ ! -f "${SECRETS_ENV_FILE}" ]]; then
   die "${E_MISSING_DEP:-3}" "Secrets file not found: ${SECRETS_ENV_FILE}. Run generate-credentials.sh first."
 fi
 
-# Validate that the key var exists in the secrets file (best-effort)
+# Best-effort: ensure the key var exists in the secrets file
 if ! grep -E "^[[:space:]]*${KEY_VAR}=" "${SECRETS_ENV_FILE}" >/dev/null; then
   log_warn "Could not find ${KEY_VAR}= in ${SECRETS_ENV_FILE}. Scripts will still work if it's added later."
 fi
 
+# Safe replacement helper for sed replacement strings (escapes \ and &)
+_sed_escape_repl() {
+  local s="${1-}"
+  s="${s//\\/\\\\}"   # backslashes
+  s="${s//&/\\&}"     # ampersands
+  printf '%s' "${s}"
+}
+
 # Small helper injected into all generated scripts: loads env & fetches key.
+# Also normalizes base URL by trimming any trailing slash.
 read -r -d '' _COMMON_PFX <<'EOS' || true
 #!/usr/bin/env bash
 set -euo pipefail
@@ -74,6 +90,9 @@ IFS=$'\n\t'
 SECRETS_ENV_FILE="${SECRETS_ENV_FILE_PLACEHOLDER}"
 API_BASE_URL="${API_BASE_URL_PLACEHOLDER}"
 KEY_VAR="${KEY_VAR_PLACEHOLDER}"
+
+# Normalize base URL: drop trailing slash
+API_BASE_URL="${API_BASE_URL%/}"
 
 # Load secrets at runtime without exporting unrelated env:
 if [[ ! -f "${SECRETS_ENV_FILE}" ]]; then
@@ -90,10 +109,10 @@ if [[ -z "${API_KEY}" ]]; then
 fi
 
 _curl_json() {
-  # usage: _curl_json GET /path
+  # usage: _curl_json GET /path [curl-args...]
   local method="$1"; shift
   local path="$1"; shift || true
-  curl -fsS --retry 2 --retry-delay 2 --max-time 15 \
+  curl -fsS --retry 2 --retry-delay 2 --max-time 20 --location \
     -H "Authorization: Bearer ${API_KEY}" \
     -H "Accept: application/json" \
     -X "${method}" "${API_BASE_URL}${path}" "$@"
@@ -145,6 +164,8 @@ SECRETS_ENV_FILE="${SECRETS_ENV_FILE_PLACEHOLDER}"
 API_BASE_URL="${API_BASE_URL_PLACEHOLDER}"
 KEY_VAR="${KEY_VAR_PLACEHOLDER}"
 
+API_BASE_URL="${API_BASE_URL%/}"
+
 if [[ $# -lt 2 || $# -gt 3 ]]; then
   echo "Usage: $0 <username> <password> [role]" >&2
   exit 64
@@ -166,12 +187,17 @@ if [[ -z "${API_KEY}" ]]; then
   exit 3
 fi
 
-payload=$(jq -c --arg u "$USERNAME" --arg p "$PASSWORD" --arg r "$ROLE" \
-  '{username:$u,password:$p,role:$r}' 2>/dev/null || \
-  printf '{"username":"%s","password":"%s","role":"%s"}' "$USERNAME" "$PASSWORD" "$ROLE")
+# Build JSON payload (prefer jq for safe escaping)
+if command -v jq >/dev/null 2>&1; then
+  payload="$(jq -c --arg u "$USERNAME" --arg p "$PASSWORD" --arg r "$ROLE" \
+    '{username:$u,password:$p,role:$r}')"
+else
+  # Basic fallback (may not handle exotic characters)
+  payload=$(printf '{"username":"%s","password":"%s","role":"%s"}' "$USERNAME" "$PASSWORD" "$ROLE")
+fi
 
 # Send request
-if ! out=$(curl -fsS --retry 2 --retry-delay 2 --max-time 20 \
+if ! out=$(curl -fsS --retry 2 --retry-delay 2 --max-time 20 --location \
       -H "Authorization: Bearer ${API_KEY}" \
       -H "Content-Type: application/json" \
       -d "$payload" \
@@ -191,24 +217,28 @@ EOF
 }
 
 # --- Write scripts ------------------------------------------------------------
-
 _generate_get_health_script
 _generate_list_users_script
 _generate_add_user_script
 
-# --- Post-process placeholders ------------------------------------------------
-# (We keep secrets out of the file; just wire paths/names in.)
+# --- Post-process placeholders (safe replacement) -----------------------------
+_rep_secrets="$(_sed_escape_repl "${SECRETS_ENV_FILE}")"
+_rep_baseurl="$(_sed_escape_repl "${API_BASE_URL}")"
+_rep_keyvar="$(_sed_escape_repl "${KEY_VAR}")"
+
 for f in "${OUT_DIR}/get-health.sh" "${OUT_DIR}/list-users.sh" "${OUT_DIR}/add-user.sh"; do
+  # Use a backup suffix that works on GNU/BSD sed
   sed -i.bak \
-    -e "s|SECRETS_ENV_FILE_PLACEHOLDER|${SECRETS_ENV_FILE}|g" \
-    -e "s|API_BASE_URL_PLACEHOLDER|${API_BASE_URL}|g" \
-    -e "s|KEY_VAR_PLACEHOLDER|${KEY_VAR}|g" \
+    -e "s|SECRETS_ENV_FILE_PLACEHOLDER|${_rep_secrets}|g" \
+    -e "s|API_BASE_URL_PLACEHOLDER|${_rep_baseurl}|g" \
+    -e "s|KEY_VAR_PLACEHOLDER|${_rep_keyvar}|g" \
     "$f"
   rm -f "${f}.bak"
 done
 
 # --- Final messages -----------------------------------------------------------
-log_warn "Generated scripts source the API key at runtime from: ${SECRETS_ENV_FILE}"
-log_warn "Key variable expected in .env: ${KEY_VAR}  (e.g., ${KEY_VAR}=\"...\")"
-log_info  "To change these later, re-run this generator with new flags."
+log_warn "Generated scripts load the API key at runtime from: ${SECRETS_ENV_FILE}"
+log_warn "Expected .env entry: ${KEY_VAR}=<your_api_key_here>"
+log_info  "Run again with different flags to update paths/URL/variable."
 log_success "✅ Management scripts generated in: ${OUT_DIR}"
+```
