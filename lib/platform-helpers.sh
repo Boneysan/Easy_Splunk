@@ -3,8 +3,15 @@
 # lib/platform-helpers.sh
 # RHEL-family helpers for firewalld and SELinux when running container stacks.
 #
-# Dependencies: lib/core.sh (log_*, die, is_number), optionally runtime-detection.sh
-# Required by:  generate-selinux-helpers.sh (and other admin scripts)
+# Features
+#   - Robust RHEL-like detection (RHEL/CentOS/Rocky/Alma/Fedora)
+#   - firewalld helpers: ensure running, open/close ports/services (idempotent),
+#     bulk operations, zone-aware (via arg or FIREWALLD_ZONE env), safe reloads
+#   - SELinux helpers: status/introspection, booleans, file context labeling
+#   - Friendly messages + graceful fallbacks on non-RHEL systems
+#
+# Dependencies: lib/core.sh (log_*, die, is_number)
+# Optionally:   lib/runtime-detection.sh (not required)
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
@@ -13,13 +20,18 @@ if ! command -v log_info >/dev/null 2>&1; then
   exit 1
 fi
 
+# ---- Fallback error codes (if core didn't set them) ----------------------------
+: "${E_GENERAL:=1}"
+: "${E_INVALID_INPUT:=2}"
+: "${E_MISSING_DEP:=3}"
+
 # ---- Internals -----------------------------------------------------------------
+
+# Detect RHEL-like family via /etc/os-release first, then redhat-release file.
 _is_rhel_like() {
-  # Prefer /etc/os-release detection
   if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
     . /etc/os-release
-    # ID or ID_LIKE contains rhel|centos|rocky|almalinux|fedora
     [[ "${ID_LIKE:-} ${ID:-}" =~ (rhel|centos|rocky|almalinux|fedora) ]]
     return
   fi
@@ -32,114 +44,174 @@ _pkg_mgr() {
   echo ""
 }
 
-_need_root_note() {
-  log_warn "Some operations require elevated privileges (sudo)."
+_need_root_note() { log_warn "Some operations require elevated privileges (sudo)." ;}
+
+# Preferred or default firewalld zone (env override or detected default)
+_fw_zone() {
+  local z="${FIREWALLD_ZONE:-}"
+  if [[ -n "$z" ]]; then
+    echo "$z"
+    return
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    firewall-cmd --get-default-zone 2>/dev/null || echo "public"
+  else
+    echo "public"
+  fi
 }
 
-# ==============================================================================
-# firewalld helpers
-# ==============================================================================
+# Validate proto (tcp/udp/sctp)
+_fw_proto_ok() {
+  case "${1:-tcp}" in tcp|udp|sctp) return 0;; *) return 1;; esac
+}
 
+# ---- firewalld helpers ---------------------------------------------------------
 _firewalld_present()  { command -v firewall-cmd >/dev/null 2>&1; }
 _firewalld_running()  { systemctl is-active --quiet firewalld 2>/dev/null; }
 _firewalld_enabled()  { systemctl is-enabled --quiet firewalld 2>/dev/null; }
 
-ensure_firewalld_running() {
-  if ! _is_rhel_like; then log_debug "Not RHEL-like; skipping firewalld ensure."; return 1; fi
-  if !_firewalld_present; then
-    log_warn "firewalld not installed. Install it (e.g., 'sudo $(_pkg_mgr) install -y firewalld')."
+# Try to install firewalld if missing (best-effort, may prompt for sudo)
+_install_firewalld_if_possible() {
+  local pm; pm="$(_pkg_mgr)"
+  if [[ -z "$pm" ]]; then
+    log_warn "No supported package manager found to install firewalld automatically."
     return 1
   fi
+  _need_root_note
+  log_info "Installing firewalld via ${pm}..."
+  sudo "$pm" install -y firewalld || {
+    log_warn "Automatic install failed. You can install manually with: sudo ${pm} install -y firewalld"
+    return 1
+  }
+  return 0
+}
+
+ensure_firewalld_running() {
+  if ! _is_rhel_like; then
+    log_debug "Not a RHEL-like system; skipping firewalld ensure."
+    return 1
+  fi
+
+  if !_firewalld_present; then
+    log_warn "firewalld not installed."
+    _install_firewalld_if_possible || return 1
+  fi
+
   if !_firewalld_running; then
     _need_root_note
     log_info "Starting firewalld..."
-    sudo systemctl start firewalld || die "${E_GENERAL:-1}" "Failed to start firewalld."
+    sudo systemctl start firewalld || die "${E_GENERAL}" "Failed to start firewalld."
   fi
+
   if !_firewalld_enabled; then
     _need_root_note
     log_info "Enabling firewalld on boot..."
     sudo systemctl enable firewalld || log_warn "Could not enable firewalld; continuing."
   fi
+
   log_success "firewalld is running."
 }
 
 reload_firewall() {
   if ! _is_rhel_like || !_firewalld_present; then return 1; fi
-  log_info "Reloading firewalld rules..."
   _need_root_note
-  sudo firewall-cmd --reload || die "${E_GENERAL:-1}" "Failed to reload firewalld."
+  log_info "Reloading firewalld rules..."
+  sudo firewall-cmd --reload || die "${E_GENERAL}" "Failed to reload firewalld."
   log_success "Firewall reloaded."
 }
 
-# open/close a single port (e.g., 8080 tcp)
-open_firewall_port() {
-  if ! _is_rhel_like || !_firewalld_present; then log_warn "firewalld not available; skipping."; return 1; fi
-  local port="${1:?port required}" proto="${2:-tcp}"
-  if ! is_number "${port}"; then die "${E_INVALID_INPUT:-2}" "Invalid port '${port}'."; fi
-  log_info "Opening ${port}/${proto} in firewalld (permanent, public)..."
-  _need_root_note
-  if sudo firewall-cmd --zone=public --query-port="${port}/${proto}" &>/dev/null; then
-    log_success "Port ${port}/${proto} already open."
-    return 0
-  fi
-  sudo firewall-cmd --zone=public --add-port="${port}/${proto}" --permanent || \
-    die "${E_GENERAL:-1}" "Failed to add port ${port}/${proto}."
-  log_success "Rule added. Run reload_firewall to apply."
+# Check if a port (or range) is open in the given zone
+# Usage: _is_port_open <zone> "8080/tcp"  OR "3000-3010/udp"
+_is_port_open() {
+  local zone="${1:?zone required}" spec="${2:?port[/proto] required}"
+  firewall-cmd --zone="${zone}" --query-port="${spec}" &>/dev/null
 }
 
+# Open a single port (or range) in firewalld (permanent). Proto defaults to tcp.
+# Usage: open_firewall_port 8080 [tcp] [zone]
+open_firewall_port() {
+  if ! _is_rhel_like || !_firewalld_present; then
+    log_warn "firewalld not available; skipping."
+    return 1
+  fi
+  local port="${1:?port required}" proto="${2:-tcp}" zone="${3:-$(_fw_zone)}"
+
+  if [[ "${port}" =~ ^[0-9]+(-[0-9]+)?$ ]]; then
+    : # numeric or range ok
+  else
+    die "${E_INVALID_INPUT}" "Invalid port/range '${port}'."
+  fi
+  _fw_proto_ok "${proto}" || die "${E_INVALID_INPUT}" "Invalid protocol '${proto}'."
+
+  local spec="${port}/${proto}"
+  if _is_port_open "${zone}" "${spec}"; then
+    log_success "Port ${spec} already open in zone '${zone}'."
+    return 0
+  fi
+
+  _need_root_note
+  log_info "Opening ${spec} in firewalld (zone='${zone}', permanent)..."
+  sudo firewall-cmd --zone="${zone}" --add-port="${spec}" --permanent \
+    || die "${E_GENERAL}" "Failed to add port ${spec}."
+  log_success "Rule added for ${spec} in zone '${zone}'."
+}
+
+# Close a single port (or range)
 close_firewall_port() {
   if ! _is_rhel_like || !_firewalld_present; then return 1; fi
-  local port="${1:?port required}" proto="${2:-tcp}"
+  local port="${1:?port required}" proto="${2:-tcp}" zone="${3:-$(_fw_zone)}"
+  _fw_proto_ok "${proto}" || die "${E_INVALID_INPUT}" "Invalid protocol '${proto}'."
+  local spec="${port}/${proto}"
   _need_root_note
-  log_info "Removing ${port}/${proto} from firewalld (permanent, public)..."
-  sudo firewall-cmd --zone=public --remove-port="${port}/${proto}" --permanent || \
-    die "${E_GENERAL:-1}" "Failed to remove port ${port}/${proto}."
-  log_success "Rule removed. Run reload_firewall to apply."
+  log_info "Removing ${spec} from firewalld (zone='${zone}', permanent)..."
+  sudo firewall-cmd --zone="${zone}" --remove-port="${spec}" --permanent \
+    || die "${E_GENERAL}" "Failed to remove port ${spec}."
+  log_success "Rule removed for ${spec} in zone '${zone}'."
 }
 
 # Add/remove a named service (e.g., 'http', 'https')
 add_firewall_service() {
   if ! _is_rhel_like || !_firewalld_present; then return 1; fi
-  local service="${1:?service required}"
+  local service="${1:?service required}" zone="${2:-$(_fw_zone)}"
   _need_root_note
-  log_info "Adding firewalld service '${service}' (permanent, public)..."
-  sudo firewall-cmd --zone=public --add-service="${service}" --permanent || \
-    die "${E_GENERAL:-1}" "Failed to add service '${service}'."
-  log_success "Service added. Run reload_firewall to apply."
+  log_info "Adding firewalld service '${service}' (zone='${zone}', permanent)..."
+  sudo firewall-cmd --zone="${zone}" --add-service="${service}" --permanent \
+    || die "${E_GENERAL}" "Failed to add service '${service}'."
+  log_success "Service '${service}' added in zone '${zone}'."
 }
 
 remove_firewall_service() {
   if ! _is_rhel_like || !_firewalld_present; then return 1; fi
-  local service="${1:?service required}"
+  local service="${1:?service required}" zone="${2:-$(_fw_zone)}"
   _need_root_note
-  log_info "Removing firewalld service '${service}' (permanent, public)..."
-  sudo firewall-cmd --zone=public --remove-service="${service}" --permanent || \
-    die "${E_GENERAL:-1}" "Failed to remove service '${service}'."
-  log_success "Service removed. Run reload_firewall to apply."
+  log_info "Removing firewalld service '${service}' (zone='${zone}', permanent)..."
+  sudo firewall-cmd --zone="${zone}" --remove-service="${service}" --permanent \
+    || die "${E_GENERAL}" "Failed to remove service '${service}'."
+  log_success "Service '${service}' removed from zone '${zone}'."
 }
 
-# Open multiple ports or ranges quickly: open_ports "8080/tcp" "3000-3010/tcp"
+# Bulk open: specs like "8080/tcp" "3000-3010/tcp"
 open_firewall_ports_bulk() {
   if ! _is_rhel_like || !_firewalld_present; then return 1; fi
+  local zone="${FIREWALLD_ZONE:-$(_fw_zone)}"
   _need_root_note
   for spec in "$@"; do
-    log_info "Opening ${spec}..."
-    sudo firewall-cmd --zone=public --add-port="${spec}" --permanent || \
-      die "${E_GENERAL:-1}" "Failed to add port spec ${spec}."
+    log_info "Opening ${spec} in zone='${zone}'..."
+    sudo firewall-cmd --zone="${zone}" --add-port="${spec}" --permanent \
+      || die "${E_GENERAL}" "Failed to add port spec ${spec}."
   done
-  log_success "Bulk rules added. Run reload_firewall to apply."
+  log_success "Bulk rules added in zone='${zone}'."
 }
 
 # Convenience: open common Splunk/Splunk UF ports (+ app defaults)
 #   8000 (SplunkWeb), 8089 (mgmt), 9997 (idx recv), 8080 (app), 3000 (Grafana), 9090 (Prometheus)
 open_common_splunk_ports() {
+  local zone="${1:-$(_fw_zone)}"
   open_firewall_ports_bulk "8000/tcp" "8089/tcp" "9997/tcp" "8080/tcp" "3000/tcp" "9090/tcp"
+  log_info "Run reload_firewall to apply changes to the running firewall."
 }
 
-# ==============================================================================
-# SELinux helpers
-# ==============================================================================
-
+# ---- SELinux helpers -----------------------------------------------------------
 _selinux_present() { command -v getenforce >/dev/null 2>&1 || command -v sestatus >/dev/null 2>&1; }
 
 selinux_status() {
@@ -151,7 +223,8 @@ selinux_status() {
   if command -v getenforce >/dev/null 2>&1; then
     getenforce 2>/dev/null | tr '[:upper:]' '[:lower:]'  # enforcing|permissive|disabled
   else
-    local s; s="$(sestatus 2>/dev/null | awk -F': ' '/SELinux status:/ {print tolower($2)}')"
+    local s
+    s="$(sestatus 2>/dev/null | awk -F': *' '/SELinux status:/ {print tolower($2)}')"
     [[ -z "$s" ]] && s="unknown"
     echo "$s"
   fi
@@ -170,13 +243,14 @@ check_selinux_status() {
 set_selinux_boolean() {
   if ! _is_rhel_like || ! command -v setsebool >/dev/null 2>&1; then return 1; fi
   local name="${1:?boolean required}" state="${2:?on|off}"
+  case "$state" in on|off) : ;; *) die "${E_INVALID_INPUT}" "State must be 'on' or 'off'." ;; esac
   _need_root_note
   log_info "Setting SELinux boolean '${name}' -> '${state}' (persistent)..."
   if ! sudo setsebool -P "${name}" "${state}"; then
     log_error "Failed to set boolean '${name}'."
     local pm; pm="$(_pkg_mgr)"
     log_warn "You may need: 'sudo ${pm} install -y policycoreutils policycoreutils-python-utils'"
-    die "${E_GENERAL:-1}" "setsebool failed."
+    die "${E_GENERAL}" "setsebool failed."
   fi
   log_success "Boolean '${name}' set to '${state}'."
 }
@@ -189,15 +263,15 @@ set_selinux_file_context() {
 
   if ! command -v semanage >/dev/null 2>&1 || ! command -v restorecon >/dev/null 2>&1; then
     local pm; pm="$(_pkg_mgr)"
-    die "${E_MISSING_DEP:-3}" "'semanage' or 'restorecon' missing. Install: sudo ${pm} install -y policycoreutils policycoreutils-python-utils"
+    die "${E_MISSING_DEP}" "'semanage' or 'restorecon' missing. Install: sudo ${pm} install -y policycoreutils policycoreutils-python-utils"
   fi
 
   _need_root_note
   log_info "Labeling '${path}' with context type '${type}' (recursive rule + restorecon)..."
-  sudo semanage fcontext -a -t "${type}" "${path}(/.*)?" || \
-    die "${E_GENERAL:-1}" "Failed to add fcontext for ${path}"
-  sudo restorecon -Rv "${path}" || \
-    die "${E_GENERAL:-1}" "restorecon failed for ${path}"
+  sudo semanage fcontext -a -t "${type}" "${path}(/.*)?" \
+    || die "${E_GENERAL}" "Failed to add fcontext for ${path}"
+  sudo restorecon -Rv "${path}" \
+    || die "${E_GENERAL}" "restorecon failed for ${path}"
   log_success "Context '${type}' applied to ${path}."
 }
 
@@ -207,13 +281,12 @@ label_container_volume() {
   set_selinux_file_context "${dir}" "${ctx}"
 }
 
-# ==============================================================================
-# Small quality-of-life helpers users can call from scripts
-# ==============================================================================
-
-# Prepare host for containers on RHEL: ensure firewalld, open common ports, report SELinux
+# High-level helper to prep a RHEL host: ensure firewalld, open common ports, reload, report SELinux
 rhel_container_prepare() {
-  if ! _is_rhel_like; then log_info "Non-RHEL system; nothing to prepare."; return 0; fi
+  if ! _is_rhel_like; then
+    log_info "Non-RHEL system; nothing to prepare."
+    return 0
+  fi
   ensure_firewalld_running || true
   open_common_splunk_ports || true
   reload_firewall || true
@@ -221,8 +294,27 @@ rhel_container_prepare() {
   log_info "RHEL container prep complete."
 }
 
-# Export public API functions if needed in subshells
-export -f ensure_firewalld_running reload_firewall open_firewall_port close_firewall_port \
-          add_firewall_service remove_firewall_service open_firewall_ports_bulk \
-          open_common_splunk_ports selinux_status check_selinux_status set_selinux_boolean \
-          set_selinux_file_context label_container_volume rhel_container_prepare
+# Show a quick summary of platform security config
+platform_security_summary() {
+  if ! _is_rhel_like; then
+    log_info "Platform: non-RHEL-like (no firewalld/SELinux helpers applied)."
+    return 0
+  fi
+  local zone="$(_fw_zone)"
+  log_info "=== Platform Security Summary ==="
+  log_info "OS Family: RHEL-like"
+  if _firewalld_present; then
+    log_info "firewalld: present, running=$(_firewalld_running && echo yes || echo no), default zone='${zone}'"
+  else
+    log_info "firewalld: not installed"
+  fi
+  local sel; sel="$(selinux_status 2>/dev/null || echo unknown)"
+  log_info "SELinux: ${sel}"
+}
+
+# ---- Export public API for subshell usage -------------------------------------
+export -f ensure_firewalld_running reload_firewall open_firewall_port close_firewall_port
+export -f add_firewall_service remove_firewall_service open_firewall_ports_bulk
+export -f open_common_splunk_ports selinux_status check_selinux_status set_selinux_boolean
+export -f set_selinux_file_context label_container_volume rhel_container_prepare
+export -f platform_security_summary
