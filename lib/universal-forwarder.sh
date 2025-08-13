@@ -5,35 +5,48 @@
 #
 # Features
 #   - Robust platform detection (Linux x86_64/arm64, macOS universal2)
-#   - Resilient downloads with resume + retries
+#   - Resilient downloads with resume + retries (works with with_retry or retry_command)
 #   - Optional SHA256 verification via env
-#   - Flexible outputs.conf generator (multi-indexer, TLS options)
+#   - Correct TLS options in outputs.conf (CA vs client cert/key)
 #
-# Dependencies: lib/core.sh (log_*, die, is_empty, get_os), lib/error-handling.sh (retry_command)
-# Required by:  download-uf.sh (and others)
+# Dependencies: lib/core.sh (log_*, die, is_empty, is_number, get_os)
+# Optional   : lib/error-handling.sh (with_retry or retry_command)
+# Required by: download-uf.sh (and others)
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
-if ! command -v log_info >/dev/null 2>&1 || ! command -v retry_command >/dev/null 2>&1; then
-  echo "FATAL: lib/core.sh and lib/error-handling.sh must be sourced before lib/universal-forwarder.sh" >&2
+if ! command -v log_info >/dev/null 2>&1 || ! command -v die >/dev/null 2>&1; then
+  echo "FATAL: lib/core.sh must be sourced before lib/universal-forwarder.sh" >&2
   exit 1
 fi
+# We don't hard-require a specific retry helper; a shim below handles both.
 
 # ---- Defaults / tunables -------------------------------------------------------
 : "${UF_VERSION:=9.2.1}"
 : "${UF_BUILD:=de650d36ad46}"
 
-# Optional checksums (set these in your environment or versions.env if desired)
-# Example:
-#   export UF_SHA256_LINUX_X86_64=abcd1234...
-#   export UF_SHA256_LINUX_ARM64=efgh5678...
-#   export UF_SHA256_DARWIN_UNIVERSAL2=....
+# Optional checksums (set via env/versions.env if desired)
+#   UF_SHA256_LINUX_X86_64, UF_SHA256_LINUX_ARM64, UF_SHA256_DARWIN_UNIVERSAL2
 : "${UF_SHA256_LINUX_X86_64:=}"
 : "${UF_SHA256_LINUX_ARM64:=}"
 : "${UF_SHA256_DARWIN_UNIVERSAL2:=}"
 
 # Curl flags (honors http_proxy/https_proxy env automatically)
 UF_CURL_OPTS=( -fL --retry 0 --connect-timeout 15 --max-time 0 )
+
+# ---- Internal retry shim -------------------------------------------------------
+# Prefers with_retry; falls back to retry_command; otherwise runs once.
+__with_retries() {
+  local tries="${1:?tries required}" base_delay="${2:-1}"; shift 2
+  if command -v with_retry >/dev/null 2>&1; then
+    with_retry --retries "${tries}" --base-delay "${base_delay}" -- "$@"
+  elif command -v retry_command >/dev/null 2>&1; then
+    retry_command "${tries}" "${base_delay}" "$@"
+  else
+    log_warn "No retry helper found; running command once: $*"
+    "$@"
+  fi
+}
 
 # ==============================================================================
 # Platform detection
@@ -47,13 +60,13 @@ _uf_norm_arch() {
   esac
 }
 
-# Returns: echo "<os> <arch> <pkgtype>"
+# Echoes: "<os> <arch> <pkgtype>"
 #   os: linux|darwin|unsupported
 #   arch: x86_64|arm64|unsupported
 #   pkgtype: tgz|dmg
 _uf_platform() {
   local os arch
-  os="$(get_os)"    # from core.sh -> linux|darwin|unsupported
+  os="$(get_os)"
   arch="$(_uf_norm_arch)"
 
   case "${os}:${arch}" in
@@ -73,7 +86,7 @@ _get_uf_download_url() {
   local os arch pkg; read -r os arch pkg < <(_uf_platform)
 
   if [[ "${os}" == "unsupported" ]]; then
-    die "${E_GENERAL}" "Unsupported platform for UF (OS=$(get_os), ARCH=$(uname -m))."
+    die "${E_GENERAL:-1}" "Unsupported platform for UF (OS=$(get_os), ARCH=$(uname -m))."
   fi
 
   local url fname sha=""
@@ -121,7 +134,7 @@ download_uf_package() {
 
   if [[ -f "${out}" ]]; then
     log_success "UF package already exists: ${out}"
-    echo "${out}"
+    printf '%s\n' "${out}"
     return 0
   fi
 
@@ -129,30 +142,29 @@ download_uf_package() {
   log_info "Source: ${url}"
   local tmp="${out}.part"
 
-  # Use retry_command wrapper to handle transient failures; resume (-C -)
-  if ! retry_command 3 5 curl "${UF_CURL_OPTS[@]}" -C - -o "${tmp}" "${url}"; then
-    rm -f "${tmp}"
-    die "${E_GENERAL}" "Failed to download UF package."
+  # Resume-friendly download with retries
+  if ! __with_retries 3 5 curl "${UF_CURL_OPTS[@]}" -C - -o "${tmp}" "${url}"; then
+    rm -f "${tmp}" || true
+    die "${E_GENERAL:-1}" "Failed to download UF package."
   fi
 
   # Basic non-zero size check
   if [[ ! -s "${tmp}" ]]; then
-    rm -f "${tmp}"
-    die "${E_GENERAL}" "Downloaded file is empty: ${fname}"
+    rm -f "${tmp}" || true
+    die "${E_GENERAL:-1}" "Downloaded file is empty: ${fname}"
   fi
 
-  # Optional SHA check if env is provided
+  # Optional SHA256 verification
   if [[ -n "${sha}" ]]; then
-    local have tool_sum
-    tool_sum="$(_sha256_file "${tmp}")" || have=$?
-    if [[ "${have:-0}" -ne 0 ]]; then
-      log_warn "No sha256 tool available; skipping checksum verification."
-    else
+    local tool_sum
+    if tool_sum="$(_sha256_file "${tmp}")"; then
       if [[ "${tool_sum}" != "${sha}" ]]; then
-        rm -f "${tmp}"
-        die "${E_GENERAL}" "Checksum mismatch for ${fname}. Expected ${sha}, got ${tool_sum}."
+        rm -f "${tmp}" || true
+        die "${E_GENERAL:-1}" "Checksum mismatch for ${fname}. Expected ${sha}, got ${tool_sum}."
       fi
       log_success "Checksum verified for ${fname}."
+    else
+      log_warn "No sha256 tool available; skipping checksum verification."
     fi
   else
     log_warn "No checksum provided for ${fname}; skipping verification."
@@ -160,11 +172,11 @@ download_uf_package() {
 
   mv -f "${tmp}" "${out}"
   log_success "Download complete: ${out}"
-  echo "${out}"
+  printf '%s\n' "${out}"
 }
 
 # ==============================================================================
-# outputs.conf generator
+# outputs.conf generator (TLS-corrected)
 # ==============================================================================
 
 # generate_uf_outputs_config <path> <indexers> [port] [tls_enabled] [tls_ca] [tls_client_cert] [tls_client_key] [verify_server=true|false] [use_ack=true|false]
@@ -175,9 +187,10 @@ download_uf_package() {
 #
 # Notes:
 #  - <indexers> can be "host:port" entries, or hosts only (then [port] is used)
-#  - If tls_enabled=true, we'll set 'sslCertPath' if provided and 'sslVerifyServerCert'
-#  - If verify_server=false, we set sslVerifyServerCert = false (not recommended)
-#  - If use_ack=true, we set useACK = true
+#  - If tls_enabled=true, we set 'sslRootCAPath' (CA) when provided.
+#  - Client auth (mTLS) is set only if client cert/key paths are provided.
+#  - 'sslCertPath' is a client certificate in Splunk terms (not the CA) — we only set it when a client cert is given.
+#  - 'sslVerifyServerCert' follows verify_server flag.
 generate_uf_outputs_config() {
   local output_file="${1:?outputs.conf path required}"
   local idx_list="${2:?comma-separated indexers required}"
@@ -191,7 +204,7 @@ generate_uf_outputs_config() {
 
   # Validate port if provided as default
   if ! is_number "${default_port}" || (( default_port < 1 || default_port > 65535 )); then
-    die "${E_INVALID_INPUT}" "Invalid port '${default_port}'. Must be 1..65535."
+    die "${E_INVALID_INPUT:-2}" "Invalid port '${default_port}'. Must be 1..65535."
   fi
 
   local dir; dir="$(dirname -- "${output_file}")"
@@ -204,10 +217,9 @@ generate_uf_outputs_config() {
     entry="${entry//[[:space:]]/}"
     [[ -z "${entry}" ]] && continue
     if [[ "${entry}" == *:* ]]; then
-      # already host:port; do a quick port sanity if possible
       local host="${entry%%:*}" port="${entry##*:}"
       if ! is_number "${port}" || (( port < 1 || port > 65535 )); then
-        die "${E_INVALID_INPUT}" "Invalid indexer port in '${entry}'."
+        die "${E_INVALID_INPUT:-2}" "Invalid indexer port in '${entry}'."
       fi
       servers+=("${host}:${port}")
     else
@@ -215,15 +227,13 @@ generate_uf_outputs_config() {
     fi
   done
 
-  if (( ${#servers[@]} == 0 )); then
-    die "${E_INVALID_INPUT}" "No valid indexers parsed from '${idx_list}'."
-  fi
+  (( ${#servers[@]} > 0 )) || die "${E_INVALID_INPUT:-2}" "No valid indexers parsed from '${idx_list}'."
 
-  # Build tcpout-server stanzas and main server list
+  # Build server list
   local server_list; server_list="$(IFS=','; echo "${servers[*]}")"
 
-  # Write atomically: temp then move
-  local tmp; tmp="$(mktemp "${output_file}.tmp.XXXXXX")" || die "${E_GENERAL}" "mktemp failed"
+  # Write atomically
+  local tmp; tmp="$(mktemp "${output_file}.tmp.XXXXXX")" || die "${E_GENERAL:-1}" "mktemp failed"
   {
     echo "# Auto-generated by universal-forwarder.sh on $(date)"
     echo "# Splunk Universal Forwarder outputs.conf"
@@ -237,9 +247,7 @@ generate_uf_outputs_config() {
     echo "[tcpout:default-autolb-group]"
     echo "server = ${server_list}"
     if is_true "${tls_enabled}"; then
-      echo "sslCertPath = ${tls_ca:-}"
-      echo "sslPassword = "       # placeholder (not recommended to set here)
-      echo "sslRootCAPath = ${tls_ca:-}"
+      [[ -n "${tls_ca}" ]] && echo "sslRootCAPath = ${tls_ca}"
       if is_true "${verify_server}"; then
         echo "sslVerifyServerCert = true"
       else
@@ -252,6 +260,7 @@ generate_uf_outputs_config() {
     for s in "${servers[@]}"; do
       echo "[tcpout-server://${s}]"
       if is_true "${tls_enabled}"; then
+        # Only set client auth if provided (mTLS)
         [[ -n "${tls_client_cert}" ]] && echo "clientCert = ${tls_client_cert}"
         [[ -n "${tls_client_key}"  ]] && echo "sslKeysfile = ${tls_client_key}"
       fi
