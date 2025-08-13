@@ -2,147 +2,161 @@
 #
 # ==============================================================================
 # parse-args.sh
-# ------------------------------------------------------------------------------
-# ⭐⭐⭐
+# Enhanced argument parsing + config templating for orchestrator.sh
 #
-# Provides enhanced argument parsing for the main orchestrator script.
-#
-# Features:
-#   - Handles long and short command-line options.
-#   - Supports loading default values from a configuration "template" file.
-#   - Includes an interactive mode to prompt for missing required values.
-#
-# Dependencies: core.sh, validation.sh
-# Required by:  orchestrator.sh
-#
+# Dependencies: lib/core.sh (log_*, die, is_true, is_empty, is_number)
+#               lib/validation.sh (validate_required_var, validate_or_prompt_for_dir)
 # ==============================================================================
 
-# --- Source Dependencies ---
-# Assumes core libraries have been sourced by the orchestrator.
-if [[ -z "$(type -t log_info)" || -z "$(type -t validate_required_var)" ]]; then
-    echo "FATAL: lib/core.sh and lib/validation.sh must be sourced before parse-args.sh" >&2
-    exit 1
+# ---- Dependency guard ----------------------------------------------------------
+if ! command -v log_info >/dev/null 2>&1 || ! command -v validate_required_var >/dev/null 2>&1; then
+  echo "FATAL: lib/core.sh and lib/validation.sh must be sourced before parse-args.sh" >&2
+  exit 1
 fi
 
-# --- Default Configuration Values ---
-# These can be overridden by a config template or command-line arguments.
-export APP_PORT="8080"
-export DATA_DIR="/var/lib/my-app"
-export ENABLE_MONITORING="false"
-export INTERACTIVE_MODE="false"
-# Resource limits
-export APP_CPU_LIMIT="1.5"
-export APP_MEM_LIMIT="2G"
+# ---- Defaults (honor pre-set env; otherwise set) --------------------------------
+: "${APP_PORT:=8080}"
+: "${DATA_DIR:=/var/lib/my-app}"
+: "${ENABLE_MONITORING:=false}"
+: "${INTERACTIVE_MODE:=false}"
+: "${APP_CPU_LIMIT:=1.5}"
+: "${APP_MEM_LIMIT:=2G}"
+: "${NON_INTERACTIVE:=0}"        # if 1, ignore -i/--interactive
+: "${OUTPUT_EFFECTIVE_CONFIG:=}" # path to write normalized config (optional)
 
-# --- Private Helper Functions ---
-
+# ---- Usage ---------------------------------------------------------------------
 _usage() {
-    cat << EOF
+  cat <<EOF
 Usage: orchestrator.sh [options]
 
-The main entry point for deploying and managing the application stack.
-
 Options:
-  --config <file>       Load configuration from the specified template file.
-  --port <port>         Set the public port for the main application. (Default: ${APP_PORT})
-  --data-dir <path>     Set the path for persistent application data. (Default: ${DATA_DIR})
-  --with-monitoring     Enable the Prometheus and Grafana monitoring stack. (Default: disabled)
-  -i, --interactive     Enable interactive mode to prompt for required settings.
-  -h, --help            Display this help message and exit.
+  --config <file>        Load key=value defaults from a template file (POSIX .env style)
+  --port <port>          Public port for the app (default: ${APP_PORT})
+  --data-dir <path>      Persistent data directory (default: ${DATA_DIR})
+  --with-monitoring      Enable Prometheus & Grafana
+  --no-monitoring        Disable monitoring (overrides template/env)
+  -i, --interactive      Prompt for missing values (ignored if NON_INTERACTIVE=1)
+  --app-cpu <limit>      CPU limit for app (e.g., 1.5)
+  --app-mem <limit>      Memory limit for app (e.g., 2G)
+  --write-effective <f>  Write normalized config (key=value) to file <f>
+  -h, --help             Show this help and exit
 
-Resource Options:
-  --app-cpu <limit>     Set the CPU limit for the main app. (Default: ${APP_CPU_LIMIT})
-  --app-mem <limit>     Set the memory limit for the main app. (Default: ${APP_MEM_LIMIT})
-
+Precedence: defaults < --config file < environment variables < CLI flags
 EOF
 }
 
-_load_config_template() {
-    local config_file="$1"
-    if [[ ! -f "$config_file" ]]; then
-        die "$E_INVALID_INPUT" "Configuration file not found: ${config_file}"
-    fi
+# ---- Helpers -------------------------------------------------------------------
+_load_env_file() {
+  # load a .env-like file safely (KEY=VALUE pairs, allows quotes and comments)
+  local f="${1:?config file required}"
+  [[ -f "$f" ]] || die "${E_INVALID_INPUT}" "Configuration file not found: ${f}"
+  log_info "Loading configuration from template: ${f}"
 
-    log_info "Loading configuration from template: ${config_file}"
-    # Source the file to override default variables
-    # The config file should contain simple VAR="value" assignments
-    source "$config_file"
+  # shellcheck disable=SC1090
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # trim leading/trailing whitespace
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    # skip blanks and comments
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    # only accept KEY=VALUE
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      local k="${BASH_REMATCH[1]}"
+      local v="${BASH_REMATCH[2]}"
+      # strip surrounding quotes if present
+      if [[ "$v" =~ ^\"(.*)\"$ ]]; then v="${BASH_REMATCH[1]}"; fi
+      if [[ "$v" =~ ^\'(.*)\'$ ]]; then v="${BASH_REMATCH[1]}"; fi
+      # only set if variable is currently unset (template < env < CLI)
+      if [[ -z "${!k+x}" ]]; then
+        printf -v "$k" '%s' "$v"
+        export "$k"
+      fi
+    else
+      log_warn "Ignoring invalid line in ${f}: ${line}"
+    fi
+  done < "$f"
 }
 
-# --- Main Public Function ---
+_write_effective_config() {
+  local out="${1:?output file required}"
+  umask 077
+  cat > "${out}" <<EOF
+# Normalized configuration generated by parse-args.sh
+APP_PORT=${APP_PORT}
+DATA_DIR=${DATA_DIR}
+ENABLE_MONITORING=${ENABLE_MONITORING}
+APP_CPU_LIMIT=${APP_CPU_LIMIT}
+APP_MEM_LIMIT=${APP_MEM_LIMIT}
+EOF
+  log_info "Wrote effective config to: ${out}"
+}
 
-# Parses all command-line arguments, loading templates and handling flags.
-# After parsing, it can enter interactive mode to fill in any missing details.
+_validate_values() {
+  # Port sanity
+  if ! is_number "${APP_PORT}" || (( APP_PORT < 1 || APP_PORT > 65535 )); then
+    die "${E_INVALID_INPUT}" "Invalid --port '${APP_PORT}'. Must be 1..65535."
+  fi
+  # Data dir present or interactive recovery
+  if is_true "${INTERACTIVE_MODE}" && (( NON_INTERACTIVE == 0 )); then
+    validate_or_prompt_for_dir "DATA_DIR" "application data"
+  else
+    validate_required_var "${DATA_DIR}" "Data Directory (--data-dir)"
+  fi
+}
+
+# ---- Main ----------------------------------------------------------------------
 parse_arguments() {
-    # First, check for a config file argument specifically, so it's loaded first.
-    for i in "$@"; do
-        if [[ "$i" == "--config" ]]; then
-            # The argument after --config is the file path
-            local config_file_path
-            # This is a bit of a trick to get the next argument in the loop
-            config_file_path=$(eval "echo \$$(( (i=i, i) + 1 ))")
-            _load_config_template "$config_file_path"
-            break
-        fi
-    done
+  local argv=("$@")
 
-    # Main argument parsing loop
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -h|--help)
-                _usage
-                exit 0
-                ;;
-            -i|--interactive)
-                INTERACTIVE_MODE="true"
-                shift # past argument
-                ;;
-            --config)
-                # We already handled this, so just skip past the flag and its value
-                shift 2
-                ;;
-            --port)
-                APP_PORT="$2"
-                shift 2 # past argument and value
-                ;;
-            --data-dir)
-                DATA_DIR="$2"
-                shift 2
-                ;;
-            --with-monitoring)
-                ENABLE_MONITORING="true"
-                shift # past argument
-                ;;
-            --app-cpu)
-                APP_CPU_LIMIT="$2"
-                shift 2
-                ;;
-            --app-mem)
-                APP_MEM_LIMIT="$2"
-                shift 2
-                ;;
-            *)
-                # Unknown option
-                die "$E_INVALID_INPUT" "Unknown option: $1"
-                ;;
-        esac
-    done
+  # First pass: isolate --config to populate defaults early
+  local i=0
+  while (( i < ${#argv[@]} )); do
+    case "${argv[$i]}" in
+      --config)
+        local cfg="${argv[$((i+1))]:-}"
+        [[ -n "$cfg" ]] || die "${E_INVALID_INPUT}" "--config requires a file path"
+        _load_env_file "$cfg"
+        ((i+=2)); continue;;
+      *) ((i++));;
+    esac
+  done
 
-    # --- Post-Parsing Validation & Interactive Mode ---
-    log_info "Configuration loaded. Final values:"
-    log_info "  -> App Port: ${APP_PORT}"
-    log_info "  -> Data Directory: ${DATA_DIR}"
-    log_info "  -> Monitoring: ${ENABLE_MONITORING}"
+  # Second pass: parse all flags (CLI overrides template/env)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) _usage; exit 0 ;;
+      -i|--interactive) INTERACTIVE_MODE="true"; shift ;;
+      --with-monitoring) ENABLE_MONITORING="true"; shift ;;
+      --no-monitoring)   ENABLE_MONITORING="false"; shift ;;
+      --port)    APP_PORT="${2:?}"; shift 2 ;;
+      --data-dir) DATA_DIR="${2:?}"; shift 2 ;;
+      --app-cpu) APP_CPU_LIMIT="${2:?}"; shift 2 ;;
+      --app-mem) APP_MEM_LIMIT="${2:?}"; shift 2 ;;
+      --config)  shift 2 ;; # already handled in first pass
+      --write-effective) OUTPUT_EFFECTIVE_CONFIG="${2:?}"; shift 2 ;;
+      *) die "${E_INVALID_INPUT}" "Unknown option: $1" ;;
+    esac
+  done
 
-    if is_true "$INTERACTIVE_MODE"; then
-        log_info "Interactive mode enabled. Validating settings..."
-        # Use the recovery function from validation.sh
-        validate_or_prompt_for_dir "DATA_DIR" "application data"
-    else
-        # In non-interactive mode, just validate that required settings exist.
-        validate_required_var "${DATA_DIR}" "Data Directory (--data-dir)"
-    fi
+  # If NON_INTERACTIVE=1 is set, force interactive off
+  if (( NON_INTERACTIVE == 1 )); then
+    INTERACTIVE_MODE="false"
+  fi
 
-    # Export all variables to make them available to the main orchestrator script
-    export APP_PORT DATA_DIR ENABLE_MONITORING APP_CPU_LIMIT APP_MEM_LIMIT
+  # Post-parse validation
+  log_info "Configuration loaded. Final values:"
+  log_info "  -> App Port: ${APP_PORT}"
+  log_info "  -> Data Directory: ${DATA_DIR}"
+  log_info "  -> Monitoring: ${ENABLE_MONITORING}"
+  log_info "  -> App CPU limit: ${APP_CPU_LIMIT}, App MEM limit: ${APP_MEM_LIMIT}"
+
+  _validate_values
+
+  # Optionally write normalized config for later stages / reproducibility
+  if [[ -n "${OUTPUT_EFFECTIVE_CONFIG}" ]]; then
+    _write_effective_config "${OUTPUT_EFFECTIVE_CONFIG}"
+  fi
+
+  # Export for orchestrator
+  export APP_PORT DATA_DIR ENABLE_MONITORING APP_CPU_LIMIT APP_MEM_LIMIT INTERACTIVE_MODE
 }

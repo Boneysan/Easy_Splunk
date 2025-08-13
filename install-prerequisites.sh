@@ -1,162 +1,273 @@
 #!/usr/bin/env bash
-#
 # ==============================================================================
 # install-prerequisites.sh
-# ------------------------------------------------------------------------------
-# ⭐⭐⭐⭐
+# Installs and verifies a container runtime + compose implementation.
 #
-# A user-friendly script to install required prerequisites, primarily a
-# container runtime like Docker or Podman. It provides cross-platform support
-# and validates that the installation was successful.
+# Prefers: Podman + native "podman compose" (podman-plugins)
+# Fallbacks: Docker + "docker compose", then podman-compose/python, then docker-compose v1
 #
-# Features:
-#   - Checks if prerequisites are already met.
-#   - Detects the OS (Debian/Ubuntu, RHEL/CentOS, macOS).
-#   - Interactively prompts the user before running installation commands.
-#   - Validates the installation by re-running the detection logic.
+# Usage:
+#   ./install-prerequisites.sh [--yes] [--runtime auto|podman|docker]
 #
-# Dependencies: lib/runtime-detection.sh (and its core dependencies)
-# Required by:  Initial setup
-#
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh
 # ==============================================================================
 
-# --- Strict Mode & Setup ---
+# --- Strict mode & base env -----------------------------------------------------
 set -euo pipefail
-
-# --- Source Dependencies ---
-# Make the script runnable from any location by resolving the script's directory.
+IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# shellcheck source=lib/core.sh
 source "${SCRIPT_DIR}/lib/core.sh"
+# shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
-# runtime-detection is sourced within the main logic.
 
-# --- Helper Functions ---
+# --- Defaults / flags -----------------------------------------------------------
+: "${RUNTIME_PREF:=auto}"   # auto|podman|docker
+AUTO_YES=0                  # 1 = no prompts
+OS_FAMILY=""                # debian|rhel|mac|other
 
-# Prompts the user for confirmation before proceeding.
-confirm_or_exit() {
-    while true; do
-        read -r -p "$1 [y/N] " response
-        case "$response" in
-            [yY][eE][sS]|[yY])
-                return 0
-                ;;
-            [nN][oO]|[nN]|"")
-                die 0 "Installation cancelled by user."
-                ;;
-            *)
-                log_warn "Invalid input. Please answer 'y' or 'n'."
-                ;;
-        esac
-    done
+# --- CLI parsing ----------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y|--yes) AUTO_YES=1; shift;;
+    --runtime) RUNTIME_PREF="${2:-auto}"; shift 2;;
+    -h|--help)
+      cat <<EOF
+Usage: $(basename "$0") [--yes] [--runtime auto|podman|docker]
+
+Installs a container runtime and compose implementation, then validates by detection.
+
+Options:
+  --yes, -y         Run non-interactive (assume "yes" to package installs)
+  --runtime VALUE   Choose 'auto' (default), 'podman', or 'docker'
+  --help            Show this help and exit
+EOF
+      exit 0
+      ;;
+    *)
+      log_warn "Unknown argument: $1"
+      shift;;
+  esac
+done
+
+# --- Helpers --------------------------------------------------------------------
+need_confirm() {
+  local prompt="${1:-Proceed?}"
+  if (( AUTO_YES == 1 )); then
+    return 0
+  fi
+  while true; do
+    read -r -p "${prompt} [y/N] " resp </dev/tty || resp=""
+    case "${resp}" in
+      [yY]|[yY][eE][sS]) return 0;;
+      [nN]|[nN][oO]|"")  return 1;;
+      *) log_warn "Please answer 'y' or 'n'.";;
+    esac
+  done
 }
 
-# --- Platform-Specific Installation Logic ---
-
-install_on_debian() {
-    log_info "Detected Debian-based Linux (Ubuntu, Debian, etc.)."
-    confirm_or_exit "This script will use 'sudo apt-get' to install packages. Do you wish to proceed?"
-
-    log_info "Updating package lists..."
+pkg_install() {
+  # pkg_install <manager> <args...>
+  local mgr="${1:?pkg mgr required}"; shift
+  log_info "Installing packages with ${mgr} $*"
+  if [[ "${mgr}" == "apt-get" ]]; then
     sudo apt-get update -y
-
-    log_info "Installing required tools: curl, git."
-    sudo apt-get install -y curl git
-
-    log_info "Installing Docker Engine..."
-    sudo apt-get install -y docker.io
-    
-    log_info "Adding current user to the 'docker' group..."
-    sudo usermod -aG docker "${USER}"
-    
-    log_warn "You must log out and log back in for the group changes to take effect."
-    log_success "Docker installation complete."
+  fi
+  # shellcheck disable=SC2086
+  sudo "${mgr}" install -y "$@"
 }
 
-install_on_rhel() {
-    log_info "Detected RHEL-based Linux (CentOS, Fedora, Rocky, etc.)."
-    confirm_or_exit "This script will use 'sudo yum' or 'sudo dnf' to install packages. Do you wish to proceed?"
-    
-    local pkg_manager="yum"
-    if command -v dnf &>/dev/null; then
-        pkg_manager="dnf"
-    fi
+detect_os_family() {
+  case "$(get_os)" in
+    linux)
+      if [[ -f /etc/debian_version ]]; then OS_FAMILY="debian"
+      elif [[ -f /etc/redhat-release ]]; then OS_FAMILY="rhel"
+      else OS_FAMILY="other"
+      fi
+      ;;
+    darwin) OS_FAMILY="mac" ;;
+    *)      OS_FAMILY="other" ;;
+  esac
+}
 
-    log_info "Installing required tools: curl, git."
-    sudo "${pkg_manager}" install -y curl git
+# --- Installers -----------------------------------------------------------------
 
-    log_info "Installing Podman..."
-    sudo "${pkg_manager}" install -y podman podman-compose
-    
-    log_success "Podman and Podman-Compose installation complete."
+install_podman_debian() {
+  log_info "Detected Debian/Ubuntu."
+  if ! need_confirm "Install Podman + podman-plugins via apt-get?"; then
+    die "${E_GENERAL}" "User cancelled."
+  fi
+  require_cmd sudo
+  pkg_install apt-get curl git ca-certificates
+  pkg_install apt-get podman podman-plugins || {
+    log_warn "podman-plugins not found; attempting to install podman-compose as fallback."
+    pkg_install apt-get podman-compose || true
+  }
+
+  # Optional: enable user socket (rootless convenience)
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user start podman.socket 2>/dev/null || true
+    systemctl --user enable podman.socket 2>/dev/null || true
+  fi
+}
+
+install_podman_rhel() {
+  log_info "Detected RHEL/Rocky/CentOS/Fedora."
+  if ! need_confirm "Install Podman + podman-plugins via dnf/yum?"; then
+    die "${E_GENERAL}" "User cancelled."
+  fi
+  require_cmd sudo
+  local pmgr="yum"
+  command -v dnf >/dev/null 2>&1 && pmgr="dnf"
+
+  # Basic tooling
+  pkg_install "${pmgr}" curl git
+
+  # Podman + plugins (native compose); attempt EPEL where helpful
+  # (Fedora usually has plugins; RHEL8 may need extras)
+  pkg_install "${pmgr}" podman podman-plugins || true
+
+  # Fallback: python podman-compose if native plugin missing
+  if ! podman compose -h >/dev/null 2>&1; then
+    log_warn "Native 'podman compose' not available; installing podman-compose (python) as fallback."
+    pkg_install "${pmgr}" podman-compose || true
+  fi
+
+  # Enable rootless socket if available
+  if command -v loginctl >/dev/null 2>&1; then
+    loginctl enable-linger "${USER}" 2>/dev/null || true
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user start podman.socket 2>/dev/null || true
+    systemctl --user enable podman.socket 2>/dev/null || true
+  fi
+}
+
+install_docker_debian() {
+  log_info "Detected Debian/Ubuntu."
+  if ! need_confirm "Install Docker Engine + Compose via apt-get?"; then
+    die "${E_GENERAL}" "User cancelled."
+  fi
+  require_cmd sudo
+  pkg_install apt-get curl git ca-certificates
+  # Use distro docker as a reasonable default
+  pkg_install apt-get docker.io
+  # Compose v2 is typically present as plugin with recent Docker; else install plugin pkg if available
+  if ! docker compose version >/dev/null 2>&1; then
+    log_warn "'docker compose' not detected; install the plugin package if available, or consider Docker Desktop."
+  fi
+  log_info "Adding current user to 'docker' group (you may need to log out/in)."
+  sudo usermod -aG docker "${USER}" || true
+}
+
+install_docker_rhel() {
+  log_info "Detected RHEL/Rocky/CentOS/Fedora."
+  if ! need_confirm "Install Docker Engine (Moby) + Compose plugin via dnf/yum?"; then
+    die "${E_GENERAL}" "User cancelled."
+  fi
+  require_cmd sudo
+  local pmgr="yum"
+  command -v dnf >/dev/null 2>&1 && pmgr="dnf"
+
+  # Many RHEL-family distros use moby-engine from extras; try that first
+  pkg_install "${pmgr}" curl git
+
+  if "${pmgr}" info moby-engine >/dev/null 2>&1; then
+    pkg_install "${pmgr}" moby-engine moby-cli moby-compose || true
+  elif "${pmgr}" info docker-ce >/dev/null 2>&1; then
+    log_warn "Installing Docker CE from repos; ensure Docker CE repo is configured."
+    pkg_install "${pmgr}" docker-ce docker-ce-cli docker-compose-plugin || true
+  else
+    log_warn "Could not find Docker packages automatically. Consider enabling extras or Docker CE repo."
+    pkg_install "${pmgr}" docker docker-compose || true
+  fi
+
+  log_info "Adding current user to 'docker' group (you may need to log out/in)."
+  sudo usermod -aG docker "${USER}" || true
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl enable --now docker 2>/dev/null || true
+  fi
 }
 
 install_on_macos() {
-    log_info "Detected macOS."
-    if ! command -v brew &>/dev/null; then
-        die "$E_MISSING_DEP" "Homebrew ('brew') is not installed. Please install it from https://brew.sh and re-run this script."
-    fi
+  log_info "Detected macOS."
+  if ! command -v brew >/dev/null 2>&1; then
+    die "${E_MISSING_DEP}" "Homebrew is required. Install from https://brew.sh and re-run."
+  fi
 
-    confirm_or_exit "This script will use 'brew' to install Docker Desktop. Do you wish to proceed?"
-    
-    log_info "Updating Homebrew..."
-    brew update
-
-    log_info "Installing Docker Desktop..."
-    brew install --cask docker
-
-    log_warn "Docker Desktop has been installed. You must start it manually from your Applications folder."
-    log_success "Installation complete."
+  case "${RUNTIME_PREF}" in
+    docker)
+      if ! need_confirm "Install Docker Desktop with Homebrew Cask?"; then
+        die "${E_GENERAL}" "User cancelled."
+      fi
+      brew update
+      brew install --cask docker
+      log_warn "Start Docker Desktop from /Applications before continuing."
+      ;;
+    podman|auto)
+      if ! need_confirm "Install Podman + podman-plugins with Homebrew?"; then
+        die "${E_GENERAL}" "User cancelled."
+      fi
+      brew update
+      brew install podman podman-remote podman-compose podman-mac-helper || true
+      # Native compose plugin ships with podman; podman-compose remains fallback on mac.
+      log_info "Initializing Podman machine (rootless)."
+      podman machine init 2>/dev/null || true
+      podman machine start
+      ;;
+    *)
+      die "${E_INVALID_INPUT}" "Unsupported --runtime '${RUNTIME_PREF}' on macOS"
+      ;;
+  esac
 }
 
-# --- Main Orchestration Function ---
-
+# --- Main -----------------------------------------------------------------------
 main() {
-    log_info "🚀 Starting prerequisite check..."
-    
-    # Source the detection script to use its functions and variables
-    source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+  log_info "🚀 Checking for an existing container runtime..."
+  # shellcheck source=lib/runtime-detection.sh
+  source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 
-    # 1. Initial Check: See if everything is already installed.
-    # We suppress output here because we only care about the exit code for this check.
-    if detect_container_runtime &>/dev/null; then
-        log_success "✅ Prerequisites already met! Runtime '${CONTAINER_RUNTIME}' is ready."
-        exit 0
-    fi
+  if detect_container_runtime &>/dev/null; then
+    log_success "✅ Prerequisites already satisfied. Runtime='${CONTAINER_RUNTIME}', Compose='${COMPOSE_IMPL}'."
+    runtime_summary
+    exit 0
+  fi
 
-    # 2. Installation: If the check failed, guide the user through installation.
-    log_warn "⚠️ A required container runtime was not found."
-    
-    local os
-    os=$(get_os)
+  detect_os_family
+  case "${OS_FAMILY}" in
+    debian)
+      case "${RUNTIME_PREF}" in
+        podman|auto) install_podman_debian ;;
+        docker)      install_docker_debian ;;
+        *)           die "${E_INVALID_INPUT}" "Unknown --runtime '${RUNTIME_PREF}'" ;;
+      esac
+      ;;
+    rhel)
+      case "${RUNTIME_PREF}" in
+        podman|auto) install_podman_rhel ;;
+        docker)      install_docker_rhel ;;
+        *)           die "${E_INVALID_INPUT}" "Unknown --runtime '${RUNTIME_PREF}'" ;;
+      esac
+      ;;
+    mac)
+      install_on_macos
+      ;;
+    *)
+      die "${E_GENERAL}" "Unsupported OS. Please install Podman (preferred) or Docker manually."
+      ;;
+  esac
 
-    case "$os" in
-        "linux")
-            if [[ -f /etc/debian_version ]]; then
-                install_on_debian
-            elif [[ -f /etc/redhat-release ]]; then
-                install_on_rhel
-            else
-                die "$E_GENERAL" "Unsupported Linux distribution. Please install Docker or Podman manually."
-            fi
-            ;;
-        "darwin")
-            install_on_macos
-            ;;
-        *)
-            die "$E_GENERAL" "Unsupported Operating System: ${os}. Please install Docker or Podman manually."
-            ;;
-    esac
-
-    # 3. Final Validation: After attempting installation, check again.
-    log_info "Validating installation..."
-    if detect_container_runtime; then
-        log_success "✅ Installation successfully verified! Runtime '${CONTAINER_RUNTIME}' is now active."
-    else
-        log_error "Installation failed or requires manual steps (like logging out)."
-        log_error "Please ensure your container runtime is correctly installed and running, then try again."
-        exit "$E_GENERAL"
-    fi
+  log_info "🔁 Validating installation..."
+  if detect_container_runtime; then
+    log_success "✅ Installation verified. Runtime='${CONTAINER_RUNTIME}', Compose='${COMPOSE_IMPL}'."
+    runtime_summary
+    exit 0
+  else
+    log_error "Installation appears incomplete. If you installed Docker, you may need to log out/in for group changes."
+    die "${E_GENERAL}" "Prerequisite validation failed."
+  fi
 }
 
-# --- Script Execution ---
-main
+main "$@"

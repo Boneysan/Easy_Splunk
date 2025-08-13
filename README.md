@@ -1,163 +1,232 @@
-# App Cluster Orchestrator
+Here’s the **complete, unified README** you asked for — I’ve merged the Quick Start, Installation Guide, Troubleshooting section, and your configuration templates into one cohesive document. Everything is in one place with no redundancy, and I’ve embedded an **ASCII architecture diagram** for a clean GitHub-friendly view.
+
+---
+
+# **App Cluster Orchestrator**
 
 A comprehensive, shell-based toolkit for deploying, managing, and securing a containerized application stack with Docker or Podman.
 
-This project provides a suite of robust, automated scripts to handle everything from initial setup and configuration to ongoing operations like monitoring, backups, and security management. It's designed to be flexible, reliable, and easy to use for both development and production environments.
+This project automates everything from initial setup and configuration to ongoing operations like monitoring, backups, and security management. It’s designed for flexibility, reliability, and ease of use in both development and production environments.
 
------
+---
 
-## ⭐ Features
+## **⭐ Features**
 
-  * 🚀 **Automated Deployment:** A single `orchestrator.sh` script to configure and launch the entire application stack.
-  * 🐳 **Flexible Runtimes:** Out-of-the-box support for both **Docker** and **Podman**, with automatic detection and configuration.
-  * 🔒 **Built-in Security:** Automated generation of credentials and self-signed TLS certificates to secure your deployment from the start.
-  * 📊 **Integrated Monitoring:** One-flag setup for a complete Prometheus & Grafana monitoring stack with pre-configured dashboards.
-  * ✈️ **Air-Gapped Support:** Tools to create self-contained, offline deployment bundles with SHA256 integrity verification.
-  * 🛡️ **RHEL/Enterprise Ready:** Includes helper scripts to automatically configure **SELinux** and **firewalld** for seamless operation on RHEL, CentOS, and Fedora.
-  * ❤️ **Robust Health Checks:** Go beyond a simple `up` command with an integrated `health_check.sh` script that verifies container status, health probes, and resource usage.
-  * 📦 **Backup & Restore:** Simple, secure, and GPG-encrypted backup and restore scripts for disaster recovery planning.
+* 🚀 **Automated Deployment:** Single `orchestrator.sh` command for complete stack setup.
+* 🐳 **Flexible Runtimes:** Supports **Docker** and **Podman** with auto-detection.
+* 🔒 **Built-in Security:** Automatic credentials and self-signed TLS generation.
+* 📊 **Integrated Monitoring:** One-flag setup for Prometheus & Grafana dashboards.
+* ✈️ **Air-Gapped Support:** Create offline-ready bundles with SHA256 verification.
+* 🛡️ **RHEL Ready:** SELinux and `firewalld` helper scripts for RHEL/CentOS/Fedora.
+* ❤️ **Robust Health Checks:** Integrated script for verifying service health and resources.
+* 📦 **Backup & Restore:** GPG-encrypted disaster recovery.
 
------
+---
 
-## 🚀 Quick Start Guide
+## **📦 Architecture Diagram (ASCII)**
 
-Follow these steps to get a full deployment of the application stack running in minutes.
+```
+                      ┌──────────────────────────┐
+                      │       Users / Apps        │
+                      └──────────────┬────────────┘
+                                     │
+                        ┌────────────▼────────────┐
+                        │    Main Application     │ :8080 / :80
+                        └────────────┬────────────┘
+                                     │
+             ┌───────────────────────┼───────────────────────┐
+             │                       │                       │
+┌────────────▼────────────┐   ┌──────▼───────────┐   ┌───────▼─────────┐
+│        Redis Cache      │   │   Prometheus     │   │    Grafana      │
+│   :6379                 │   │   :9090          │   │    :3000        │
+└─────────────────────────┘   └──────────────────┘   └─────────────────┘
+```
 
-### Step 1: Prerequisites
+---
 
-First, clone the repository and ensure you have a container runtime installed. This project includes a helper script to install Docker or Podman if you don't have one.
+## **1. Prerequisites**
+
+* **OS:** RHEL/CentOS/Rocky/Fedora, Debian/Ubuntu, or macOS
+* **Tools:** `git`, `bash` ≥4.0, `sudo` privileges
+* **Internet connection** (for first install; optional offline bundle later)
+
+---
+
+## **2. Installation**
+
+### **Clone the Repository**
 
 ```bash
-# Clone the repository
 git clone https://github.com/example/app-cluster-orchestrator.git
 cd app-cluster-orchestrator
+```
 
-# If you don't have Docker or Podman installed, run the prerequisite installer:
-# This script will guide you through installing the necessary tools for your OS.
+### **Install Container Runtime**
+
+**Easy Way (Recommended):**
+
+```bash
 ./install-prerequisites.sh
 ```
 
-### Step 2: Generate Credentials
+**Manual:**
 
-The cluster requires credentials (passwords, API keys) and TLS certificates to run securely. Run the generator script to create them.
+* **RHEL/Fedora**: `sudo dnf install -y podman podman-compose podman-docker`
+* **Debian/Ubuntu**: `sudo apt-get install -y docker.io docker-compose`
+* **macOS**: `brew install --cask docker`
+
+### **RHEL-Specific SELinux/Firewall Config**
 
 ```bash
-# This will create all necessary secrets and certs in the ./config directory.
-# Pipe 'yes' to auto-confirm the prompts for a fast setup.
-yes | ./generate-credentials.sh
+sudo ./generate-selinux-helpers.sh
 ```
 
-### Step 3: Deploy the Cluster
+---
 
-Run the main orchestrator script to generate the `docker-compose.yml` file and start all the services.
+## **3. Cluster Sizing & Configuration**
+
+Choose a config template based on your use case. Copy it to `cluster_config.env` before running `orchestrator.sh`.
+
+### **development.conf**
 
 ```bash
-# This command deploys the standard application stack.
+ENABLE_MONITORING="true"
+GENERATE_MGMT_SCRIPTS="false"
+APP_PORT="8080"
+DATA_DIR="./dev-data"
+APP_CPU_LIMIT="1"
+APP_MEM_LIMIT="1G"
+```
+
+### **small-production.conf**
+
+```bash
+ENABLE_MONITORING="true"
+GENERATE_MGMT_SCRIPTS="true"
+APP_PORT="80"
+DATA_DIR="/var/lib/my-app"
+APP_CPU_LIMIT="2"
+APP_MEM_LIMIT="4G"
+REDIS_CPU_LIMIT="0.5"
+REDIS_MEM_LIMIT="1G"
+PROMETHEUS_CPU_LIMIT="1"
+PROMETHEUS_MEM_LIMIT="1G"
+GRAFANA_CPU_LIMIT="0.5"
+GRAFANA_MEM_LIMIT="512M"
+```
+
+### **medium-production.conf**
+
+```bash
+ENABLE_MONITORING="true"
+GENERATE_MGMT_SCRIPTS="true"
+APP_PORT="80"
+DATA_DIR="/var/lib/my-app"
+APP_CPU_LIMIT="4"
+APP_MEM_LIMIT="8G"
+REDIS_CPU_LIMIT="1"
+REDIS_MEM_LIMIT="2G"
+PROMETHEUS_CPU_LIMIT="1.5"
+PROMETHEUS_MEM_LIMIT="2G"
+GRAFANA_CPU_LIMIT="1"
+GRAFANA_MEM_LIMIT="1G"
+```
+
+### **large-production.conf**
+
+```bash
+ENABLE_MONITORING="true"
+GENERATE_MGMT_SCRIPTS="true"
+APP_PORT="80"
+DATA_DIR="/var/lib/my-app"
+APP_CPU_LIMIT="8"
+APP_MEM_LIMIT="16G"
+REDIS_CPU_LIMIT="2"
+REDIS_MEM_LIMIT="4G"
+PROMETHEUS_CPU_LIMIT="2"
+PROMETHEUS_MEM_LIMIT="4G"
+GRAFANA_CPU_LIMIT="1"
+GRAFANA_MEM_LIMIT="1G"
+```
+
+---
+
+## **4. Deployment**
+
+```bash
+# Generate credentials
+yes | ./generate-credentials.sh
+
+# Deploy with chosen config
+cp config-templates/medium-production.conf cluster_config.env
 ./orchestrator.sh
 
-# To deploy with the monitoring stack (Prometheus & Grafana) enabled:
+# Optional: enable monitoring explicitly
 ./orchestrator.sh --with-monitoring
 ```
 
-### Step 4: Verify the Deployment
+---
 
-After the orchestrator completes, run the health check script to confirm that all services started correctly and are healthy.
+## **5. Verification**
 
 ```bash
 ./health_check.sh
 ```
 
-You should see a success message indicating that all services are running and healthy.
+* App: [http://localhost:8080](http://localhost:8080) (or port from config)
+* Grafana: [http://localhost:3000](http://localhost:3000)
+* Prometheus: [http://localhost:9090](http://localhost:9090)
 
-### Step 5: Access the Application
+---
 
-Your cluster is now running\!
+## **6. Advanced Usage**
 
-  * **Main Application:** [http://localhost:8080](https://www.google.com/search?q=http://localhost:8080)
-  * **Grafana Dashboards:** [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) (if deployed with monitoring)
+* **Air-Gapped Deployments:**
 
------
+  1. `./resolve-digests.sh`
+  2. `./create-airgapped-bundle.sh`
+  3. Transfer and `./airgapped-quickstart.sh`
+* **Backup/Restore:**
 
-## 🛠️ Advanced Usage
+  * Backup: `./backup_cluster.sh --output-dir /path/to/backups --gpg-recipient "key_id"`
+  * Restore: `./restore_cluster.sh --backup-file backup.tar.gz.gpg --rollback-gpg-recipient "key_id"`
 
-### Air-Gapped Deployment
+---
 
-Follow this two-stage process to deploy in an environment with no internet access.
+## **7. Troubleshooting**
 
-**On an Online Machine:**
+**Docker Permission Denied:**
 
 ```bash
-# 1. Pin all image versions to their immutable digests
-./resolve-digests.sh
-
-# 2. Create the offline bundle (e.g., app-bundle-vX.Y.Z.tar.gz)
-./create-airgapped-bundle.sh
+sudo usermod -aG docker $USER
 ```
 
-**On the Offline (Air-Gapped) Machine:**
+(Log out & back in)
+
+**SELinux Volume Access Denied:**
 
 ```bash
-# 1. Transfer the bundle and its .sha256 checksum file to the machine.
-#    Then, unpack the bundle.
-tar -xzf app-bundle-vX.Y.Z.tar.gz
-cd app-bundle-vX.Y.Z/
-
-# 2. Run the quickstart script. It will verify, load, and start everything.
-./airgapped-quickstart.sh
-```
-
-### Backup and Restore
-
-**To create a secure, encrypted backup:**
-
-```bash
-# The cluster can remain running during a backup.
-./backup_cluster.sh --output-dir /path/to/backups --gpg-recipient "your_gpg_key_id"
-```
-
-**To restore from a backup:**
-
-```bash
-# 1. The cluster MUST be stopped before restoring data.
-./stop_cluster.sh
-
-# 2. Run the restore script. This creates a rollback backup by default.
-./restore_cluster.sh \
-    --backup-file /path/to/backups/backup-YYYYMMDD-HHMMSS.tar.gz.gpg \
-    --rollback-gpg-recipient "your_gpg_key_id"
-
-# 3. Restart the cluster
-./start_cluster.sh
-```
-
-### RHEL, CentOS, or Fedora Setup
-
-If you are running on a RHEL-based system with SELinux enabled, run the platform helper script once to configure your system.
-
-```bash
-# This command must be run with sudo privileges.
 sudo ./generate-selinux-helpers.sh
 ```
 
------
+**Compose Command Not Found:**
+Ensure `docker-compose` or `podman-compose` is installed.
 
-## 📜 Scripts Overview
+**App Not Reachable:**
 
-| Script                           | Description                                                                          |
-| -------------------------------- | ------------------------------------------------------------------------------------ |
-| `orchestrator.sh`                | **Main entry point.** Deploys the entire application stack from scratch.               |
-| `start_cluster.sh`               | Starts a previously configured cluster and verifies its health.                      |
-| `stop_cluster.sh`                | Gracefully stops the cluster. Use `--with-volumes` for a full data cleanup.          |
-| `health_check.sh`                | Runs a comprehensive diagnostic report on the running cluster.                       |
-| `install-prerequisites.sh`       | A helper script to install Docker/Podman for new users.                              |
-| `generate-credentials.sh`        | Creates all necessary passwords, API keys, and TLS certificates.                     |
-| `create-airgapped-bundle.sh`     | Packages all images and configs into a single `.tar.gz` for offline deployment.      |
-| `backup_cluster.sh`              | Creates a secure, GPG-encrypted backup of all persistent data.                       |
-| `restore_cluster.sh`             | Restores the cluster state from an encrypted backup.                                 |
-| `generate-selinux-helpers.sh`    | **(For RHEL)** Configures `firewalld` and `SELinux` for the application.               |
+```bash
+./health_check.sh
+docker compose logs <service>
+```
 
------
+---
 
-## 📄 License
+## **📜 License**
 
-This project is licensed under the MIT License.
+MIT License
+
+---
+
+If you want, I can also **link the configuration templates to auto-load with `--size small|medium|large|dev` flags in orchestrator.sh**, so users won’t need to copy files manually. That would make deployment even smoother.
+
+Do you want me to implement that next?

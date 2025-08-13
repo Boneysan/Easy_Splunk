@@ -3,136 +3,212 @@
 # ==============================================================================
 # generate-management-scripts.sh
 # ------------------------------------------------------------------------------
-# ⭐⭐
+# Generates helper scripts that call the app's API using an API key loaded
+# at runtime from a secrets .env file (not embedded at generation time).
 #
-# Generates a suite of helper scripts for managing the application via its API.
-# This script reads sensitive credentials (like an API key) and embeds them
-# into simple, task-specific wrapper scripts.
+# Flags:
+#   --out-dir <dir>         Where to write scripts (default: ./management-scripts)
+#   --secrets-file <path>   Path to .env file (default: ./config/secrets/production.env)
+#   --api-url <url>         Base API URL (default: http://localhost:8080/api/v1)
+#   --key-var <NAME>        Env var name that contains the API key in the .env
+#                           (default: THIRD_PARTY_API_KEY)
 #
-# Features:
-#   - Generates multiple, ready-to-use management scripts.
-#   - Integrates with the application's API.
-#   - Provides a template for creating further automation tools.
-#
-# Dependencies: core.sh
-# Required by:  orchestrator.sh
-#
+# Dependencies: lib/core.sh, lib/error-handling.sh
 # ==============================================================================
 
-# --- Strict Mode & Setup ---
 set -euo pipefail
+IFS=$'\n\t'
 
 # --- Source Dependencies ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 
-# --- Configuration ---
-readonly MGMT_SCRIPTS_DIR="./management-scripts"
-readonly SECRETS_ENV_FILE="./config/secrets/production.env"
-readonly API_BASE_URL="http://localhost:8080/api/v1"
+# --- Defaults (overridable by flags) ---
+OUT_DIR="${OUT_DIR:-./management-scripts}"
+SECRETS_ENV_FILE="${SECRETS_ENV_FILE:-./config/secrets/production.env}"
+API_BASE_URL="${API_BASE_URL:-http://localhost:8080/api/v1}"
+KEY_VAR="${KEY_VAR:-THIRD_PARTY_API_KEY}"
 
-# This variable will be populated by sourcing the secrets file.
-API_KEY=""
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [options]
 
-# --- Private Script Generators ---
+Options:
+  --out-dir <dir>         Output directory (default: ${OUT_DIR})
+  --secrets-file <path>   Secrets .env path (default: ${SECRETS_ENV_FILE})
+  --api-url <url>         API base URL (default: ${API_BASE_URL})
+  --key-var <NAME>        Env var name holding API key (default: ${KEY_VAR})
+  -h, --help              Show this help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --out-dir) OUT_DIR="${2:?}"; shift 2;;
+    --secrets-file) SECRETS_ENV_FILE="${2:?}"; shift 2;;
+    --api-url) API_BASE_URL="${2:?}"; shift 2;;
+    --key-var) KEY_VAR="${2:?}"; shift 2;;
+    -h|--help) usage; exit 0;;
+    *) die "${E_INVALID_INPUT:-2}" "Unknown option: $1";;
+  esac
+done
+
+# --- Pre-flight ---
+mkdir -p "${OUT_DIR}"
+if [[ ! -f "${SECRETS_ENV_FILE}" ]]; then
+  die "${E_MISSING_DEP:-3}" "Secrets file not found: ${SECRETS_ENV_FILE}. Run generate-credentials.sh first."
+fi
+
+# Validate that the key var exists in the secrets file (best-effort)
+if ! grep -E "^[[:space:]]*${KEY_VAR}=" "${SECRETS_ENV_FILE}" >/dev/null; then
+  log_warn "Could not find ${KEY_VAR}= in ${SECRETS_ENV_FILE}. Scripts will still work if it's added later."
+fi
+
+# Small helper injected into all generated scripts: loads env & fetches key.
+read -r -d '' _COMMON_PFX <<'EOS' || true
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+SECRETS_ENV_FILE="${SECRETS_ENV_FILE_PLACEHOLDER}"
+API_BASE_URL="${API_BASE_URL_PLACEHOLDER}"
+KEY_VAR="${KEY_VAR_PLACEHOLDER}"
+
+# Load secrets at runtime without exporting unrelated env:
+if [[ ! -f "${SECRETS_ENV_FILE}" ]]; then
+  echo "Secrets file not found: ${SECRETS_ENV_FILE}" >&2
+  exit 2
+fi
+# shellcheck disable=SC1090
+set -a; source "${SECRETS_ENV_FILE}"; set +a
+
+API_KEY="${!KEY_VAR:-}"
+if [[ -z "${API_KEY}" ]]; then
+  echo "API key env var '${KEY_VAR}' is empty/missing in ${SECRETS_ENV_FILE}" >&2
+  exit 3
+fi
+
+_curl_json() {
+  # usage: _curl_json GET /path
+  local method="$1"; shift
+  local path="$1"; shift || true
+  curl -fsS --retry 2 --retry-delay 2 --max-time 15 \
+    -H "Authorization: Bearer ${API_KEY}" \
+    -H "Accept: application/json" \
+    -X "${method}" "${API_BASE_URL}${path}" "$@"
+}
+
+_pp_or_cat() {
+  if command -v jq >/dev/null 2>&1; then jq .; else cat; fi
+}
+EOS
+
+# --- Generators ---------------------------------------------------------------
 
 _generate_get_health_script() {
-    local script_path="${MGMT_SCRIPTS_DIR}/get-health.sh"
-    log_info "  -> Generating: ${script_path}"
-    
-    # Create the script using a here-document
-    cat > "$script_path" <<EOF
-#!/usr/bin/env bash
-# Checks the health of the application API.
-
-echo "Querying API health endpoint..."
-# The -f flag fails silently on server errors, -s is silent on progress.
-curl -fs -H "Authorization: Bearer ${API_KEY}" "${API_BASE_URL}/health" | \
-    (command -v jq &>/dev/null && jq . || cat) # Pretty-print with jq if available
-
-if [[ \$? -eq 0 ]]; then
-    echo "API is healthy."
+  local p="${OUT_DIR}/get-health.sh"
+  log_info "  -> ${p}"
+  cat > "${p}" <<EOF
+${_COMMON_PFX}
+# Check API health
+if _curl_json GET "/health" | _pp_or_cat; then
+  echo "API is healthy."
 else
-    echo "Error connecting to API."
+  echo "API health check failed." >&2
+  exit 1
 fi
 EOF
-    chmod +x "$script_path"
+  chmod 700 "${p}"
 }
 
 _generate_list_users_script() {
-    local script_path="${MGMT_SCRIPTS_DIR}/list-users.sh"
-    log_info "  -> Generating: ${script_path}"
-    
-    cat > "$script_path" <<EOF
-#!/usr/bin/env bash
-# Lists all users via the application API.
-
-echo "Fetching user list..."
-curl -fs -H "Authorization: Bearer ${API_KEY}" "${API_BASE_URL}/users" | \
-    (command -v jq &>/dev/null && jq . || cat)
+  local p="${OUT_DIR}/list-users.sh"
+  log_info "  -> ${p}"
+  cat > "${p}" <<EOF
+${_COMMON_PFX}
+# List users
+_curl_json GET "/users" | _pp_or_cat
 EOF
-    chmod +x "$script_path"
+  chmod 700 "${p}"
 }
 
 _generate_add_user_script() {
-    local script_path="${MGMT_SCRIPTS_DIR}/add-user.sh"
-    log_info "  -> Generating: ${script_path}"
-
-    cat > "$script_path" <<EOF
+  local p="${OUT_DIR}/add-user.sh"
+  log_info "  -> ${p}"
+  cat > "${p}" <<'EOF'
 #!/usr/bin/env bash
-# Adds a new user via the application API.
+set -euo pipefail
+IFS=$'\n\t'
 
-if [[ \$# -ne 2 ]]; then
-    echo "Usage: \$0 <username> <password>"
-    exit 1
+SECRETS_ENV_FILE="${SECRETS_ENV_FILE_PLACEHOLDER}"
+API_BASE_URL="${API_BASE_URL_PLACEHOLDER}"
+KEY_VAR="${KEY_VAR_PLACEHOLDER}"
+
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "Usage: $0 <username> <password> [role]" >&2
+  exit 64
 fi
 
-USERNAME="\$1"
-PASSWORD="\$2"
+USERNAME="$1"; PASSWORD="$2"; ROLE="${3:-user}"
 
-echo "Attempting to add user: \${USERNAME}"
+# Load secrets
+if [[ ! -f "${SECRETS_ENV_FILE}" ]]; then
+  echo "Secrets file not found: ${SECRETS_ENV_FILE}" >&2
+  exit 2
+fi
+# shellcheck disable=SC1090
+set -a; source "${SECRETS_ENV_FILE}"; set +a
 
-curl -fs -X POST \
-    -H "Authorization: Bearer ${API_KEY}" \
-    -H "Content-Type: application/json" \
-    -d '{"username": "'"\${USERNAME}"'", "password": "'"\${PASSWORD}"'"}' \
-    "${API_BASE_URL}/users"
+API_KEY="${!KEY_VAR:-}"
+if [[ -z "${API_KEY}" ]]; then
+  echo "API key env var '${KEY_VAR}' is empty/missing in ${SECRETS_ENV_FILE}" >&2
+  exit 3
+fi
+
+payload=$(jq -c --arg u "$USERNAME" --arg p "$PASSWORD" --arg r "$ROLE" \
+  '{username:$u,password:$p,role:$r}' 2>/dev/null || \
+  printf '{"username":"%s","password":"%s","role":"%s"}' "$USERNAME" "$PASSWORD" "$ROLE")
+
+# Send request
+if ! out=$(curl -fsS --retry 2 --retry-delay 2 --max-time 20 \
+      -H "Authorization: Bearer ${API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$payload" \
+      -X POST "${API_BASE_URL}/users" 2>&1); then
+  echo "$out" >&2
+  exit 1
+fi
+
+# Pretty print if possible
+if command -v jq >/dev/null 2>&1; then
+  printf '%s\n' "$out" | jq .
+else
+  printf '%s\n' "$out"
+fi
 EOF
-    chmod +x "$script_path"
+  chmod 700 "${p}"
 }
 
+# --- Write scripts ------------------------------------------------------------
 
-# --- Main Function ---
+_generate_get_health_script
+_generate_list_users_script
+_generate_add_user_script
 
-main() {
-    log_info "🚀 Generating API-based Management Scripts..."
+# --- Post-process placeholders ------------------------------------------------
+# (We keep secrets out of the file; just wire paths/names in.)
+for f in "${OUT_DIR}/get-health.sh" "${OUT_DIR}/list-users.sh" "${OUT_DIR}/add-user.sh"; do
+  sed -i.bak \
+    -e "s|SECRETS_ENV_FILE_PLACEHOLDER|${SECRETS_ENV_FILE}|g" \
+    -e "s|API_BASE_URL_PLACEHOLDER|${API_BASE_URL}|g" \
+    -e "s|KEY_VAR_PLACEHOLDER|${KEY_VAR}|g" \
+    "$f"
+  rm -f "${f}.bak"
+done
 
-    # 1. Pre-flight checks
-    if [[ ! -f "$SECRETS_ENV_FILE" ]]; then
-        die "$E_MISSING_DEP" "Secrets file not found at '${SECRETS_ENV_FILE}'. Please run 'generate-credentials.sh' first."
-    fi
-    mkdir -p "$MGMT_SCRIPTS_DIR"
-
-    # 2. Load the API Key
-    log_info "Loading API key from secrets file..."
-    # Source the file to load the variables. We only need API_KEY.
-    # shellcheck source=/dev/null
-    source <(grep 'API_KEY' "$SECRETS_ENV_FILE")
-    if is_empty "$API_KEY"; then
-        die "$E_GENERAL" "API_KEY not found or is empty in '${SECRETS_ENV_FILE}'."
-    fi
-
-    # 3. Generate the scripts
-    _generate_get_health_script
-    _generate_list_users_script
-    _generate_add_user_script
-
-    # 4. Final Output
-    log_warn "The generated scripts in '${MGMT_SCRIPTS_DIR}' contain an embedded API key."
-    log_warn "Treat these scripts as sensitive files and manage their permissions carefully."
-    log_success "✅ Management scripts generated successfully."
-}
-
-# --- Script Execution ---
-main "$@"
+# --- Final messages -----------------------------------------------------------
+log_warn "Generated scripts source the API key at runtime from: ${SECRETS_ENV_FILE}"
+log_warn "Key variable expected in .env: ${KEY_VAR}  (e.g., ${KEY_VAR}=\"...\")"
+log_info  "To change these later, re-run this generator with new flags."
+log_success "✅ Management scripts generated in: ${OUT_DIR}"

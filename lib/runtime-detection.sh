@@ -1,95 +1,175 @@
 #!/usr/bin/env bash
-#
 # ==============================================================================
 # lib/runtime-detection.sh
-# ------------------------------------------------------------------------------
-# ⭐⭐⭐⭐⭐
+# Detect container runtime and compose implementation; expose a unified runner.
 #
-# Detects the available container runtime (Podman or Docker) and configures
-# the environment accordingly. This is a critical script that must run before
-# any container operations are attempted.
+# Pref order:
+#   1) podman compose          (podman-plugins)
+#   2) docker compose          (Compose v2)
+#   3) podman-compose          (python)
+#   4) docker-compose          (v1)
 #
-# Features:
-#   - Prefers Podman if both runtimes are available.
-#   - Detects the correct Compose command (e.g., 'docker compose' vs 'docker-compose').
-#   - Performs basic health checks (e.g., is the daemon/socket running?).
-#   - Exports standardized variables (CONTAINER_RUNTIME, COMPOSE_COMMAND) for
-#     other scripts to use.
+# Exports:
+#   CONTAINER_RUNTIME   = podman|docker
+#   COMPOSE_IMPL        = podman-compose|docker-compose|podman-compose-py|docker-compose-v1
+#   COMPOSE_SUPPORTS_SECRETS        = 1|0
+#   COMPOSE_SUPPORTS_HEALTHCHECK    = 1|0
+#   PODMAN_HAS_SOCKET   = 1|0 (when runtime=podman)
 #
-# Dependencies: core.sh, validation.sh
-# Required by:  All container operations
+# Defines:
+#   compose <args...>   -> runs the right compose implementation
 #
+# Dependencies: lib/core.sh, lib/validation.sh
 # ==============================================================================
 
-# --- Source Dependencies ---
-# This script relies on logging and error functions from core libraries.
-# It assumes they have been sourced by the main calling script.
-if [[ -z "$(type -t log_info)" ]]; then
-    echo "FATAL: lib/core.sh and lib/validation.sh must be sourced before lib/runtime-detection.sh" >&2
-    exit 1
+# ---- Dependency guard ----------------------------------------------------------
+if ! command -v log_info >/dev/null 2>&1; then
+  echo "FATAL: lib/core.sh must be sourced before lib/runtime-detection.sh" >&2
+  exit 1
 fi
 
-# --- Global Variables ---
-# These variables will be populated and exported for use in other scripts.
+# ---- Globals -------------------------------------------------------------------
 export CONTAINER_RUNTIME=""
-export COMPOSE_COMMAND=""
+export COMPOSE_IMPL=""
+export COMPOSE_SUPPORTS_SECRETS=0
+export COMPOSE_SUPPORTS_HEALTHCHECK=0
+export PODMAN_HAS_SOCKET=0
 
-# --- Main Detection Function ---
+# Internal storage of the compose runner (either "podman compose" or "docker compose" or a single binary)
+__COMPOSE_BIN=""
+__COMPOSE_SUB=""
 
-# Detects and configures the container runtime environment.
-# It checks for Podman first, then falls back to Docker.
-# Exits with an error if no valid runtime can be found.
+# Provide a single entrypoint for callers:
+# Usage: compose up -d
+compose() {
+  if [[ -n "${__COMPOSE_SUB}" ]]; then
+    "${__COMPOSE_BIN}" "${__COMPOSE_SUB}" "$@"
+  else
+    "${__COMPOSE_BIN}" "$@"
+  fi
+}
+
+# ---- Helpers -------------------------------------------------------------------
+__check_podman_socket() {
+  # Rootless: user-level socket; root: system
+  if command -v podman >/dev/null 2>&1 && podman system connection ls --format '{{.Default}} {{.URI}}' 2>/dev/null | grep -q 'true.*podman\.sock'; then
+    PODMAN_HAS_SOCKET=1
+  else
+    PODMAN_HAS_SOCKET=0
+  fi
+}
+
+__compose_version_ok() {
+  # Try to print version for the selected compose; return 0/1
+  if [[ -n "${__COMPOSE_SUB}" ]]; then
+    "${__COMPOSE_BIN}" "${__COMPOSE_SUB}" version >/dev/null 2>&1
+  else
+    "${__COMPOSE_BIN}" version >/dev/null 2>&1
+  fi
+}
+
+__set_caps_for_impl() {
+  case "${COMPOSE_IMPL}" in
+    podman-compose|docker-compose)
+      COMPOSE_SUPPORTS_SECRETS=1
+      COMPOSE_SUPPORTS_HEALTHCHECK=1
+      ;;
+    podman-compose-py|docker-compose-v1)
+      # Python podman-compose & legacy docker-compose v1 have partial support;
+      # secrets via "secrets:" in Compose spec may be limited or unsupported.
+      COMPOSE_SUPPORTS_SECRETS=0
+      COMPOSE_SUPPORTS_HEALTHCHECK=1
+      ;;
+    *)
+      COMPOSE_SUPPORTS_SECRETS=0
+      COMPOSE_SUPPORTS_HEALTHCHECK=0
+      ;;
+  esac
+}
+
+runtime_summary() {
+  log_info "Runtime: ${CONTAINER_RUNTIME}, Compose: ${COMPOSE_IMPL}, secrets=${COMPOSE_SUPPORTS_SECRETS}, healthcheck=${COMPOSE_SUPPORTS_HEALTHCHECK}, podman-socket=${PODMAN_HAS_SOCKET}"
+}
+
+# ---- Detection -----------------------------------------------------------------
 detect_container_runtime() {
-    log_info "🔎 Detecting container runtime..."
+  log_info "🔎 Detecting container runtime and compose implementation..."
 
-    # 1. Check for Podman (Preferred)
-    if command -v podman &> /dev/null; then
-        log_info "Found container runtime: Podman"
-        CONTAINER_RUNTIME="podman"
+  # --- Prefer Podman + native compose plugin
+  if command -v podman >/dev/null 2>&1; then
+    CONTAINER_RUNTIME="podman"
+    __check_podman_socket
 
-        # Check for podman-compose
-        if command -v podman-compose &> /dev/null; then
-            COMPOSE_COMMAND="podman-compose"
-            log_success "  ✔️ Using compose command: ${COMPOSE_COMMAND}"
-            
-            # Optimization: Check for the Podman socket for API compatibility
-            if ! podman system connection ls --format '{{.Default}} {{.URI}}' | grep -q "true.*podman.sock"; then
-                log_warn "Podman socket does not appear to be the default. Some tools may require it."
-                log_warn "Consider running: systemctl --user start podman.socket"
-            fi
-            
-            export CONTAINER_RUNTIME COMPOSE_COMMAND
-            return 0
-        else
-            die "$E_MISSING_DEP" "Podman is installed, but 'podman-compose' is not found. Please install it to continue."
-        fi
+    # Native plugin: "podman compose"
+    if podman compose version >/dev/null 2>&1 || podman compose help >/dev/null 2>&1; then
+      __COMPOSE_BIN="podman"
+      __COMPOSE_SUB="compose"
+      COMPOSE_IMPL="podman-compose"
+      __set_caps_for_impl
+      if ! __compose_version_ok; then
+        log_warn "podman compose detected but version check failed; continuing"
+      fi
+      log_success "✔ Using Podman with native compose plugin"
+      runtime_summary
+      export CONTAINER_RUNTIME COMPOSE_IMPL COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK PODMAN_HAS_SOCKET
+      return 0
     fi
 
-    # 2. Check for Docker (Fallback)
-    if command -v docker &> /dev/null; then
-        log_info "Found container runtime: Docker"
-        CONTAINER_RUNTIME="docker"
-
-        # Optimization: Check if the Docker daemon is running
-        if ! docker info &> /dev/null; then
-            die "$E_MISSING_DEP" "Docker is installed, but the Docker daemon does not appear to be running."
-        fi
-
-        # Check for Docker Compose command (V2 plugin first, then V1 standalone)
-        if docker compose version &> /dev/null; then
-            COMPOSE_COMMAND="docker compose"
-            log_success "  ✔️ Using compose command: ${COMPOSE_COMMAND} (V2 Plugin)"
-        elif command -v docker-compose &> /dev/null; then
-            COMPOSE_COMMAND="docker-compose"
-            log_success "  ✔️ Using compose command: ${COMPOSE_COMMAND} (V1 Standalone)"
-        else
-             die "$E_MISSING_DEP" "Docker is installed, but 'docker compose' or 'docker-compose' could not be found."
-        fi
-        
-        export CONTAINER_RUNTIME COMPOSE_COMMAND
-        return 0
+    # Fallback: python podman-compose
+    if command -v podman-compose >/dev/null 2>&1; then
+      __COMPOSE_BIN="podman-compose"
+      __COMPOSE_SUB=""
+      COMPOSE_IMPL="podman-compose-py"
+      __set_caps_for_impl
+      if ! __compose_version_ok; then
+        log_warn "podman-compose detected but version check failed; continuing"
+      fi
+      log_warn "Using podman-compose (python). Consider installing podman-plugins for 'podman compose'."
+      runtime_summary
+      export CONTAINER_RUNTIME COMPOSE_IMPL COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK PODMAN_HAS_SOCKET
+      return 0
     fi
 
-    # 3. No Runtime Found
-    die "$E_MISSING_DEP" "No container runtime found. Please install Docker or Podman to continue."
+    log_warn "Podman found but no compose implementation available. You can: 'dnf install podman-plugins' (RHEL) or install 'podman-compose' (python)."
+    # Do not fail yet—maybe Docker is available too.
+  fi
+
+  # --- Docker path
+  if command -v docker >/dev/null 2>&1; then
+    CONTAINER_RUNTIME="docker"
+
+    # Ensure daemon reachable
+    if ! docker info >/dev/null 2>&1; then
+      die "${E_MISSING_DEP}" "Docker is installed, but the Docker daemon is not running."
+    fi
+
+    # Prefer v2 plugin: "docker compose"
+    if docker compose version >/dev/null 2>&1; then
+      __COMPOSE_BIN="docker"
+      __COMPOSE_SUB="compose"
+      COMPOSE_IMPL="docker-compose"
+      __set_caps_for_impl
+      log_success "✔ Using Docker with Compose v2 plugin"
+      runtime_summary
+      export CONTAINER_RUNTIME COMPOSE_IMPL COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK PODMAN_HAS_SOCKET
+      return 0
+    fi
+
+    # Fallback: legacy docker-compose v1
+    if command -v docker-compose >/dev/null 2>&1; then
+      __COMPOSE_BIN="docker-compose"
+      __COMPOSE_SUB=""
+      COMPOSE_IMPL="docker-compose-v1"
+      __set_caps_for_impl
+      log_warn "Using legacy docker-compose v1. Consider upgrading to Docker Compose v2."
+      runtime_summary
+      export CONTAINER_RUNTIME COMPOSE_IMPL COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK PODMAN_HAS_SOCKET
+      return 0
+    fi
+
+    die "${E_MISSING_DEP}" "Docker found, but no Compose implementation ('docker compose' or 'docker-compose') is available."
+  fi
+
+  # --- No runtime at all
+  die "${E_MISSING_DEP}" "No container runtime found. Install Podman (preferred) or Docker."
 }

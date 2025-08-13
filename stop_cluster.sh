@@ -3,24 +3,24 @@
 # ==============================================================================
 # stop_cluster.sh
 # ------------------------------------------------------------------------------
-# ⭐⭐⭐
+# Gracefully stop the application stack and (optionally) clean up resources.
 #
-# Gracefully stops and removes the application cluster's containers and
-# networks. By default, it preserves all named volumes to prevent data loss.
+# Flags:
+#   --compose-file <path>   Compose file to use (default: ./docker-compose.yml)
+#   --timeout <sec>         Graceful stop timeout (default: 30)
+#   --with-volumes          ALSO delete named volumes (DATA LOSS!)
+#   --remove-orphans        Remove containers for services not in the compose file (default: on)
+#   --no-remove-orphans     Disable removing orphan containers
+#   --prune                 After stopping, prune dangling images/volumes/networks (prompted)
+#   --save-logs             Save recent logs before shutdown (./logs/stop-YYYYmmdd-HHMMSS/)
+#   --yes, -y               Non-interactive (assume yes on prompts)
+#   -h, --help              Show usage
 #
-# Features:
-#   - Graceful shutdown of services.
-#   - Automated cleanup of containers and networks.
-#   - Prioritizes data preservation by default.
-#   - Optional flag to perform a full cleanup, including data volumes.
-#
-# Dependencies: core.sh, runtime-detection.sh
-# Required by:  End users
-#
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh
 # ==============================================================================
 
-# --- Strict Mode & Setup ---
 set -euo pipefail
+IFS=$'\n\t'
 
 # --- Source Dependencies ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
@@ -28,86 +28,141 @@ source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 
-# --- Configuration ---
-readonly COMPOSE_FILE="docker-compose.yml"
+# --- Defaults ---
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+STOP_TIMEOUT="${STOP_TIMEOUT:-30}"
 CLEANUP_VOLUMES="false"
+REMOVE_ORPHANS="true"
+DO_PRUNE="false"
+SAVE_LOGS="false"
+AUTO_YES=0
 
-# --- Helper Functions ---
-
-_usage() {
-    cat << EOF
-Usage: ./stop_cluster.sh [options]
-
-Gracefully stops the application cluster.
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [options]
 
 Options:
-  --with-volumes    WARNING: Deletes all named volumes associated with the
-                    cluster, resulting in permanent data loss.
-  -h, --help        Display this help message and exit.
+  --compose-file <path>   Compose file (default: ${COMPOSE_FILE})
+  --timeout <sec>         Graceful stop timeout (default: ${STOP_TIMEOUT})
+  --with-volumes          Also delete named volumes (DATA LOSS)
+  --remove-orphans        Remove orphan containers (default: enabled)
+  --no-remove-orphans     Do not remove orphan containers
+  --prune                 Prune dangling images/volumes/networks after stop
+  --save-logs             Save last 200 lines per service before shutdown
+  --yes, -y               Non-interactive (assume yes)
+  -h, --help              Show this help and exit
 EOF
 }
 
-# Prompts the user for confirmation before a destructive action.
-_confirm_or_exit() {
-    while true; do
-        read -r -p "$1 [y/N] " response
-        case "$response" in
-            [yY][eE][sS]|[yY]) return 0 ;;
-            [nN][oO]|[nN]|"") die 0 "Operation cancelled by user." ;;
-            *) log_warn "Invalid input. Please answer 'y' or 'n'." ;;
-        esac
-    done
+confirm_or_exit() {
+  local prompt="${1:-Proceed?}"
+  if (( AUTO_YES == 1 )); then return 0; fi
+  while true; do
+    read -r -p "${prompt} [y/N] " resp </dev/tty || resp=""
+    case "${resp}" in
+      [yY]|[yY][eE][sS]) return 0 ;;
+      [nN]|[nN][oO]|"")  die 0 "Operation cancelled by user." ;;
+      *) log_warn "Please answer 'y' or 'n'." ;;
+    esac
+  done
 }
 
-# --- Main Shutdown Function ---
+# Parse args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --compose-file) COMPOSE_FILE="${2:?}"; shift 2;;
+    --timeout) STOP_TIMEOUT="${2:?}"; shift 2;;
+    --with-volumes) CLEANUP_VOLUMES="true"; shift;;
+    --remove-orphans) REMOVE_ORPHANS="true"; shift;;
+    --no-remove-orphans) REMOVE_ORPHANS="false"; shift;;
+    --prune) DO_PRUNE="true"; shift;;
+    --save-logs) SAVE_LOGS="true"; shift;;
+    -y|--yes) AUTO_YES=1; shift;;
+    -h|--help) usage; exit 0;;
+    *) die "${E_INVALID_INPUT:-2}" "Unknown option: $1";;
+  esac
+done
+
+# --- Helpers ---
+_save_logs_if_requested() {
+  [[ "${SAVE_LOGS}" == "true" ]] || return 0
+  local ts outdir
+  ts="$(date +%Y%m%d-%H%M%S)"
+  outdir="./logs/stop-${ts}"
+  mkdir -p "${outdir}"
+  log_info "Saving recent logs to ${outdir}/ ..."
+  # Get service names known to compose; if none, bail quietly.
+  local services
+  services="$("${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" ps --services 2>/dev/null || true)"
+  [[ -z "${services}" ]] && { log_warn "No services found to log."; return 0; }
+  while IFS= read -r svc; do
+    [[ -z "${svc}" ]] && continue
+    "${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" logs --no-color --tail=200 "${svc}" \
+      > "${outdir}/${svc}.log" 2>&1 || true
+  done <<< "${services}"
+  log_success "Logs saved."
+}
+
+_prune_if_requested() {
+  [[ "${DO_PRUNE}" == "true" ]] || return 0
+  confirm_or_exit "Prune dangling images/volumes/networks now?"
+  log_info "Pruning unused data via ${CONTAINER_RUNTIME}..."
+  "${CONTAINER_RUNTIME}" system prune -f || log_warn "System prune failed or not supported."
+  # Attempt volume prune too (Docker supports; Podman might require different flags)
+  "${CONTAINER_RUNTIME}" volume prune -f >/dev/null 2>&1 || true
+  log_success "Prune completed."
+}
 
 main() {
-    # 1. Parse Arguments for optional flags
-    for arg in "$@"; do
-        case "$arg" in
-            --with-volumes)
-                CLEANUP_VOLUMES="true"
-                shift
-                ;;
-            -h|--help)
-                _usage
-                exit 0
-                ;;
-        esac
-    done
+  log_info "🛑 Stopping Application Cluster"
 
-    log_info "🚀 Stopping Application Cluster..."
+  # Pre-flight
+  if [[ ! -f "${COMPOSE_FILE}" ]]; then
+    log_warn "Compose file not found: ${COMPOSE_FILE}. Nothing to stop."
+    exit 0
+  fi
+  detect_container_runtime
+  read -r -a COMPOSE_COMMAND_ARRAY <<< "${COMPOSE_COMMAND}"
 
-    # 2. Pre-flight Checks
-    if [[ ! -f "$COMPOSE_FILE" ]]; then
-        log_warn "Compose file '${COMPOSE_FILE}' not found. Nothing to stop."
-        exit 0
-    fi
-    detect_container_runtime
-    read -r -a COMPOSE_COMMAND_ARRAY <<< "$COMPOSE_COMMAND"
+  # Warn about destructive actions
+  if [[ "${CLEANUP_VOLUMES}" == "true" ]]; then
+    log_error "DANGER: '--with-volumes' will PERMANENTLY DELETE named volumes (data loss)!"
+    confirm_or_exit "Are you absolutely sure you want to delete all data volumes?"
+  fi
 
-    # 3. Build and execute the shutdown command
-    local -a down_cmd=("${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" down)
+  # Optional: capture logs before shutting down
+  _save_logs_if_requested
 
-    if is_true "$CLEANUP_VOLUMES"; then
-        log_warn "The '--with-volumes' flag was specified."
-        log_error "This will PERMANENTLY DELETE ALL DATA stored in the application's volumes."
-        _confirm_or_exit "Are you absolutely sure you want to proceed?"
-        
-        down_cmd+=("--volumes")
-    else
-        log_info "Named volumes will be preserved to prevent data loss."
-        log_info "To remove all data, run again with the '--with-volumes' flag."
-    fi
-    
-    # 4. Execute the shutdown
-    log_info "Shutting down services..."
-    if ! "${down_cmd[@]}"; then
-        die "$E_GENERAL" "Failed to stop the cluster. Please check for errors above."
-    fi
+  # Show summary
+  log_info "Runtime:       ${CONTAINER_RUNTIME}"
+  log_info "Compose:       ${COMPOSE_COMMAND}"
+  log_info "Compose file:  ${COMPOSE_FILE}"
+  log_info "Timeout:       ${STOP_TIMEOUT}s"
+  log_info "Remove orphans:${REMOVE_ORPHANS}"
+  log_info "With volumes:  ${CLEANUP_VOLUMES}"
+  log_info "Prune:         ${DO_PRUNE}"
 
-    log_success "✅ Cluster has been stopped successfully."
+  # Graceful stop first (faster & cleaner health transition)
+  log_info "Stopping services gracefully (-t ${STOP_TIMEOUT})..."
+  retry_command 2 3 "${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" stop -t "${STOP_TIMEOUT}" || \
+    log_warn "Graceful stop reported errors; continuing to 'down'."
+
+  # Build 'down' command
+  local -a down_cmd=("${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" down "-t" "${STOP_TIMEOUT}")
+  if [[ "${REMOVE_ORPHANS}" == "true" ]]; then
+    down_cmd+=("--remove-orphans")
+  fi
+  if [[ "${CLEANUP_VOLUMES}" == "true" ]]; then
+    down_cmd+=("--volumes")
+  fi
+
+  log_info "Bringing stack down..."
+  if ! retry_command 2 3 "${down_cmd[@]}"; then
+    die "${E_GENERAL:-1}" "Failed to stop the cluster after multiple attempts."
+  fi
+
+  log_success "✅ Cluster stopped."
+  _prune_if_requested
 }
 
-# --- Script Execution ---
 main "$@"

@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# lib/versions.sh
+# Helpers for validating version strings and image digests, and building refs.
+#
+# Dependencies: lib/core.sh (log_* and die), optional: lib/error-handling.sh
+# ==============================================================================
+
+# Guard for core
+if ! command -v log_info >/dev/null 2>&1; then
+  echo "FATAL: lib/core.sh must be sourced before lib/versions.sh" >&2
+  exit 1
+fi
+
+# validate_version_format "1.2.3"
+validate_version_format() {
+  local v="${1-}"
+  [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+# is_valid_digest "sha256:...."
+is_valid_digest() {
+  local d="${1-}"
+  [[ "${d}" =~ ^sha256:[a-f0-9]{64}$ ]]
+}
+
+# image_ref <repo> <digest> [tag]
+# Returns repo@digest if digest valid, otherwise repo:tag (warns if tag used).
+image_ref() {
+  local repo="${1:?repo required}"
+  local digest="${2-}"
+  local tag="${3-}"
+
+  if [[ -n "${digest}" ]] && is_valid_digest "${digest}"; then
+    printf '%s@%s\n' "${repo}" "${digest}"
+    return 0
+  fi
+  if [[ -n "${tag}" ]]; then
+    log_warn "Using mutable tag for ${repo}: ${tag} (no valid digest provided)"
+    printf '%s:%s\n' "${repo}" "${tag}"
+    return 0
+  fi
+  die "${E_INVALID_INPUT}" "image_ref: need a valid digest or a tag for ${repo}"
+}
+
+# verify_versions_env — sanity-checks common *_VERSION and *_DIGEST vars.
+# Call after sourcing versions.env.
+verify_versions_env() {
+  local ok=0
+  local k
+
+  # Check all *_DIGEST variables
+  while IFS='=' read -r k _; do
+    if [[ "${k}" == *_DIGEST ]]; then
+      local v="${!k-}"
+      if [[ -z "${v}" ]] || ! is_valid_digest "${v}"; then
+        log_error "Bad digest in versions.env: ${k}='${v}'"
+        ok=1
+      fi
+    fi
+  done < <(env | LC_ALL=C sort)
+
+  # Spot-check *_VERSION format (only those that look like semver)
+  for k in $(env | awk -F= '/_VERSION=/{print $1}'); do
+    local v="${!k-}"
+    if [[ "${v}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      # Strip optional leading v
+      v="${v#v}"
+      validate_version_format "${v}" || { log_error "Invalid semver: ${k}='${v}'"; ok=1; }
+    fi
+  done
+
+  return "${ok}"
+}

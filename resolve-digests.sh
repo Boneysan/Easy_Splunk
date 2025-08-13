@@ -1,144 +1,152 @@
 #!/usr/bin/env bash
-#
-# ==============================================================================
-# resolve-digests.sh
-# ------------------------------------------------------------------------------
-# ⭐⭐
-#
-# A utility script to resolve image tags to their immutable SHA256 digests
-# and update the 'versions.env' file accordingly. This is a key step in
-# "version pinning" to ensure reproducible and secure builds.
-#
-# Features:
-#   - Reads image tags from versions.env.
-#   - Uses the container runtime to find the corresponding digest.
-#   - Updates versions.env in place with the resolved digests.
-#   - Creates a backup before modifying any files.
-#
-# Dependencies: core.sh, runtime-detection.sh
-# Required by:  Release process for air-gapped bundles.
-#
-# ==============================================================================
+# resolve-digests.sh — pin tags in versions.env to immutable digests
 
-# --- Strict Mode & Setup ---
 set -euo pipefail
+IFS=$'\n\t'
 
-# --- Source Dependencies ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 
-# --- Configuration ---
 readonly VERSIONS_FILE="versions.env"
 
-# --- Helper Functions ---
+usage() {
+  cat <<EOF
+Usage: $(basename "$0")
 
-_usage() {
-    cat << EOF
-Usage: ./resolve-digests.sh
-
-Resolves all image tags in '${VERSIONS_FILE}' to their immutable digests.
-This script modifies the file in place and creates a backup ('${VERSIONS_FILE}.bak').
+Resolves tags in ${VERSIONS_FILE} to SHA256 digests and updates:
+  • <PREFIX>_IMAGE_DIGEST
+  • <PREFIX>_IMAGE  (to "<REPO>@<DIGEST>")
+Creates backups: ${VERSIONS_FILE}.bak (full) and sed sidecars as needed.
 EOF
 }
 
-# Resolves a single image tag (e.g., "redis:latest") to its full digest.
-# @param1: The image tag.
-# @stdout: The resolved SHA256 digest.
-_get_digest_for_image() {
-    local image_tag="$1"
-    
-    log_info "  -> Pulling image to ensure we have the latest manifest: ${image_tag}"
-    if ! "${CONTAINER_RUNTIME}" pull "$image_tag" &>/dev/null; then
-        log_error "Failed to pull image: ${image_tag}"
-        return 1
-    fi
-    
-    # Use 'inspect' to get the RepoDigests and extract the sha256 value.
-    local digest
-    digest=$("${CONTAINER_RUNTIME}" image inspect "$image_tag" --format '{{index .RepoDigests 0}}' | cut -d'@' -f2)
-    
-    if is_empty "$digest"; then
-        log_error "Could not resolve digest for ${image_tag}. Is it a public image?"
-        return 1
-    fi
-    
-    echo "$digest"
+# Portable in-place sed
+_sed_inplace() {
+  # _sed_inplace <pattern> <replacement> <file>
+  # expects a full sed script in arg1; uses .sibak temp
+  local script="$1" file="$2"
+  if sed --version >/dev/null 2>&1; then
+    # GNU sed
+    sed -i.sibak -e "${script}" "${file}"
+  else
+    # BSD sed
+    sed -i .sibak -e "${script}" "${file}"
+  fi
 }
 
+# Resolve digest for a given <repo>:<tag> and ensure it matches that repo.
+_get_digest_for_image() {
+  local image_tag="$1" repo="${image_tag%%:*}"
 
-# --- Main Function ---
+  log_info "  -> Pulling ${image_tag} (to read manifest/digest)…"
+  if ! "${CONTAINER_RUNTIME}" pull "${image_tag}" &>/dev/null; then
+    log_error "     pull failed for ${image_tag}"
+    return 1
+  fi
+
+  # Collect all RepoDigests, pick the one whose repo matches (exactly or with default registry)
+  local digests match
+  if ! digests="$("${CONTAINER_RUNTIME}" image inspect "${image_tag}" \
+      --format '{{join .RepoDigests "\n"}}' 2>/dev/null)"; then
+    log_error "     inspect failed for ${image_tag}"
+    return 1
+  fi
+
+  # Try exact repo match first, then fallback to first digest.
+  match="$(printf '%s\n' "${digests}" | grep -E "^${repo}@" || true)"
+  if [[ -z "${match}" ]]; then
+    # Docker may normalize to docker.io/library/<name>
+    if [[ "${repo}" != */* ]]; then
+      match="$(printf '%s\n' "${digests}" | grep -E "^(docker\.io/)?library/${repo}@" || true)"
+    fi
+  fi
+  match="${match:-$(printf '%s\n' "${digests}" | head -n1)}"
+
+  local digest="${match##*@}"
+  if [[ -z "${digest}" ]]; then
+    log_error "     could not determine digest for ${image_tag}"
+    return 1
+  fi
+  printf '%s\n' "${digest}"
+}
 
 main() {
-    if [[ $# -gt 0 ]]; then
-        _usage
-        exit 0
+  if [[ $# -gt 0 ]]; then usage; exit 0; fi
+  [[ -f "${VERSIONS_FILE}" ]] || die "${E_MISSING_DEP:-3}" "File not found: ${VERSIONS_FILE}"
+  detect_container_runtime
+
+  cp -f "${VERSIONS_FILE}" "${VERSIONS_FILE}.bak"
+  log_info "Backup created: ${VERSIONS_FILE}.bak"
+
+  # Load once (we only read), before we start editing the file.
+  # shellcheck source=/dev/null
+  source "${VERSIONS_FILE}"
+
+  # Collect prefixes robustly (ignore comments/whitespace)
+  mapfile -t PREFIXES < <(awk '
+    /^[[:space:]]*readonly[[:space:]]+[A-Z_]+_IMAGE_REPO=/{ 
+      match($0,/readonly[[:space:]]+([A-Z_]+)_IMAGE_REPO=/,m); 
+      if(m[1]!="") print m[1];
+    }' "${VERSIONS_FILE}" | sort -u)
+
+  if ((${#PREFIXES[@]}==0)); then
+    die "${E_INVALID_INPUT:-2}" "No *_IMAGE_REPO entries found in ${VERSIONS_FILE}"
+  fi
+
+  for prefix in "${PREFIXES[@]}"; do
+    log_info "Processing: ${prefix}"
+
+    # Indirects from sourced env
+    local repo_var="${prefix}_IMAGE_REPO"
+    local ver_var="${prefix}_VERSION"
+    local dig_var="${prefix}_IMAGE_DIGEST"
+    local img_var="${prefix}_IMAGE"
+
+    local repo="${!repo_var-}"
+    local ver="${!ver_var-}"
+
+    if [[ -z "${repo:-}" || -z "${ver:-}" ]]; then
+      log_warn "  -> Skipping ${prefix}: missing ${repo_var} or ${ver_var}"
+      continue
     fi
 
-    log_info "🚀 Resolving Image Digests in ${VERSIONS_FILE}..."
-
-    # 1. Pre-flight Checks
-    if [[ ! -f "$VERSIONS_FILE" ]]; then
-        die "$E_MISSING_DEP" "File not found: '${VERSIONS_FILE}'."
+    local tag="${repo}:${ver}"
+    local digest
+    if ! digest="$(_get_digest_for_image "${tag}")"; then
+      log_warn "  -> Skipping ${prefix}: digest resolution failed for ${tag}"
+      continue
     fi
-    detect_container_runtime
+    log_success "  -> ${tag} -> ${digest}"
 
-    # 2. Create a backup before modifying the file
-    cp "$VERSIONS_FILE" "${VERSIONS_FILE}.bak"
-    log_info "Created backup: ${VERSIONS_FILE}.bak"
+    # 1) Update/insert DIGEST line
+    if grep -qE "^[[:space:]]*readonly[[:space:]]+${dig_var}=" "${VERSIONS_FILE}"; then
+      _sed_inplace "s|^[[:space:]]*readonly[[:space:]]\\+${dig_var}=.*|readonly ${dig_var}=\"${digest}\"|" "${VERSIONS_FILE}"
+    else
+      # append after VERSION line
+      _sed_inplace "/^[[:space:]]*readonly[[:space:]]\\+${ver_var}=.*/a\\
+readonly ${dig_var}=\"${digest}\"
+" "${VERSIONS_FILE}"
+    fi
 
-    # 3. Process the versions file
-    # Grep for all service prefixes (e.g., APP, REDIS) that have an IMAGE_REPO.
-    local prefixes
-    prefixes=$(grep "IMAGE_REPO" "$VERSIONS_FILE" | sed 's/readonly \([A-Z_]*\)_IMAGE_REPO.*/\1/')
+    # 2) Refresh the combined IMAGE line to repo@digest
+    local new_image="${repo}@${digest}"
+    if grep -qE "^[[:space:]]*readonly[[:space:]]+${img_var}=" "${VERSIONS_FILE}"; then
+      _sed_inplace "s|^[[:space:]]*readonly[[:space:]]\\+${img_var}=.*|readonly ${img_var}=\"${new_image}\"|" "${VERSIONS_FILE}"
+    else
+      # If not present, add it right after DIGEST (or after VERSION if DIGEST also newly added)
+      _sed_inplace "/^[[:space:]]*readonly[[:space:]]\\+${dig_var}=.*/a\\
+readonly ${img_var}=\"${new_image}\"
+" "${VERSIONS_FILE}"
+    fi
+  done
 
-    for prefix in $prefixes; do
-        log_info "Processing service prefix: ${prefix}"
-        
-        # Source the file to get the variables into the environment
-        # shellcheck source=/dev/null
-        source "$VERSIONS_FILE"
-        
-        # Dynamically construct variable names
-        local repo_var="${prefix}_IMAGE_REPO"
-        local version_var="${prefix}_VERSION"
-        local digest_var="${prefix}_IMAGE_DIGEST"
+  # Clean sidecar backups from sed
+  rm -f "${VERSIONS_FILE}.sibak" 2>/dev/null || true
 
-        # Use indirect expansion to get the values of the variables
-        local repo=${!repo_var}
-        local version=${!version_var}
-
-        if is_empty "$repo" || is_empty "$version"; then
-            log_warn "  -> Skipping ${prefix}: Missing REPO or VERSION variable."
-            continue
-        fi
-
-        local full_image_tag="${repo}:${version}"
-        local new_digest
-        new_digest=$(_get_digest_for_image "$full_image_tag")
-
-        if [[ -n "$new_digest" ]]; then
-            log_success "  -> Resolved ${full_image_tag} to ${new_digest}"
-            
-            # Use sed to update the file in-place.
-            # First, check if the DIGEST line exists.
-            if grep -q "readonly ${digest_var}=" "$VERSIONS_FILE"; then
-                # It exists, so replace it.
-                sed -i.bak "s|^readonly ${digest_var}=.*|readonly ${digest_var}=\"${new_digest}\"|" "$VERSIONS_FILE"
-            else
-                # It doesn't exist, so append it after the VERSION line.
-                sed -i.bak "/^readonly ${version_var}=.*/a readonly ${digest_var}=\"${new_digest}\"" "$VERSIONS_FILE"
-            fi
-        fi
-    done
-
-    # Clean up the extra sed backup file
-    rm -f "${VERSIONS_FILE}.bak.bak"
-
-    log_success "✅ ${VERSIONS_FILE} has been updated with the latest resolved digests."
-    log_info "Please review the changes and commit the updated file."
+  log_success "✅ ${VERSIONS_FILE} updated with resolved digests and IMAGE pins."
+  log_info "Review and commit changes."
 }
 
-# --- Script Execution ---
 main "$@"

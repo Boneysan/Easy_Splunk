@@ -1,149 +1,271 @@
 #!/usr/bin/env bash
-#
 # ==============================================================================
 # lib/universal-forwarder.sh
-# ------------------------------------------------------------------------------
-# ⭐⭐⭐
+# Download & configure Splunk Universal Forwarder (UF).
 #
-# Provides core functions to download and configure the Splunk Universal
-# Forwarder (UF). This library supports multiple platforms by determining the
-# correct download package automatically.
+# Features
+#   - Robust platform detection (Linux x86_64/arm64, macOS universal2)
+#   - Resilient downloads with resume + retries
+#   - Optional SHA256 verification via env
+#   - Flexible outputs.conf generator (multi-indexer, TLS options)
 #
-# Features:
-#   - UF Download Management: Selects the correct UF package based on OS and
-#     architecture and downloads it.
-#   - Configuration Generation: Creates a basic 'outputs.conf' to point the
-#     UF to a Splunk indexer.
-#   - Multi-platform Support: Handles Linux (x86_64, arm64) and macOS.
-#
-# Dependencies: core.sh, error-handling.sh
-# Required by:  download-uf.sh
-#
+# Dependencies: lib/core.sh (log_*, die, is_empty, get_os), lib/error-handling.sh (retry_command)
+# Required by:  download-uf.sh (and others)
 # ==============================================================================
 
-# --- Source Dependencies ---
-# Assumes core libraries have been sourced by the calling script.
-if [[ -z "$(type -t log_info)" || -z "$(type -t retry_command)" ]]; then
-    echo "FATAL: lib/core.sh and lib/error-handling.sh must be sourced first." >&2
-    exit 1
+# ---- Dependency guard ----------------------------------------------------------
+if ! command -v log_info >/dev/null 2>&1 || ! command -v retry_command >/dev/null 2>&1; then
+  echo "FATAL: lib/core.sh and lib/error-handling.sh must be sourced before lib/universal-forwarder.sh" >&2
+  exit 1
 fi
 
-# --- Configuration ---
-readonly UF_VERSION="9.2.1" # The version of the Universal Forwarder to download
-readonly UF_BUILD="de650d36ad46" # The build number associated with the version
+# ---- Defaults / tunables -------------------------------------------------------
+: "${UF_VERSION:=9.2.1}"
+: "${UF_BUILD:=de650d36ad46}"
 
-# --- Private Helper Functions ---
+# Optional checksums (set these in your environment or versions.env if desired)
+# Example:
+#   export UF_SHA256_LINUX_X86_64=abcd1234...
+#   export UF_SHA256_LINUX_ARM64=efgh5678...
+#   export UF_SHA256_DARWIN_UNIVERSAL2=....
+: "${UF_SHA256_LINUX_X86_64:=}"
+: "${UF_SHA256_LINUX_ARM64:=}"
+: "${UF_SHA256_DARWIN_UNIVERSAL2:=}"
 
-# Determines the correct download URL for the UF based on OS and architecture.
-# @stdout: The full URL for the UF package.
+# Curl flags (honors http_proxy/https_proxy env automatically)
+UF_CURL_OPTS=( -fL --retry 0 --connect-timeout 15 --max-time 0 )
+
+# ==============================================================================
+# Platform detection
+# ==============================================================================
+
+_uf_norm_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo "x86_64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    *) echo "unsupported" ;;
+  esac
+}
+
+# Returns: echo "<os> <arch> <pkgtype>"
+#   os: linux|darwin|unsupported
+#   arch: x86_64|arm64|unsupported
+#   pkgtype: tgz|dmg
+_uf_platform() {
+  local os arch
+  os="$(get_os)"    # from core.sh -> linux|darwin|unsupported
+  arch="$(_uf_norm_arch)"
+
+  case "${os}:${arch}" in
+    linux:x86_64) echo "linux x86_64 tgz" ;;
+    linux:arm64)  echo "linux arm64 tgz" ;;
+    darwin:x86_64|darwin:arm64) echo "darwin universal2 dmg" ;;  # UF ships universal2 dmg
+    *) echo "unsupported unsupported unsupported" ;;
+  esac
+}
+
+# ==============================================================================
+# URL / filename / checksum resolution
+# ==============================================================================
+
+# _get_uf_download_url -> echoes "URL FILENAME CHECKSUM"
 _get_uf_download_url() {
-    local os
-    local arch
-    os=$(get_os)
-    arch=$(uname -m)
+  local os arch pkg; read -r os arch pkg < <(_uf_platform)
 
-    log_debug "Detecting UF package for OS='${os}' and Arch='${arch}'"
+  if [[ "${os}" == "unsupported" ]]; then
+    die "${E_GENERAL}" "Unsupported platform for UF (OS=$(get_os), ARCH=$(uname -m))."
+  fi
 
-    case "$os" in
-        "linux")
-            case "$arch" in
-                "x86_64")
-                    echo "https://download.splunk.com/products/universalforwarder/releases/${UF_VERSION}/linux/splunkforwarder-${UF_VERSION}-${UF_BUILD}-Linux-x86_64.tgz"
-                    ;;
-                "aarch64"|"arm64")
-                    echo "https://download.splunk.com/products/universalforwarder/releases/${UF_VERSION}/linux/splunkforwarder-${UF_VERSION}-${UF_BUILD}-Linux-arm64.tgz"
-                    ;;
-                *)
-                    echo "" # Return empty for unsupported arch
-                    ;;
-            esac
-            ;;
-        "darwin")
-             # For macOS, architecture is often handled by a universal .dmg
-            echo "https://download.splunk.com/products/universalforwarder/releases/${UF_VERSION}/macos/splunkforwarder-${UF_VERSION}-${UF_BUILD}-darwin-universal2.dmg"
-            ;;
-        *)
-            echo "" # Return empty for unsupported OS
-            ;;
-    esac
+  local url fname sha=""
+  if [[ "${os}" == "linux" && "${arch}" == "x86_64" ]]; then
+    fname="splunkforwarder-${UF_VERSION}-${UF_BUILD}-Linux-x86_64.tgz"
+    url="https://download.splunk.com/products/universalforwarder/releases/${UF_VERSION}/linux/${fname}"
+    sha="${UF_SHA256_LINUX_X86_64}"
+  elif [[ "${os}" == "linux" && "${arch}" == "arm64" ]]; then
+    fname="splunkforwarder-${UF_VERSION}-${UF_BUILD}-Linux-arm64.tgz"
+    url="https://download.splunk.com/products/universalforwarder/releases/${UF_VERSION}/linux/${fname}"
+    sha="${UF_SHA256_LINUX_ARM64}"
+  else # darwin universal2 dmg
+    fname="splunkforwarder-${UF_VERSION}-${UF_BUILD}-darwin-universal2.dmg"
+    url="https://download.splunk.com/products/universalforwarder/releases/${UF_VERSION}/macos/${fname}"
+    sha="${UF_SHA256_DARWIN_UNIVERSAL2}"
+  fi
+
+  echo "${url} ${fname} ${sha}"
 }
 
+# ==============================================================================
+# Download with resume + optional checksum
+# ==============================================================================
 
-# --- Public Functions ---
+# _sha256_file <path> -> prints hex digest; returns non-zero if tools missing
+_sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 2
+  fi
+}
 
-# Downloads the appropriate Universal Forwarder package for the current system.
-#
-# Usage: download_uf_package "/path/to/destination/dir"
-#
-# @param1: The directory where the package will be saved.
-# @stdout: The full path to the downloaded file.
+# download_uf_package <dest_dir>
+# stdout: absolute path to downloaded file
 download_uf_package() {
-    local dest_dir="$1"
-    mkdir -p "$dest_dir"
+  local dest_dir="${1:?destination directory required}"
+  mkdir -p "${dest_dir}"
 
-    log_info "Determining correct Universal Forwarder package to download..."
-    local url
-    url=$(_get_uf_download_url)
+  local url fname sha
+  read -r url fname sha < <(_get_uf_download_url)
+  local out="${dest_dir%/}/${fname}"
 
-    if is_empty "$url"; then
-        die "$E_GENERAL" "This platform (OS: $(get_os), Arch: $(uname -m)) is not supported for UF download."
+  if [[ -f "${out}" ]]; then
+    log_success "UF package already exists: ${out}"
+    echo "${out}"
+    return 0
+  fi
+
+  log_info "Downloading Splunk UF ${UF_VERSION} (${fname})"
+  log_info "Source: ${url}"
+  local tmp="${out}.part"
+
+  # Use retry_command wrapper to handle transient failures; resume (-C -)
+  if ! retry_command 3 5 curl "${UF_CURL_OPTS[@]}" -C - -o "${tmp}" "${url}"; then
+    rm -f "${tmp}"
+    die "${E_GENERAL}" "Failed to download UF package."
+  fi
+
+  # Basic non-zero size check
+  if [[ ! -s "${tmp}" ]]; then
+    rm -f "${tmp}"
+    die "${E_GENERAL}" "Downloaded file is empty: ${fname}"
+  fi
+
+  # Optional SHA check if env is provided
+  if [[ -n "${sha}" ]]; then
+    local have tool_sum
+    tool_sum="$(_sha256_file "${tmp}")" || have=$?
+    if [[ "${have:-0}" -ne 0 ]]; then
+      log_warn "No sha256 tool available; skipping checksum verification."
+    else
+      if [[ "${tool_sum}" != "${sha}" ]]; then
+        rm -f "${tmp}"
+        die "${E_GENERAL}" "Checksum mismatch for ${fname}. Expected ${sha}, got ${tool_sum}."
+      fi
+      log_success "Checksum verified for ${fname}."
     fi
-    
-    local filename
-    filename=$(basename "$url")
-    local dest_file="${dest_dir}/${filename}"
+  else
+    log_warn "No checksum provided for ${fname}; skipping verification."
+  fi
 
-    if [[ -f "$dest_file" ]]; then
-        log_success "Universal Forwarder package already exists: ${dest_file}"
-        echo "$dest_file"
-        return 0
-    fi
-
-    log_info "Downloading UF package from: ${url}"
-    log_info "Destination: ${dest_file}"
-    
-    # Use retry_command for a more resilient download
-    if ! retry_command 3 5 "curl" "-#L" "-o" "$dest_file" "$url"; then
-        # Cleanup partial download on failure
-        rm -f "$dest_file"
-        die "$E_GENERAL" "Failed to download Universal Forwarder package."
-    fi
-
-    log_success "Download complete."
-    echo "$dest_file"
+  mv -f "${tmp}" "${out}"
+  log_success "Download complete: ${out}"
+  echo "${out}"
 }
 
-# Generates a basic outputs.conf file to configure the UF's forwarding destination.
+# ==============================================================================
+# outputs.conf generator
+# ==============================================================================
+
+# generate_uf_outputs_config <path> <indexers> [port] [tls_enabled] [tls_ca] [tls_client_cert] [tls_client_key] [verify_server=true|false] [use_ack=true|false]
 #
-# Usage: generate_uf_outputs_config "/path/to/outputs.conf" "splunk.example.com" "9997"
+# Examples:
+#   generate_uf_outputs_config "./outputs.conf" "idx1.example.com,idx2.example.com" 9997 true "/path/ca.pem"
+#   generate_uf_outputs_config "./outputs.conf" "10.0.0.10" 9997 false "" "" "" false true
 #
-# @param1: The full path for the output 'outputs.conf' file.
-# @param2: The hostname or IP of the Splunk indexer.
-# @param3: The receiving port on the Splunk indexer (e.g., 9997).
+# Notes:
+#  - <indexers> can be "host:port" entries, or hosts only (then [port] is used)
+#  - If tls_enabled=true, we'll set 'sslCertPath' if provided and 'sslVerifyServerCert'
+#  - If verify_server=false, we set sslVerifyServerCert = false (not recommended)
+#  - If use_ack=true, we set useACK = true
 generate_uf_outputs_config() {
-    local output_file="$1"
-    local target_host="$2"
-    local target_port="$3"
+  local output_file="${1:?outputs.conf path required}"
+  local idx_list="${2:?comma-separated indexers required}"
+  local default_port="${3:-9997}"
+  local tls_enabled="${4:-false}"
+  local tls_ca="${5:-}"
+  local tls_client_cert="${6:-}"
+  local tls_client_key="${7:-}"
+  local verify_server="${8:-true}"
+  local use_ack="${9:-false}"
 
-    local output_dir
-    output_dir=$(dirname "$output_file")
-    mkdir -p "$output_dir"
+  # Validate port if provided as default
+  if ! is_number "${default_port}" || (( default_port < 1 || default_port > 65535 )); then
+    die "${E_INVALID_INPUT}" "Invalid port '${default_port}'. Must be 1..65535."
+  fi
 
-    log_info "Generating UF outputs.conf at: ${output_file}"
+  local dir; dir="$(dirname -- "${output_file}")"
+  mkdir -p "${dir}"
 
-    cat > "$output_file" << EOF
-# Auto-generated by universal-forwarder.sh on $(date)
-#
-# This file configures the Universal Forwarder to send data to a Splunk indexer.
+  # Normalize servers into "host:port" list
+  IFS=',' read -r -a raw_idx <<< "${idx_list}"
+  local servers=()
+  for entry in "${raw_idx[@]}"; do
+    entry="${entry//[[:space:]]/}"
+    [[ -z "${entry}" ]] && continue
+    if [[ "${entry}" == *:* ]]; then
+      # already host:port; do a quick port sanity if possible
+      local host="${entry%%:*}" port="${entry##*:}"
+      if ! is_number "${port}" || (( port < 1 || port > 65535 )); then
+        die "${E_INVALID_INPUT}" "Invalid indexer port in '${entry}'."
+      fi
+      servers+=("${host}:${port}")
+    else
+      servers+=("${entry}:${default_port}")
+    fi
+  done
 
-[tcpout]
-defaultGroup = default-autolb-group
+  if (( ${#servers[@]} == 0 )); then
+    die "${E_INVALID_INPUT}" "No valid indexers parsed from '${idx_list}'."
+  fi
 
-[tcpout:default-autolb-group]
-server = ${target_host}:${target_port}
+  # Build tcpout-server stanzas and main server list
+  local server_list; server_list="$(IFS=','; echo "${servers[*]}")"
 
-[tcpout-server://${target_host}:${target_port}]
-EOF
+  # Write atomically: temp then move
+  local tmp; tmp="$(mktemp "${output_file}.tmp.XXXXXX")" || die "${E_GENERAL}" "mktemp failed"
+  {
+    echo "# Auto-generated by universal-forwarder.sh on $(date)"
+    echo "# Splunk Universal Forwarder outputs.conf"
+    echo
+    echo "[tcpout]"
+    echo "defaultGroup = default-autolb-group"
+    if is_true "${use_ack}"; then
+      echo "useACK = true"
+    fi
+    echo
+    echo "[tcpout:default-autolb-group]"
+    echo "server = ${server_list}"
+    if is_true "${tls_enabled}"; then
+      echo "sslCertPath = ${tls_ca:-}"
+      echo "sslPassword = "       # placeholder (not recommended to set here)
+      echo "sslRootCAPath = ${tls_ca:-}"
+      if is_true "${verify_server}"; then
+        echo "sslVerifyServerCert = true"
+      else
+        echo "sslVerifyServerCert = false"
+      fi
+    fi
+    echo
 
-    log_success "Successfully generated ${output_file}."
+    # Individual server stanzas
+    for s in "${servers[@]}"; do
+      echo "[tcpout-server://${s}]"
+      if is_true "${tls_enabled}"; then
+        [[ -n "${tls_client_cert}" ]] && echo "clientCert = ${tls_client_cert}"
+        [[ -n "${tls_client_key}"  ]] && echo "sslKeysfile = ${tls_client_key}"
+      fi
+      echo
+    done
+  } > "${tmp}"
+
+  mv -f "${tmp}" "${output_file}"
+  log_success "Generated outputs.conf at: ${output_file}"
 }
+
+# ==============================================================================
+# End of lib/universal-forwarder.sh
+# ==============================================================================
+
+# Export functions for subshell usage if needed
+export -f download_uf_package generate_uf_outputs_config

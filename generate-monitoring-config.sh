@@ -1,65 +1,77 @@
 #!/usr/bin/env bash
-#
 # ==============================================================================
 # generate-monitoring-config.sh
-# ------------------------------------------------------------------------------
-# ⭐⭐⭐
+# Generate Prometheus & Grafana default configs (safe overwrite, atomic writes).
 #
-# A convenience script to generate all default configuration files for the
-# monitoring stack (Prometheus and Grafana). It serves as a simple, high-level
-# entry point to the functions within the monitoring library.
+# Flags:
+#   --yes, -y    Run non-interactively (no confirmation prompt)
+#   -h, --help   Show usage
 #
-# Features:
-#   - Orchestrates the creation of prometheus.yml, alert rules, and Grafana
-#     provisioning files by calling the underlying library.
-#
-# Dependencies: lib/monitoring.sh (and its core dependencies)
-# Required by:  orchestrator.sh (or run manually by an administrator)
-#
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/monitoring.sh
 # ==============================================================================
 
-# --- Strict Mode & Setup ---
 set -euo pipefail
-
-# --- Source Dependencies ---
-# Make the script runnable from any location by resolving its directory.
+IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# --- Source dependencies (order matters) ---------------------------------------
+# shellcheck source=lib/core.sh
 source "${SCRIPT_DIR}/lib/core.sh"
-source "${SCRIPT_DIR}/lib/monitoring.sh" # This contains the core generation logic
+# shellcheck source=lib/error-handling.sh
+source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/monitoring.sh
+source "${SCRIPT_DIR}/lib/monitoring.sh"
 
-# --- Helper Functions ---
+AUTO_YES=0
 
-# Prompts the user for confirmation before proceeding.
-confirm_or_exit() {
-    while true; do
-        read -r -p "$1 [y/N] " response
-        case "$response" in
-            [yY][eE][sS]|[yY]) return 0 ;;
-            [nN][oO]|[nN]|"") 
-                log_info "Operation cancelled by user."
-                exit 0 
-                ;;
-            *) log_warn "Invalid input. Please answer 'y' or 'n'." ;;
-        esac
-    done
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--yes]
+
+Generates default monitoring configs:
+  - ./config/prometheus.yml
+  - ./config/alert.rules.yml
+  - ./config/grafana-provisioning/datasources/datasource.yml
+  - ./config/grafana-provisioning/dashboards/provider.yml
+  - ./config/grafana-provisioning/dashboards/app-overview.json
+
+Options:
+  --yes, -y     Run non-interactively (skip confirmation)
+  -h, --help    Show this help and exit
+EOF
 }
 
-# --- Main Generation Function ---
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y|--yes) AUTO_YES=1; shift;;
+    -h|--help) usage; exit 0;;
+    *) die "${E_INVALID_INPUT}" "Unknown option: $1";;
+  esac
+done
+
+confirm_or_exit() {
+  local prompt="${1:-Proceed?}"
+  if (( AUTO_YES == 1 )); then return 0; fi
+  while true; do
+    read -r -p "${prompt} [y/N] " resp </dev/tty || resp=""
+    case "${resp}" in
+      [yY]|[yY][eE][sS]) return 0;;
+      [nN]|[nN][oO]|"")  log_info "Operation cancelled by user."; exit 0;;
+      *) log_warn "Please answer 'y' or 'n'.";;
+    esac
+  done
+}
 
 main() {
-    log_info "🚀 This script will generate default monitoring configurations."
-    log_warn "Existing configuration files in './config/prometheus' and './config/grafana' will be overwritten."
-    confirm_or_exit "Do you want to proceed?"
+  log_info "📊 This will (re)generate default Prometheus & Grafana configs."
+  log_warn "Existing files under ./config may be overwritten."
+  confirm_or_exit "Continue?"
 
-    # --- Execute Core Logic ---
-    # This single function call, defined in lib/monitoring.sh, handles all
-    # the complex file generation logic for Prometheus and Grafana.
-    generate_monitoring_config
+  generate_monitoring_config
 
-    log_success "✅ Monitoring configuration generation complete!"
-    log_info "Files have been created in the './config' directory."
-    log_info "To use them, enable monitoring when running the main orchestrator script."
+  log_success "✅ Monitoring configuration generation complete!"
+  log_info "Prometheus: ./config/prometheus.yml, ./config/alert.rules.yml"
+  log_info "Grafana:    ./config/grafana-provisioning/{datasources,dashboards}/"
 }
 
-# --- Script Execution ---
 main "$@"
