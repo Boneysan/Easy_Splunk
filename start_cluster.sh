@@ -1,11 +1,8 @@
+```bash
 #!/usr/bin/env bash
-#
 # ==============================================================================
 # start_cluster.sh
-# ------------------------------------------------------------------------------
 # Starts the application cluster and verifies that all services are healthy.
-# Adds CLI flags, resilient startup, health/port checks, and better failure
-# diagnostics.
 #
 # Flags:
 #   --compose-file <path>     Compose file (default: ./docker-compose.yml)
@@ -14,10 +11,12 @@
 #   --poll <sec>              Poll interval (default: 10)
 #   --no-pull                 Skip 'compose pull'
 #   --wait-ports <csv>        Comma-separated ports to wait for (e.g., 8080,3000)
+#   --with-tls                Use TLS for endpoint checks
 #   --yes, -y                 Non-interactive (assume yes on prompts)
 #   -h, --help                Show usage
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh
+# Version: 1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -28,6 +27,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+source "${SCRIPT_DIR}/lib/security.sh"
+
+# --- Version Checks ------------------------------------------------------------
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "start_cluster.sh requires security.sh version >= 1.0.0"
+fi
 
 # --- Defaults ---
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
@@ -36,8 +41,10 @@ declare -a HEALTH_CHECK_SERVICES=("${SERVICES_DEFAULT[@]}")
 STARTUP_TIMEOUT=${STARTUP_TIMEOUT:-180}
 POLL_INTERVAL=${POLL_INTERVAL:-10}
 DO_PULL=1
+WITH_TLS=0
 WAIT_PORTS=""
 AUTO_YES=0
+: "${SECRETS_DIR:=./secrets}"
 
 usage() {
   cat <<EOF
@@ -50,6 +57,7 @@ Options:
   --poll <sec>              Poll interval seconds (default: ${POLL_INTERVAL})
   --no-pull                 Skip 'compose pull'
   --wait-ports <csv>        Ports to wait for (e.g., 8080,3000)
+  --with-tls                Use TLS for endpoint checks
   --yes, -y                 Non-interactive; skip prompts
   -h, --help                Show this help and exit
 EOF
@@ -77,6 +85,7 @@ while [[ $# -gt 0 ]]; do
     --poll) POLL_INTERVAL="${2:?}"; shift 2;;
     --no-pull) DO_PULL=0; shift;;
     --wait-ports) WAIT_PORTS="${2:?}"; shift 2;;
+    --with-tls) WITH_TLS=1; shift;;
     -y|--yes) AUTO_YES=1; shift;;
     -h|--help) usage; exit 0;;
     *) die "${E_INVALID_INPUT:-2}" "Unknown option: $1";;
@@ -87,8 +96,14 @@ done
 _wait_for_tcp_port() {
   local port="${1:?}"
   local deadline=$((SECONDS + STARTUP_TIMEOUT))
+  local scheme="http"
+  if (( WITH_TLS == 1 )); then
+    scheme="https"
+  fi
   while (( SECONDS < deadline )); do
-    if (echo >"/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1; then
+    if (( WITH_TLS == 1 )); then
+      curl_auth "${scheme}://127.0.0.1:${port}" "${SECRETS_DIR}/curl_auth" && return 0
+    elif (echo >"/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1; then
       return 0
     fi
     sleep "${POLL_INTERVAL}"
@@ -124,6 +139,13 @@ _all_services_healthy() {
       log_debug "Service '${svc}': not ready (state=${st:-n/a}, health=${he:-n/a})."
       not_ok=1
     fi
+    # Additional endpoint check for specific services
+    if [[ "${svc}" == "grafana" && -f "${SECRETS_DIR}/grafana_admin_password.txt" ]]; then
+      if ! curl_auth "http://localhost:3000/api/health" "${SECRETS_DIR}/curl_auth"; then
+        log_debug "Service '${svc}': endpoint check failed."
+        not_ok=1
+      fi
+    fi
   done
   (( not_ok == 0 ))
 }
@@ -135,7 +157,6 @@ _show_recent_logs_for_unhealthy() {
     [[ -z "${cid}" ]] && continue
     local st; st="$(_container_state "${cid}")"
     local he; he="$(_container_health "${cid}")"
-    # Show logs if unhealthy OR not running
     if [[ "${he}" != "healthy" || "${st}" != "running" ]]; then
       echo
       log_error "---- ${svc} (state=${st:-n/a}, health=${he:-n/a}) ----"
@@ -145,14 +166,12 @@ _show_recent_logs_for_unhealthy() {
 }
 
 _discover_present_services() {
-  # Populate PRESENT_SERVICES with the services defined in compose
   local out
   out="$("${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" config --services 2>/dev/null || true)"
   mapfile -t PRESENT_SERVICES <<< "${out:-}"
 }
 
 _filter_services_to_present() {
-  # Filter HEALTH_CHECK_SERVICES to those that actually exist in the compose file
   [[ ${#PRESENT_SERVICES[@]:-0} -eq 0 ]] && return 0
   local filtered=() wanted_missing=()
   local want
@@ -163,14 +182,12 @@ _filter_services_to_present() {
     done
     (( found == 0 )) && wanted_missing+=("$want")
   done
-
   if (( ${#filtered[@]} > 0 )); then
     HEALTH_CHECK_SERVICES=("${filtered[@]}")
     if (( ${#wanted_missing[@]} > 0 )); then
       log_warn "Ignoring non-existent service(s): ${wanted_missing[*]}"
     fi
   else
-    # If user requested only services that don't exist, just wait on all present
     if (( ${#wanted_missing[@]} > 0 )); then
       log_warn "Requested service list not found in compose; waiting on all services instead."
     fi
@@ -181,15 +198,11 @@ _filter_services_to_present() {
 main() {
   log_info "🚀 Starting Application Cluster"
   [[ -f "${COMPOSE_FILE}" ]] || die "${E_MISSING_DEP:-3}" "Compose file not found: ${COMPOSE_FILE}"
-
   detect_container_runtime
   read -r -a COMPOSE_COMMAND_ARRAY <<< "${COMPOSE_COMMAND}"
-
   log_info "Using runtime: ${CONTAINER_RUNTIME}"
   log_info "Compose cmd:   ${COMPOSE_COMMAND}"
   log_info "Compose file:  ${COMPOSE_FILE}"
-
-  # Only wait for services that actually exist in this compose
   _discover_present_services
   _filter_services_to_present
   if (( ${#HEALTH_CHECK_SERVICES[@]} == 0 )); then
@@ -197,32 +210,31 @@ main() {
   fi
   log_info "Services:      ${HEALTH_CHECK_SERVICES[*]}"
   log_info "Timeout/poll:  ${STARTUP_TIMEOUT}s / ${POLL_INTERVAL}s"
-
+  if (( WITH_TLS == 1 )); then
+    log_info "TLS:           Enabled for endpoint checks"
+  fi
+  confirm_or_exit "Continue?"
   if (( DO_PULL == 1 )); then
     log_info "Pulling images as defined by compose..."
     if ! retry_command 2 3 "${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" pull; then
       log_warn "Image pull failed or unavailable (possibly air-gapped). Continuing..."
     fi
   fi
-
   log_info "Bringing services up (detached)..."
   if ! retry_command 3 5 "${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" up -d --remove-orphans; then
     die "${E_GENERAL:-1}" "Failed to start services after multiple attempts."
   fi
-
-  # Optional: wait for TCP ports
   if [[ -n "${WAIT_PORTS}" ]]; then
     IFS=',' read -r -a _ports <<< "${WAIT_PORTS}"
     for p in "${_ports[@]}"; do
       log_info "Waiting for TCP port ${p}..."
-      if !_wait_for_tcp_port "${p}"; then
+      if ! _wait_for_tcp_port "${p}"; then
         log_warn "Port ${p} not reachable within timeout; continuing to health checks."
       else
         log_info "Port ${p} is reachable."
       fi
     done
   fi
-
   log_info "Waiting for services to become healthy (timeout: ${STARTUP_TIMEOUT}s)..."
   local deadline=$((SECONDS + STARTUP_TIMEOUT))
   while (( SECONDS < deadline )); do
@@ -232,16 +244,18 @@ main() {
       log_info "Access hints (examples):"
       log_info "  • App     : http://localhost:8080"
       log_info "  • Grafana : http://localhost:3000"
+      audit_security_configuration "${SCRIPT_DIR}/security-audit.txt"
       return 0
     fi
     printf "."; sleep "${POLL_INTERVAL}"
   done
   printf "\n"
-
   log_error "❌ Timeout: Some services did not become healthy."
   "${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" ps || true
   _show_recent_logs_for_unhealthy
   die "${E_GENERAL:-1}" "Cluster startup failed. Inspect logs above or run: ${COMPOSE_COMMAND} -f ${COMPOSE_FILE} logs -f"
 }
 
+START_CLUSTER_VERSION="1.0.0"
 main "$@"
+```
