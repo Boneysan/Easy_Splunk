@@ -5,7 +5,7 @@
 # atomic file operations, and resumable progress tracking.
 #
 # Dependencies: lib/core.sh (expects: log_*, die, E_*, register_cleanup, have_cmd)
-# Version: 1.0.3
+# Version: 1.0.4
 #
 # Usage Examples:
 #   with_retry --retries 3 --base-delay 2 -- curl -f https://example.com
@@ -13,6 +13,7 @@
 #   echo "content" | atomic_write /path/to/file 644
 #   begin_step "install"; ...; complete_step "install"
 #   pkg_install_retry apt-get podman
+#   secure_store_password "splunk_password" "secret"
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
@@ -33,7 +34,7 @@ fi
 : "${RETRY_STRATEGY:=exp}"      # exp | full_jitter
 : "${PKG_INSTALL_RETRIES:=5}"   # retries for package installations
 
-# State directory for step tracking (overrideable)
+# State directory for step tracking and secure storage (overrideable)
 STATE_DIR_DEFAULT="${XDG_RUNTIME_DIR:-/tmp}/splunk-pkg-state"
 : "${STATE_DIR:=${STATE_DIR_DEFAULT}}"
 
@@ -216,6 +217,17 @@ pkg_install_retry() {
     with_retry --retries "${PKG_INSTALL_RETRIES}" -- sudo apt-get update -y
   fi
   with_retry --retries "${PKG_INSTALL_RETRIES}" -- sudo "${mgr}" install -y "$@"
+}
+
+# secure_store_password <name> <password>
+# Stores a password securely in a temporary file
+secure_store_password() {
+  local name="${1:?name required}"
+  local password="${2:?password required}"
+  local file="${STATE_DIR}/${name}.secret"
+  echo "${password}" | atomic_write "${file}" 600
+  log_debug "Stored password securely: ${file}"
+  echo "${file}"
 }
 
 # ==============================================================================
