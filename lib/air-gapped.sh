@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/air-gapped.sh
@@ -6,6 +7,7 @@
 # Dependencies (required):
 #   - lib/core.sh              (log_*, die, have_cmd, register_cleanup)
 #   - lib/error-handling.sh    (atomic_write, atomic_write_file, with_retry)
+#   - lib/security.sh          (write_secret_file, audit_security_configuration)
 #
 # Dependencies (detected/optional at runtime):
 #   - lib/runtime-detection.sh (detect_container_runtime, compose, capability vars)
@@ -32,11 +34,12 @@
 #   * Archive compression via TARBALL_COMPRESSION = gzip|zstd|none
 #   * Checksums use sha256; *.sha256 written via atomic_write
 #   * Designed to be idempotent; safe to re-run
+# Version: 1.0.0
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
-if ! command -v log_info >/dev/null 2>&1 || ! command -v with_retry >/dev/null 2>&1; then
-  echo "FATAL: core.sh and error-handling.sh must be sourced before lib/air-gapped.sh" >&2
+if ! command -v log_info >/dev/null 2>&1 || ! command -v with_retry >/dev/null 2>&1 || ! command -v write_secret_file >/dev/null 2>&1; then
+  echo "FATAL: core.sh, error-handling.sh, and security.sh must be sourced before lib/air-gapped.sh" >&2
   exit 1
 fi
 
@@ -47,6 +50,7 @@ fi
 : "${TARBALL_COMPRESSION:=gzip}"   # gzip|zstd|none
 : "${BUNDLE_SCHEMA_VERSION:=1}"
 : "${VERIFY_AFTER_LOAD:=0}"        # 1 = re-list/inspect images after load
+: "${SECRETS_DIR:=./secrets}"      # For secure versions.env storage
 
 # ---- Internal: ensure a runtime is set/detected --------------------------------
 __ensure_runtime() {
@@ -190,7 +194,6 @@ __bundle_manifest_json() {
   local archive_path="${1:?archive required}"; shift
   local imgs=( "$@" )
 
-  # Try to enrich metadata from environment if versions.env has been sourced
   local bundle_version="${BUNDLE_VERSION:-}"
   local bundle_arch="${BUNDLE_ARCHITECTURE:-}"
   local created_date_iso="$(date -u +%FT%TZ)"
@@ -248,9 +251,9 @@ create_airgapped_bundle() {
   # Write manifest (atomic)
   __bundle_manifest_json "${archive_path}" "${imgs[@]}" | atomic_write "${bundle}/manifest.json" "644"
 
-  # Snapshot versions.env if available
+  # Snapshot versions.env securely if available
   if [[ -f "./versions.env" ]]; then
-    atomic_write_file "./versions.env" "${bundle}/versions.env" "644"
+    write_secret_file "${bundle}/versions.env" "$(cat ./versions.env)" "versions.env"
   fi
 
   # README
@@ -274,6 +277,9 @@ Load on target:
        docker load -i $(basename -- "${archive_path}")        # or
        podman load -i $(basename -- "${archive_path}")
 EOF
+
+  # Run security audit
+  audit_security_configuration "${bundle}/security-audit.txt"
 
   log_success "Bundle created at: ${bundle}"
 }
@@ -321,7 +327,6 @@ load_airgapped_bundle() {
     archive="$(awk -F\" '/"archive":/ {print $4}' "${manifest}")"
   fi
   if [[ -z "${archive}" ]]; then
-    # Fallback: pick the first images.tar* we find
     archive="$(ls -1 "${bundle}"/images.tar* 2>/dev/null | head -n1)"
     [[ -n "${archive}" ]] || die "${E_INVALID_INPUT:-2}" "No images archive found in ${bundle}"
   else
@@ -386,7 +391,7 @@ bundle_info() {
   [[ -f "${manifest}" ]] || die "${E_INVALID_INPUT:-2}" "Manifest not found: ${manifest}"
   log_info "Bundle manifest summary:"
   awk '
-    /"schema":|\"created\":|\"runtime\":|\"compression\":|\"archive\":|\"bundle_version\":|\"architecture\":/ {
+    /"schema":|\"created\":|\"runtime\":|\"compression\":|\"archive":|\"bundle_version":|\"architecture":/ {
       gsub(/^[ \t]+|[ \t,]+$/,"",$0); print "  " $0
     }' "${manifest}" || true
   local archive
@@ -415,6 +420,9 @@ collect_images_from_versions_file() {
 
   # Prefer official loader/validator if available
   if command -v load_versions_file >/dev/null 2>&1; then
+    if [[ "${VERSIONS_VERSION:-0.0.0}" < "1.0.0" ]]; then
+      die "${E_GENERAL}" "collect_images_from_versions_file requires versions.sh version >= 1.0.0"
+    fi
     load_versions_file "${versions_file}"
   else
     # Validate in a subshell first (syntax only)
@@ -482,3 +490,7 @@ export -f generate_checksum_file verify_checksum_file \
           verify_bundle bundle_info list_bundle_images \
           collect_images_from_versions_file create_bundle_from_versions \
           create_image_archive
+
+# Define version
+AIR_GAPPED_VERSION="1.0.0"
+```
