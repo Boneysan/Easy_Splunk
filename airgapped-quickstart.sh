@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # airgapped-quickstart.sh
@@ -17,7 +18,9 @@
 # Env overrides:
 #   REQUIRED_SERVICES="app redis"   Space-separated list to health-check
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/air-gapped.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh,
+#               lib/security.sh, lib/air-gapped.sh
+# Version: 1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -33,20 +36,30 @@ if [[ ! -d "${BUNDLE_ROOT}/lib" ]]; then
   exit 1
 fi
 
+# Source dependencies
 # shellcheck source=lib/core.sh
 source "${BUNDLE_ROOT}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${BUNDLE_ROOT}/lib/error-handling.sh"
 # shellcheck source=lib/runtime-detection.sh
 source "${BUNDLE_ROOT}/lib/runtime-detection.sh"
+# shellcheck source=lib/security.sh
+source "${BUNDLE_ROOT}/lib/security.sh"
 # shellcheck source=lib/air-gapped.sh
 source "${BUNDLE_ROOT}/lib/air-gapped.sh"
+
+# --- Version Checks ------------------------------------------------------------
+if [[ "${AIR_GAPPED_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "airgapped-quickstart.sh requires air-gapped.sh version >= 1.0.0"
+fi
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "airgapped-quickstart.sh requires security.sh version >= 1.0.0"
+fi
 
 # --- Defaults / Flags -----------------------------------------------------------
 AUTO_YES=0
 COMPOSE_FILE="${BUNDLE_ROOT}/docker-compose.yml"
 WAIT_SECONDS=20
-# Default required services; override via env REQUIRED_SERVICES="a b c"
 : "${REQUIRED_SERVICES:=app redis}"
 
 usage() {
@@ -91,7 +104,6 @@ confirm_or_exit() {
 # Try to find an images archive in the bundle root if manifest is missing
 _find_archive_path() {
   if [[ -f "${BUNDLE_ROOT}/manifest.json" ]]; then
-    # lib/air-gapped.sh can read it directly via load_airgapped_bundle
     echo "BUNDLE"
     return 0
   fi
@@ -129,22 +141,29 @@ main() {
     load_image_archive "${archive}"
   fi
 
-  # 3) Start the stack
+  # 3) Secure sensitive files
+  if [[ -d "${BUNDLE_ROOT}/config/secrets" ]]; then
+    log_info "Securing sensitive files in bundle..."
+    harden_file_permissions "${BUNDLE_ROOT}/config/secrets/*" "600" "secret file" || true
+  fi
+
+  # 4) Run security audit
+  audit_security_configuration "${BUNDLE_ROOT}/security-audit.txt"
+
+  # 5) Start the stack
   [[ -f "${COMPOSE_FILE}" ]] || die "${E_INVALID_INPUT}" "Compose file not found: ${COMPOSE_FILE}"
   log_info "🚀 Starting services with: ${COMPOSE_FILE}"
 
-  # Use retry for flaky first boots
   with_retry --retries 3 --base-delay 3 --max-delay 15 -- \
     compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 
   log_info "⏳ Waiting ${WAIT_SECONDS}s for services to stabilize..."
   sleep "${WAIT_SECONDS}"
 
-  # 4) Health checks
+  # 6) Health checks
   log_info "🩺 Running health checks..."
   local all_ok=0
   for svc in ${REQUIRED_SERVICES}; do
-    # Get container ID for the service
     local cid
     cid="$(compose -f "${COMPOSE_FILE}" ps -q "${svc}" || true)"
     if [[ -z "${cid}" ]]; then
@@ -152,7 +171,6 @@ main() {
       all_ok=1
       continue
     fi
-    # Inspect via runtime
     local status
     status="$("${CONTAINER_RUNTIME}" inspect --format '{{.State.Status}}' "${cid}" 2>/dev/null || echo "unknown")"
     if [[ "${status}" == "running" ]]; then
@@ -175,3 +193,4 @@ main() {
 }
 
 main "$@"
+```
