@@ -4,12 +4,13 @@
 # Security utilities: strong secrets, safe secret files, curl auth wrapper,
 # TLS certificates, and Splunk-specific security configurations.
 #
-# Dependencies: lib/core.sh (log_*, die, have_cmd, register_cleanup, umask_strict, is_true)
+# Dependencies: lib/core.sh (log_*, die, have_cmd, register_cleanup, is_true)
 #               lib/error-handling.sh (atomic_write, atomic_write_file)
 #
 # Notes:
 # - Provides safe fallbacks for is_true and error codes if core didn’t define them.
 # - Never logs secret values. Paths and filenames only.
+# - This is a library meant to be sourced; it intentionally avoids `set -e`.
 # ==============================================================================
 
 # ---- Dependency guard ----------------------------------------------------------
@@ -40,17 +41,45 @@ fi
 : "${CERT_DEFAULT_ALG:=ed25519}"          # ed25519 preferred; fallback to rsa
 : "${CURL_SECRET_PATH:=/run/secrets/curl_auth}"  # curl -K config file
 : "${NETRC_PATH:=${HOME}/.netrc}"         # user-level fallback
-: "${TLS_DIR:=secrets/tls}"                # default TLS dir (caller can override)
+: "${TLS_DIR:=secrets/tls}"               # default TLS dir (caller can override)
 : "${SPLUNK_SECRETS_DIR:=secrets/splunk}" # Splunk-specific secrets
 : "${MIN_PASSWORD_LENGTH:=12}"            # Minimum password length
 : "${ENABLE_PASSWORD_COMPLEXITY:=true}"   # Enforce password complexity
 
-# Default to strict umask for all file writes; prefer core’s helper if present
+# Default to strict umask for all file writes; if core provided a helper use it
 if command -v umask_strict >/dev/null 2>&1; then
   umask_strict
 else
   umask 077
 fi
+
+# ==============================================================================
+# Internal helpers (kept simple and local)
+# ==============================================================================
+
+# _escape_for_curl_conf STRING -> prints string with " and \ escaped for curl -K files
+_escape_for_curl_conf() {
+  # Escape backslashes first, then quotes
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# _have_shuf — some minimal containers lack shuf
+_have_shuf() { command -v shuf >/dev/null 2>&1; }
+
+# _shuffle_chars — shuffle characters of input (stdout)
+_shuffle_chars() {
+  if _have_shuf; then
+    fold -w1 | shuf | tr -d '\n'
+  else
+    # Portable-ish fallback: randomize with awk
+    awk '
+      BEGIN{srand()}
+      { for(i=1;i<=length($0);i++){ a[i]=substr($0,i,1) } n=length($0)
+        for(i=n;i>=1;i--){ j=int(rand()*i)+1; printf "%s", a[j]; a[j]=a[i] }
+      } END{ }
+    '
+  fi
+}
 
 # ==============================================================================
 # Enhanced Secret generation / persistence
@@ -74,7 +103,7 @@ generate_random_password() {
       local L="abcdefghijklmnopqrstuvwxyz"
       local U="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
       local D="0123456789"
-      local S='@#%+=:,.!-?'
+      local S='@#%+=:,.!-?_'
       local ALL="${L}${U}${D}${S}"
 
       password=""
@@ -87,15 +116,18 @@ generate_random_password() {
         password+="${ALL:$((RANDOM % ${#ALL})):1}"
       done
 
-      # Shuffle using openssl for better randomness if available
-      password="$(printf '%s' "${password}" | fold -w1 | shuf | tr -d '\n')"
+      # Shuffle for better dispersion
+      password="$(printf '%s' "${password}" | _shuffle_chars)"
     else
-      password="$(openssl rand -base64 $((length * 2)) 2>/dev/null \
-        | tr -dc 'A-Za-z0-9_@#%+=:,.!-?' \
-        | head -c "${length}")"
+      # Generate a broad set then filter to allowed chars
+      LC_ALL=C password="$(
+        openssl rand -base64 $((length * 2)) 2>/dev/null \
+          | tr -dc 'A-Za-z0-9_@#%+=:,.!-?' \
+          | head -c "${length}"
+      )"
     fi
   else
-    password="$(tr -dc 'A-Za-z0-9_@#%+=:,.!-?' < /dev/urandom | head -c "${length}")"
+    LC_ALL=C password="$(tr -dc 'A-Za-z0-9_@#%+=:,.!-?' < /dev/urandom | head -c "${length}")"
   fi
 
   printf '%s\n' "${password}"
@@ -117,7 +149,8 @@ validate_password_strength() {
     [[ "${password}" =~ [a-z] ]] && has_lower=1
     [[ "${password}" =~ [A-Z] ]] && has_upper=1
     [[ "${password}" =~ [0-9] ]] && has_digit=1
-    [[ "${password}" =~ [@#%+=:,.!\?-] ]] && has_special=1
+    # Keep '-' last or escaped; include underscore too
+    [[ "${password}" =~ [@#%+=:,.!\?_+-] ]] && has_special=1
     local score=$((has_lower + has_upper + has_digit + has_special))
     if [[ "${score}" -lt 3 ]]; then
       log_error "Password lacks complexity: must contain at least 3 of {lower,upper,digit,special}"
@@ -212,23 +245,28 @@ rotate_secret_file() {
 
   # Create new .1
   cp -f -- "${path}" "${path}.1"
-  log_debug "Rotated secret file: $(basename "${path}") -> $(basename "${path}.1")"
+  log_debug "Rotated secret file: $(basename "${path}") -> $(basename "${path}.1}")"
 }
 
 # ==============================================================================
-# Curl auth helpers (no plaintext creds in ps)
+# Curl auth helpers (avoid plaintext creds in process list)
 # ==============================================================================
 
 # make_curl_config <username> <password> [verify] [additional_options]
 # Creates a curl config snippet with enhanced security options.
 make_curl_config() {
-  local user="${1:?user required}"
-  local pass="${2:?pass required}"
+  local user_raw="${1:?user required}"
+  local pass_raw="${2:?pass required}"
   local verify="${3:-secure}"
   local additional="${4:-}"
 
+  local user esc_user esc_pass
+  esc_user="$(_escape_for_curl_conf "${user_raw}")"
+  esc_pass="$(_escape_for_curl_conf "${pass_raw}")"
+  user="${esc_user}:${esc_pass}"
+
   cat <<EOF
-user = "${user}:${pass}"
+user = "${user}"
 max-time = 30
 connect-timeout = 10
 show-error
@@ -385,6 +423,7 @@ generate_ca_cert() {
   local tmp_key tmp_cert config
   tmp_key="$(mktemp "${ca_key}.tmp.XXXXXX")"
   tmp_cert="$(mktemp "${ca_cert}.tmp.XXXXXX")"
+  ensure_dir_secure "${TLS_DIR}"
   config="$(mktemp "${TLS_DIR}/ca-config-XXXXXX.cnf")"
   register_cleanup "rm -f '${tmp_key}' '${tmp_cert}' '${config}'"
 
