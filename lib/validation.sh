@@ -59,6 +59,38 @@ enforce_system_resources() {
   validate_system_resources "$@" || die "${E_INSUFFICIENT_MEM}" "System does not meet minimum resource requirements."
 }
 
+# validate_disk_space <path> <min_gb>
+# Checks available disk space at given path
+validate_disk_space() {
+  local path="${1:?path required}" min_gb="${2:?min_gb required}"
+  
+  if [[ ! -d "$path" ]]; then
+    log_error "Path does not exist for disk space check: $path"
+    return 1
+  fi
+  
+  local available_gb
+  if have_cmd df; then
+    # Try to get available space in GB
+    available_gb=$(df -BG "$path" 2>/dev/null | awk 'NR==2 {gsub(/G/, "", $4); print $4}')
+    if [[ -z "$available_gb" ]]; then
+      # Fallback for systems that don't support -BG
+      available_gb=$(df "$path" | awk 'NR==2 {print int($4/1024/1024)}')
+    fi
+  else
+    log_warn "df command not available; skipping disk space check for $path"
+    return 0
+  fi
+  
+  if ! is_number "$available_gb" || (( available_gb < min_gb )); then
+    log_error "Insufficient disk space at $path: have ${available_gb}GB, need ${min_gb}GB"
+    return 1
+  fi
+  
+  log_info "✔ Disk space at $path: ${available_gb}GB (>= ${min_gb}GB)"
+  return 0
+}
+
 # validate_vm_max_map_count <min_value>
 validate_vm_max_map_count() {
   local min="${1:?min required}"
@@ -73,6 +105,44 @@ validate_vm_max_map_count() {
     return 1
   fi
   log_info "✔ vm.max_map_count: ${val} (>= ${min})"
+  return 0
+}
+
+# ==============================================================================
+# Container runtime validation
+# ==============================================================================
+
+# validate_docker_daemon
+# Checks if Docker daemon is running and accessible
+validate_docker_daemon() {
+  local runtime="${1:-docker}"
+  
+  if ! have_cmd "$runtime"; then
+    log_error "Container runtime not found: $runtime"
+    return 1
+  fi
+  
+  if ! "$runtime" info >/dev/null 2>&1; then
+    log_error "Cannot connect to $runtime daemon"
+    return 1
+  fi
+  
+  log_info "✔ $runtime daemon is accessible"
+  return 0
+}
+
+# validate_container_network <network_name>
+# Checks if Docker network exists
+validate_container_network() {
+  local network="${1:?network required}"
+  local runtime="${2:-docker}"
+  
+  if ! "$runtime" network inspect "$network" >/dev/null 2>&1; then
+    log_error "Container network not found: $network"
+    return 1
+  fi
+  
+  log_info "✔ Container network exists: $network"
   return 0
 }
 
@@ -152,6 +222,47 @@ validate_required_var() {
   return 0
 }
 
+# validate_file_readable <path> <description>
+validate_file_readable() {
+  local path="${1:?path required}" desc="${2:-file}"
+  
+  if [[ ! -f "$path" ]]; then
+    log_error "$desc not found: $path"
+    return 1
+  fi
+  
+  if [[ ! -r "$path" ]]; then
+    log_error "$desc is not readable: $path"
+    return 1
+  fi
+  
+  log_info "✔ $desc is readable: $path"
+  return 0
+}
+
+# validate_environment_vars <var1> [var2] ...
+# Validates that required environment variables are set and non-empty
+validate_environment_vars() {
+  local missing=0
+  local var
+  
+  for var in "$@"; do
+    if [[ -z "${!var:-}" ]]; then
+      log_error "Required environment variable not set: $var"
+      ((missing++))
+    else
+      log_debug "✔ Environment variable set: $var"
+    fi
+  done
+  
+  if ((missing > 0)); then
+    log_error "$missing required environment variable(s) missing"
+    return 1
+  fi
+  
+  return 0
+}
+
 # ==============================================================================
 # Network / port validation
 # ==============================================================================
@@ -216,6 +327,53 @@ validate_rf_sf() {
   fi
 
   log_info "✔ RF/SF constraints satisfied (rf=${rf}, sf=${sf}, indexers=${ix})"
+  return 0
+}
+
+# validate_splunk_license <license_file>
+# Basic validation of Splunk license file format
+validate_splunk_license() {
+  local license_file="${1:?license_file required}"
+  
+  validate_file_readable "$license_file" "Splunk license file" || return 1
+  
+  # Basic format check - Splunk licenses are XML-like
+  if ! grep -q "<license>" "$license_file" 2>/dev/null; then
+    log_error "Invalid Splunk license format: $license_file"
+    return 1
+  fi
+  
+  log_info "✔ Splunk license file format appears valid"
+  return 0
+}
+
+# validate_splunk_cluster_size <indexer_count> <search_head_count>
+# Validates cluster sizing for production deployments
+validate_splunk_cluster_size() {
+  local indexers="${1:?indexer_count required}"
+  local search_heads="${2:?search_head_count required}"
+  
+  if ! is_number "$indexers" || ! is_number "$search_heads"; then
+    log_error "Cluster sizes must be numbers"
+    return 1
+  fi
+  
+  # Production recommendations
+  if (( indexers < 3 )); then
+    log_warn "Indexer count ($indexers) below production recommendation (3+)"
+  fi
+  
+  if (( search_heads < 2 )); then
+    log_warn "Search head count ($search_heads) below HA recommendation (2+)"
+  fi
+  
+  # Check ratio
+  local ratio=$((search_heads * 10 / indexers))  # *10 for integer math
+  if (( ratio > 10 )); then  # 1:1 ratio
+    log_warn "High search head to indexer ratio: ${search_heads}:${indexers}"
+  fi
+  
+  log_info "✔ Cluster sizing validated: ${indexers} indexers, ${search_heads} search heads"
   return 0
 }
 
