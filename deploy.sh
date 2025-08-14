@@ -1,11 +1,11 @@
 #!/bin/bash
-# deploy.sh - Enhanced deployment wrapper with comprehensive error handling
+# deploy.sh - Complete deployment wrapper with comprehensive error handling
 # Main entry point for Easy_Splunk cluster deployment
 
 # Source error handling module
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/scripts/common/error_handling.sh" || {
-    echo "ERROR: Cannot load error handling module" >&2
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Cannot load error handling module from lib/error-handling.sh" >&2
     exit 1
 }
 
@@ -20,6 +20,7 @@ readonly TEMPLATES_DIR="${SCRIPT_DIR}/config-templates"
 readonly SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
 readonly CREDS_DIR="${SCRIPT_DIR}/credentials"
 readonly MIN_PASSWORD_LENGTH=8
+readonly MAX_INDEX_NAME_LENGTH=64
 
 # Global variables
 CLUSTER_SIZE=""
@@ -32,6 +33,9 @@ SKIP_HEALTH=false
 NO_MONITORING=false
 FORCE_DEPLOY=false
 DEPLOYMENT_ID="$(date +%Y%m%d_%H%M%S)"
+
+# Reserved index names that cannot be used
+readonly RESERVED_INDEXES=("_audit" "_internal" "_introspection" "main" "history" "summary")
 
 # Cleanup function for deployment
 cleanup_deployment() {
@@ -81,6 +85,30 @@ EOF
     exit 0
 }
 
+# Validate index name
+validate_index_name() {
+    local index="$1"
+    
+    # Check length
+    if [[ ${#index} -gt $MAX_INDEX_NAME_LENGTH ]]; then
+        error_exit "Index name too long (max $MAX_INDEX_NAME_LENGTH characters): $index"
+    fi
+    
+    # Check format
+    if ! [[ "$index" =~ ^[a-zA-Z][a-zA-Z0-9_]*$ ]]; then
+        error_exit "Index name must start with a letter and contain only alphanumeric characters and underscores: $index"
+    fi
+    
+    # Check for reserved names
+    for reserved in "${RESERVED_INDEXES[@]}"; do
+        if [[ "$index" == "$reserved" ]]; then
+            error_exit "Cannot use reserved index name: $index"
+        fi
+    done
+    
+    log_message DEBUG "Index name validated: $index"
+}
+
 # Parse command line arguments
 parse_arguments() {
     log_message INFO "Parsing command line arguments"
@@ -103,6 +131,8 @@ parse_arguments() {
             if [[ -f "$1" ]]; then
                 CONFIG_FILE="$1"
                 CLUSTER_SIZE="custom"
+                # Validate config file path
+                validate_safe_path "$CONFIG_FILE" "$SCRIPT_DIR"
             else
                 error_exit "Invalid cluster size or config file: $1"
             fi
@@ -115,8 +145,7 @@ parse_arguments() {
         case "$1" in
             --index-name)
                 INDEX_NAME="$2"
-                validate_input "$INDEX_NAME" "^[a-zA-Z][a-zA-Z0-9_]*$" \
-                    "Index name must start with a letter and contain only alphanumeric characters and underscores"
+                validate_index_name "$INDEX_NAME"
                 shift 2
                 ;;
             --splunk-user)
@@ -147,6 +176,7 @@ parse_arguments() {
                 ;;
             --debug)
                 DEBUG_MODE=true
+                export DEBUG=true
                 shift
                 ;;
             --help|-h)
@@ -201,6 +231,10 @@ validate_environment() {
         validate_path "$dir" "directory"
     done
     
+    # Create necessary directories if they don't exist
+    mkdir -p "$CONFIG_DIR" || error_exit "Failed to create config directory"
+    mkdir -p "$CREDS_DIR" || error_exit "Failed to create credentials directory"
+    
     log_message SUCCESS "Environment validation completed"
 }
 
@@ -229,18 +263,26 @@ load_configuration() {
         fi
     done
     
-    # Validate numeric values
-    validate_input "$INDEXER_COUNT" "^[0-9]+$" "INDEXER_COUNT must be a positive integer"
-    validate_input "$SEARCH_HEAD_COUNT" "^[0-9]+$" "SEARCH_HEAD_COUNT must be a positive integer"
+    # Validate numeric values and ranges
+    validate_cluster_config "$INDEXER_COUNT" "$SEARCH_HEAD_COUNT"
+    
+    # Validate resource allocations
+    validate_resource_allocation "$CPU_INDEXER" "$MEMORY_INDEXER"
+    validate_resource_allocation "$CPU_SEARCH_HEAD" "$MEMORY_SEARCH_HEAD"
     
     # Override monitoring if specified
     if [[ "$NO_MONITORING" == "true" ]]; then
         export ENABLE_MONITORING=false
     fi
     
-    # Copy configuration to active
-    cp "$CONFIG_FILE" "${CONFIG_DIR}/active.conf" || \
+    # Copy configuration to active with error handling
+    if ! cp "$CONFIG_FILE" "${CONFIG_DIR}/active.conf"; then
         error_exit "Failed to copy configuration to active.conf"
+    fi
+    
+    # Set proper permissions
+    chmod 644 "${CONFIG_DIR}/active.conf" || \
+        log_message WARNING "Could not set permissions on active.conf"
     
     log_message SUCCESS "Configuration loaded and validated"
 }
@@ -259,10 +301,11 @@ handle_credentials() {
             error_exit "Splunk admin password file not found. Cannot skip credential generation."
         fi
         
-        # Load existing password if not provided
+        # Load existing password if not provided with error handling
         if [[ -z "$SPLUNK_PASSWORD" ]]; then
-            SPLUNK_PASSWORD=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null) || \
+            if ! SPLUNK_PASSWORD=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null); then
                 error_exit "Failed to read existing Splunk password"
+            fi
         fi
     else
         log_message INFO "Generating credentials"
@@ -288,10 +331,26 @@ handle_credentials() {
         fi
         
         # Generate credentials with retry logic
-        retry_with_backoff "${SCRIPTS_DIR}/generate-credentials.sh" \
-            --user "$SPLUNK_USER" \
-            --password "$SPLUNK_PASSWORD" || \
-            error_exit "Failed to generate credentials"
+        local creds_script="${SCRIPTS_DIR}/generate-credentials.sh"
+        if [[ ! -f "$creds_script" ]]; then
+            creds_script="${SCRIPT_DIR}/generate-credentials.sh"
+        fi
+        
+        if [[ -f "$creds_script" ]]; then
+            retry_with_backoff "$creds_script" \
+                --user "$SPLUNK_USER" \
+                --password "$SPLUNK_PASSWORD" || \
+                error_exit "Failed to generate credentials"
+        else
+            log_message WARNING "Credentials script not found, using basic generation"
+            # Fallback: create basic credential files
+            echo -n "$SPLUNK_USER" > "${CREDS_DIR}/splunk_admin_user" || \
+                error_exit "Failed to save username"
+            echo -n "$SPLUNK_PASSWORD" > "${CREDS_DIR}/splunk_admin_password" || \
+                error_exit "Failed to save password"
+            chmod 600 "${CREDS_DIR}/splunk_admin_user" "${CREDS_DIR}/splunk_admin_password" || \
+                error_exit "Failed to set credential permissions"
+        fi
     fi
     
     # Export credentials for use by other scripts
@@ -339,12 +398,22 @@ configure_indexes() {
         # Wait for Splunk to be ready
         sleep 10
         
-        # Generate Splunk configurations with retry
-        retry_with_backoff "${SCRIPTS_DIR}/generate-splunk-configs.sh" \
-            --index-name "$INDEX_NAME" \
-            --splunk-user "$SPLUNK_USER" \
-            --splunk-password "$SPLUNK_PASSWORD" || \
-            log_message WARNING "Failed to configure index $INDEX_NAME"
+        # Find the configuration script
+        local config_script="${SCRIPTS_DIR}/generate-splunk-configs.sh"
+        if [[ ! -f "$config_script" ]]; then
+            config_script="${SCRIPT_DIR}/generate-splunk-configs.sh"
+        fi
+        
+        if [[ -f "$config_script" ]]; then
+            # Generate Splunk configurations with retry
+            retry_with_backoff "$config_script" \
+                --index-name "$INDEX_NAME" \
+                --splunk-user "$SPLUNK_USER" \
+                --splunk-password "$SPLUNK_PASSWORD" || \
+                log_message WARNING "Failed to configure index $INDEX_NAME"
+        else
+            log_message WARNING "Configuration script not found, skipping index configuration"
+        fi
     fi
 }
 
@@ -361,11 +430,21 @@ run_health_checks() {
     log_message INFO "Waiting for services to stabilize..."
     sleep 15
     
-    # Run health check with timeout
-    safe_execute 120 "${SCRIPT_DIR}/health_check.sh" || {
-        log_message WARNING "Some health checks failed. Please check the logs."
-        log_message INFO "You can manually run: ${SCRIPT_DIR}/health_check.sh"
-    }
+    # Find health check script
+    local health_script="${SCRIPT_DIR}/health_check.sh"
+    if [[ ! -f "$health_script" ]]; then
+        health_script="${SCRIPTS_DIR}/health_check.sh"
+    fi
+    
+    if [[ -f "$health_script" ]]; then
+        # Run health check with timeout
+        safe_execute 120 "$health_script" || {
+            log_message WARNING "Some health checks failed. Please check the logs."
+            log_message INFO "You can manually run: $health_script"
+        }
+    else
+        log_message WARNING "Health check script not found"
+    fi
 }
 
 # Display deployment summary
@@ -438,3 +517,4 @@ main() {
 
 # Execute main function
 main "$@"
+    
