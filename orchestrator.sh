@@ -1,11 +1,11 @@
 #!/bin/bash
-# orchestrator.sh - Enhanced cluster orchestration with retry logic
+# orchestrator.sh - Complete cluster orchestration with comprehensive error handling
 # Manages Docker/Podman compose operations for Splunk cluster
 
 # Source error handling module
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/scripts/common/error_handling.sh" || {
-    echo "ERROR: Cannot load error handling module" >&2
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Cannot load error handling module from lib/error-handling.sh" >&2
     exit 1
 }
 
@@ -89,11 +89,14 @@ parse_arguments() {
                 shift
                 ;;
             --service)
-                SERVICES_TO_START+=("$2")
+                local service_name="$2"
+                validate_service_name "$service_name"
+                SERVICES_TO_START+=("$service_name")
                 shift 2
                 ;;
             --debug)
                 DEBUG_MODE=true
+                export DEBUG=true
                 shift
                 ;;
             --help|-h)
@@ -154,6 +157,13 @@ validate_compose_files() {
     # Check main compose file
     validate_path "$COMPOSE_FILE" "file"
     
+    # Validate compose file paths for safety
+    for i in "${!COMPOSE_FILES[@]}"; do
+        if [[ "${COMPOSE_FILES[$i]}" != "-f" ]]; then
+            validate_safe_path "${COMPOSE_FILES[$i]}" "$SCRIPT_DIR"
+        fi
+    done
+    
     # Validate compose file syntax
     if ! $COMPOSE_CMD "${COMPOSE_FILES[@]}" config --quiet 2>/dev/null; then
         error_exit "Invalid compose configuration. Please check your compose files."
@@ -171,8 +181,11 @@ validate_compose_files() {
 pull_images() {
     log_message INFO "Pulling container images"
     
-    # Get list of services
-    local services=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" config --services 2>/dev/null)
+    # Get list of services with error handling
+    local services
+    if ! services=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" config --services 2>/dev/null); then
+        error_exit "Failed to get service list from compose configuration"
+    fi
     
     if [[ -z "$services" ]]; then
         error_exit "No services found in compose configuration"
@@ -254,8 +267,9 @@ wait_for_service() {
     log_message INFO "Waiting for $service to be healthy (timeout: ${timeout}s)"
     
     while [[ $elapsed -lt $timeout ]]; do
-        # Check container status
-        local status=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" ps --status running --services 2>/dev/null | grep -c "^${service}$" || true)
+        # Check container status with error handling
+        local status
+        status=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" ps --status running --services 2>/dev/null | grep -c "^${service}$" || true)
         
         if [[ "$status" -eq 1 ]]; then
             # Check if service is responding (basic health check)
@@ -285,28 +299,35 @@ check_service_health() {
     case "$service" in
         cluster-master|cluster_master)
             # Check Splunk cluster master
-            curl -sf -o /dev/null "http://localhost:8000/en-US/account/login" 2>/dev/null
+            safe_execute 5 curl -sf -o /dev/null "http://localhost:8000/en-US/account/login" 2>/dev/null
             ;;
         search-head*|search_head*)
             # Check Splunk search head
-            curl -sf -o /dev/null "http://localhost:8001/en-US/account/login" 2>/dev/null
+            safe_execute 5 curl -sf -o /dev/null "http://localhost:8001/en-US/account/login" 2>/dev/null
             ;;
         indexer*)
             # Check Splunk indexer (management port)
-            nc -z localhost 8089 2>/dev/null
+            safe_execute 5 nc -z localhost 8089 2>/dev/null || return 1
             ;;
         prometheus)
             # Check Prometheus
-            curl -sf -o /dev/null "http://localhost:9090/-/ready" 2>/dev/null
+            safe_execute 5 curl -sf -o /dev/null "http://localhost:9090/-/ready" 2>/dev/null
             ;;
         grafana)
             # Check Grafana
-            curl -sf -o /dev/null "http://localhost:3000/api/health" 2>/dev/null
+            safe_execute 5 curl -sf -o /dev/null "http://localhost:3000/api/health" 2>/dev/null
             ;;
         *)
             # Generic check - just verify container is running
-            local container_id=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" ps -q "$service" 2>/dev/null)
-            [[ -n "$container_id" ]] && $CONTAINER_RUNTIME inspect "$container_id" --format='{{.State.Running}}' 2>/dev/null | grep -q true
+            local container_id
+            container_id=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" ps -q "$service" 2>/dev/null | head -1)
+            if [[ -n "$container_id" ]]; then
+                local is_running
+                is_running=$($CONTAINER_RUNTIME inspect "$container_id" --format='{{.State.Running}}' 2>/dev/null || echo "false")
+                [[ "$is_running" == "true" ]]
+            else
+                return 1
+            fi
             ;;
     esac
 }
@@ -315,8 +336,13 @@ check_service_health() {
 verify_deployment() {
     log_message INFO "Verifying deployment"
     
-    # Get list of expected services
-    local services=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" config --services 2>/dev/null)
+    # Get list of expected services with error handling
+    local services
+    if ! services=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" config --services 2>/dev/null); then
+        log_message WARNING "Could not get service list for verification"
+        return 1
+    fi
+    
     local failed_services=()
     
     for service in $services; do
@@ -342,10 +368,11 @@ display_status() {
     # Show running services
     $COMPOSE_CMD "${COMPOSE_FILES[@]}" ps || true
     
-    # Show port mappings
+    # Show port mappings with error handling
     echo -e "\n${BLUE}Port Mappings:${NC}"
-    $COMPOSE_CMD "${COMPOSE_FILES[@]}" ps --format="table {{.Service}}\t{{.Ports}}" 2>/dev/null || \
+    if ! $COMPOSE_CMD "${COMPOSE_FILES[@]}" ps --format="table {{.Service}}\t{{.Ports}}" 2>/dev/null; then
         log_message WARNING "Could not retrieve port mappings"
+    fi
 }
 
 # Main orchestration function
