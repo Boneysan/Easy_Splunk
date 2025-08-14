@@ -289,53 +289,61 @@ load_configuration() {
 
 # Generate or validate credentials
 handle_credentials() {
+    local secrets_cli="$SCRIPT_DIR/security/secrets_manager.sh"
+
     if [[ "$SKIP_CREDS" == "true" ]]; then
         log_message INFO "Skipping credential generation (--skip-creds specified)"
-        
-        # Validate existing credentials
-        if [[ ! -d "$CREDS_DIR" ]]; then
-            error_exit "Credentials directory not found. Cannot skip credential generation."
-        fi
-        
-        if [[ ! -f "${CREDS_DIR}/splunk_admin_password" ]]; then
-            error_exit "Splunk admin password file not found. Cannot skip credential generation."
-        fi
-        
-        # Load existing password if not provided with error handling
-        if [[ -z "$SPLUNK_PASSWORD" ]]; then
-            if ! SPLUNK_PASSWORD=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null); then
-                error_exit "Failed to read existing Splunk password"
+
+        # Try retrieving from secrets manager first
+        if [[ -x "$secrets_cli" ]]; then
+            if [[ -z "$SPLUNK_PASSWORD" ]]; then
+                if ! SPLUNK_PASSWORD=$("$secrets_cli" retrieve_credential splunk "$SPLUNK_USER" 2>/dev/null); then
+                    error_exit "Could not retrieve Splunk password from secrets manager. Cannot skip credential generation."
+                fi
+            fi
+        else
+            # Validate existing credentials directory and files
+            if [[ ! -d "$CREDS_DIR" ]]; then
+                error_exit "Credentials directory not found. Cannot skip credential generation."
+            fi
+            if [[ ! -f "${CREDS_DIR}/splunk_admin_password" ]]; then
+                error_exit "Splunk admin password file not found. Cannot skip credential generation."
+            fi
+            if [[ -z "$SPLUNK_PASSWORD" ]]; then
+                if ! SPLUNK_PASSWORD=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null); then
+                    error_exit "Failed to read existing Splunk password"
+                fi
             fi
         fi
     else
         log_message INFO "Generating credentials"
-        
+
         # Create credentials directory if it doesn't exist
         mkdir -p "$CREDS_DIR" || error_exit "Failed to create credentials directory"
-        
+
         # Get password if not provided
         if [[ -z "$SPLUNK_PASSWORD" ]]; then
             read -s -p "Enter Splunk admin password (min $MIN_PASSWORD_LENGTH chars): " SPLUNK_PASSWORD
             echo
             read -s -p "Confirm password: " SPLUNK_PASSWORD_CONFIRM
             echo
-            
+
             if [[ "$SPLUNK_PASSWORD" != "$SPLUNK_PASSWORD_CONFIRM" ]]; then
                 error_exit "Passwords do not match"
             fi
         fi
-        
+
         # Validate password strength
         if [[ ${#SPLUNK_PASSWORD} -lt $MIN_PASSWORD_LENGTH ]]; then
             error_exit "Password must be at least $MIN_PASSWORD_LENGTH characters long"
         fi
-        
+
         # Generate credentials with retry logic
         local creds_script="${SCRIPTS_DIR}/generate-credentials.sh"
         if [[ ! -f "$creds_script" ]]; then
             creds_script="${SCRIPT_DIR}/generate-credentials.sh"
         fi
-        
+
         if [[ -f "$creds_script" ]]; then
             retry_with_backoff "$creds_script" \
                 --user "$SPLUNK_USER" \
@@ -343,13 +351,19 @@ handle_credentials() {
                 error_exit "Failed to generate credentials"
         else
             log_message WARNING "Credentials script not found, using basic generation"
-            # Fallback: create basic credential files
-            echo -n "$SPLUNK_USER" > "${CREDS_DIR}/splunk_admin_user" || \
-                error_exit "Failed to save username"
-            echo -n "$SPLUNK_PASSWORD" > "${CREDS_DIR}/splunk_admin_password" || \
-                error_exit "Failed to save password"
-            chmod 600 "${CREDS_DIR}/splunk_admin_user" "${CREDS_DIR}/splunk_admin_password" || \
-                error_exit "Failed to set credential permissions"
+            # Prefer storing in system keyring / secrets manager when available
+            if [[ -x "$secrets_cli" ]]; then
+                "$secrets_cli" store_credential splunk "$SPLUNK_USER" "$SPLUNK_PASSWORD" || \
+                    error_exit "Failed to store password in secrets manager"
+            else
+                # Fallback: create basic credential files
+                echo -n "$SPLUNK_USER" > "${CREDS_DIR}/splunk_admin_user" || \
+                    error_exit "Failed to save username"
+                echo -n "$SPLUNK_PASSWORD" > "${CREDS_DIR}/splunk_admin_password" || \
+                    error_exit "Failed to save password"
+                chmod 600 "${CREDS_DIR}/splunk_admin_user" "${CREDS_DIR}/splunk_admin_password" || \
+                    error_exit "Failed to set credential permissions"
+            fi
         fi
     fi
     

@@ -405,28 +405,44 @@ write_credential() {
     local description="${3:-Credential}"
     
     local filepath="${CREDS_DIR}/${filename}"
-    
     log_message DEBUG "Writing $description to $filename"
-    
-    # Write to temporary file first
-    local temp_file="${CREDS_DIR}/.tmp_${filename}_$"
+
+    # Prefer system keyring / secrets manager when available
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local secrets_cli="$script_dir/security/secrets_manager.sh"
+    if [[ -x "$secrets_cli" ]]; then
+        # Map filename to service/name: use filename as key name and CREDS_DIR basename as service
+        local service
+        service="splunk" # default service name for now
+        # store using secrets manager
+        if ! "$secrets_cli" store_credential "$service" "$filename" "$content"; then
+            log_message WARNING "Failed to store $description in secrets manager, falling back to file storage"
+        else
+            log_message SUCCESS "$description saved in secrets manager"
+            return 0
+        fi
+    fi
+
+    # Fallback: write to file securely (temporary file then atomic move)
+    local temp_file="${CREDS_DIR}/.tmp_${filename}_$$"
     if ! echo -n "$content" > "$temp_file"; then
         rm -f "$temp_file" 2>/dev/null
         error_exit "Failed to write $description"
     fi
-    
+
     # Set secure permissions
     if ! chmod 600 "$temp_file"; then
         rm -f "$temp_file" 2>/dev/null
         error_exit "Failed to set permissions for $description"
     fi
-    
+
     # Move to final location
     if ! mv "$temp_file" "$filepath"; then
         rm -f "$temp_file" 2>/dev/null
         error_exit "Failed to save $description"
     fi
-    
+
     log_message SUCCESS "$description saved"
 }
 
