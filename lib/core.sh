@@ -69,6 +69,24 @@ log_debug() {
     fi
 }
 
+# Special formatting helpers
+log_header() {
+    local message="$*"
+    echo
+    printf "${COLOR_BLUE}%s${COLOR_RESET}\n" "$(printf '=%.0s' {1..80})"
+    printf "${COLOR_BLUE}%s${COLOR_RESET}\n" "$message"
+    printf "${COLOR_BLUE}%s${COLOR_RESET}\n" "$(printf '=%.0s' {1..80})"
+    echo
+}
+
+log_section() {
+    local message="$*"
+    echo
+    printf "${COLOR_GREEN}%s${COLOR_RESET}\n" "$(printf -- '-%.0s' {1..60})"
+    printf "${COLOR_GREEN}%s${COLOR_RESET}\n" "$message"
+    printf "${COLOR_GREEN}%s${COLOR_RESET}\n" "$(printf -- '-%.0s' {1..60})"
+}
+
 # Abort helper
 # Usage: die <exit_code> <message...>
 die() {

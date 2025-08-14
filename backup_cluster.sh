@@ -10,15 +10,17 @@
 #   • Creates manifest + SHA256 checksum
 #   • Resilient volume copy via retry + temporary container (alpine/busybox)
 #   • Safe file perms (umask 077)
+#   • Integration with new backup manager system
 #
 # Examples:
 #   ./backup_cluster.sh --output-dir ./backups --gpg-recipient ops@example.com \
 #       --project my-app --gzip-level 6
 #   ./backup_cluster.sh --output-dir ./backups --no-encrypt \
 #       --volumes my-app_app-data,my-app_redis-data
+#   ./backup_cluster.sh --use-backup-manager --type full
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh, gpg (unless --no-encrypt)
-# Version: 1.0.0
+# Version: 2.0.0
 # ==============================================================================
 
 set -euo pipefail
