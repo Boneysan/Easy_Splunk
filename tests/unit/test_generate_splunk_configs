@@ -1,0 +1,105 @@
+```bash
+#!/usr/bin/env bash
+# ==============================================================================
+# tests/unit/test_generate_splunk_configs.sh
+# Unit tests for generate-splunk-configs.sh, covering Splunk index and HEC token setup.
+#
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, generate-splunk-configs.sh
+# Version: 1.0.0
+# ==============================================================================
+set -euo pipefail
+IFS=$'\n\t'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# Source dependencies
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/error-handling.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/security.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../generate-splunk-configs.sh"
+
+# Test counter and results
+TEST_COUNT=0
+TEST_PASSED=0
+TEST_FAILED=0
+
+# Mock commands
+curl() { echo "Mock curl: $@"; echo '{"entry":[{"content":{"version":"9.0.0","build":"12345"}}]}' > "$7"; return 0; }
+jq() { echo "9.0.0"; return 0; }
+date() { echo "2025-08-13 12:00:00 UTC"; return 0; }
+stat() { echo "600"; return 0; }
+openssl() { echo "Mock openssl: $@"; return 0; }
+read() { echo "testpass"; } # Simulate password input
+
+# Helper to run a test
+run_test() {
+  local test_name="$1"; shift
+  ((TEST_COUNT++))
+  log_info "Running test: ${test_name}"
+  if "$@"; then
+    log_success "Test passed: ${test_name}"
+    ((TEST_PASSED++))
+  else
+    log_error "Test failed: ${test_name}"
+    ((TEST_FAILED++))
+  fi
+}
+
+# Test 1: Create new index and HEC token
+test_create_index_hec() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  curl() { echo '{"entry":[{"content":{"token":"abc123"}}]}' > "$7"; echo "404" > "$6"; return 0; }
+  SPLUNK_USER="admin" INDEX_NAME="test_index" SPLUNK_PASSWORD="testpass" main
+  return 0
+}
+
+# Test 2: Existing index and HEC token
+test_existing_index_hec() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  curl() { echo '{"entry":[{"content":{"token":"abc123"}}]}' > "$7"; echo "200" > "$6"; return 0; }
+  SPLUNK_USER="admin" INDEX_NAME="test_index" SPLUNK_PASSWORD="testpass" main
+  return 0
+}
+
+# Test 3: Write HEC token to file
+test_write_token_file() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  curl() { echo '{"entry":[{"content":{"token":"abc123"}}]}' > "$7"; echo "200" > "$6"; return 0; }
+  SPLUNK_USER="admin" INDEX_NAME="test_index" SPLUNK_PASSWORD="testpass" TOKEN_FILE="$tmp/token.txt" main
+  [[ -f "$tmp/token.txt" ]] && [[ $(stat -c %a "$tmp/token.txt" 2>/dev/null || stat -f %A "$tmp/token.txt") == "600" ]]
+}
+
+# Test 4: Missing required arguments
+test_missing_args() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  main 2>/dev/null && return 1
+  return 0
+}
+
+# Test 5: Failed API connection
+test_failed_api() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  curl() { echo "Connection failed" > "$7"; echo "500" > "$6"; return 1; }
+  SPLUNK_USER="admin" INDEX_NAME="test_index" SPLUNK_PASSWORD="testpass" main 2>/dev/null && return 1
+  return 0
+}
+
+# Run all tests
+run_test "Create new index and HEC token" test_create_index_hec
+run_test "Existing index and HEC token" test_existing_index_hec
+run_test "Write HEC token to file" test_write_token_file
+run_test "Missing required arguments" test_missing_args
+run_test "Failed API connection" test_failed_api
+
+# Summary
+log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
+[[ ${TEST_FAILED} -eq 0 ]]
+```
