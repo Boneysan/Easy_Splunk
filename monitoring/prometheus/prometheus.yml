@@ -1,0 +1,47 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  scrape_timeout: 10s
+
+rule_files:
+  - "splunk_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - "alertmanager:9093"
+
+scrape_configs:
+  - job_name: 'splunk-indexers'
+    static_configs:
+      - targets:
+        - 'localhost:9100'  # Node exporter
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: '${1}'
+
+  - job_name: 'splunk-search-heads'
+    static_configs:
+      - targets:
+        - 'localhost:9100'  # Node exporter
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: '${1}'
+
+  - job_name: 'node'
+    static_configs:
+      - targets:
+        - 'localhost:9100'  # Node exporter
+
+  - job_name: 'splunk-metrics'
+    file_sd_configs:
+      - files:
+        - '/etc/prometheus/targets/*.yml'
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets:
+        - 'localhost:9090'  # Prometheus itself

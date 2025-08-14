@@ -1,0 +1,118 @@
+{{ define "slack.title" }}
+[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}
+{{ end }}
+
+{{ define "slack.text" }}
+{{ range .Alerts }}
+*Alert:* {{ .Labels.alertname }}{{ if .Labels.severity }} - `{{ .Labels.severity }}`{{ end }}
+*Description:* {{ .Annotations.description }}
+*Instance:* {{ .Labels.instance }}
+*Details:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: {{ .Value }}
+{{ end }}
+{{ end }}
+{{ end }}
+
+{{ define "slack.critical.title" }}
+[CRITICAL{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}
+{{ end }}
+
+{{ define "slack.critical.text" }}
+{{ range .Alerts }}
+🚨 *Critical Alert:* {{ .Labels.alertname }}
+*Description:* {{ .Annotations.description }}
+*Instance:* {{ .Labels.instance }}
+*Details:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: {{ .Value }}
+{{ end }}
+*Actions Required:*
+1. Acknowledge alert in monitoring system
+2. Check instance health and logs
+3. Escalate if not resolved within 15 minutes
+{{ end }}
+{{ end }}
+
+{{ define "email.subject" }}
+[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
+{{ end }}
+
+{{ define "email.html" }}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: sans-serif; }
+        .alert { margin: 10px; padding: 10px; border: 1px solid #ddd; }
+        .firing { background-color: #fff3f3; }
+        .resolved { background-color: #f3fff3; }
+        .critical { color: #cc0000; }
+        .warning { color: #cc7700; }
+    </style>
+</head>
+<body>
+    <h2>{{ .CommonLabels.alertname }}</h2>
+    {{ range .Alerts }}
+    <div class="alert {{ .Status }}">
+        <h3 class="{{ .Labels.severity }}">{{ .Labels.alertname }}</h3>
+        <p><strong>Status:</strong> {{ .Status }}</p>
+        <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+        <p><strong>Instance:</strong> {{ .Labels.instance }}</p>
+        <h4>Labels:</h4>
+        <ul>
+        {{ range .Labels.SortedPairs }}
+            <li>{{ .Name }}: {{ .Value }}</li>
+        {{ end }}
+        </ul>
+    </div>
+    {{ end }}
+</body>
+</html>
+{{ end }}
+
+{{ define "email.critical.subject" }}
+[CRITICAL] {{ .CommonLabels.alertname }} - Immediate Action Required
+{{ end }}
+
+{{ define "email.critical.html" }}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: sans-serif; }
+        .alert { margin: 10px; padding: 10px; border: 2px solid #cc0000; background-color: #fff3f3; }
+        .critical { color: #cc0000; font-weight: bold; }
+        .actions { background-color: #f8f8f8; padding: 10px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h2 class="critical">🚨 CRITICAL ALERT: {{ .CommonLabels.alertname }}</h2>
+    {{ range .Alerts }}
+    <div class="alert">
+        <h3>{{ .Labels.alertname }}</h3>
+        <p><strong>Status:</strong> {{ .Status }}</p>
+        <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+        <p><strong>Instance:</strong> {{ .Labels.instance }}</p>
+        <h4>Labels:</h4>
+        <ul>
+        {{ range .Labels.SortedPairs }}
+            <li>{{ .Name }}: {{ .Value }}</li>
+        {{ end }}
+        </ul>
+        <div class="actions">
+            <h4>Required Actions:</h4>
+            <ol>
+                <li>Acknowledge this alert in the monitoring system</li>
+                <li>Check the affected instance's health and logs</li>
+                <li>Escalate to the on-call team if not resolved within 15 minutes</li>
+                <li>Update the incident status in the tracking system</li>
+            </ol>
+        </div>
+    </div>
+    {{ end }}
+</body>
+</html>
+{{ end }}
+
+{{ define "pagerduty.description" }}
+[CRITICAL] {{ .CommonLabels.alertname }} - {{ .CommonAnnotations.description }}
+{{ end }}

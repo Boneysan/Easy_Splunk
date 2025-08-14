@@ -1,0 +1,62 @@
+global:
+  resolve_timeout: 5m
+  slack_api_url: '${SLACK_API_URL}'
+  smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
+  smtp_from: '${SMTP_FROM}'
+  smtp_auth_username: '${SMTP_USER}'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  group_by: ['alertname', 'category']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'team-splunk'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'team-splunk-critical'
+      repeat_interval: 1h
+    - match:
+        severity: warning
+      receiver: 'team-splunk'
+
+receivers:
+  - name: 'team-splunk'
+    slack_configs:
+      - channel: '#splunk-alerts'
+        title: '{{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+        send_resolved: true
+    email_configs:
+      - to: '${TEAM_EMAIL}'
+        send_resolved: true
+        html: '{{ template "email.html" . }}'
+        headers:
+          subject: '{{ template "email.subject" . }}'
+
+  - name: 'team-splunk-critical'
+    slack_configs:
+      - channel: '#splunk-critical'
+        title: '{{ template "slack.critical.title" . }}'
+        text: '{{ template "slack.critical.text" . }}'
+        send_resolved: true
+    email_configs:
+      - to: '${ONCALL_EMAIL}'
+        send_resolved: true
+        html: '{{ template "email.critical.html" . }}'
+        headers:
+          subject: '{{ template "email.critical.subject" . }}'
+    pagerduty_configs:
+      - service_key: '${PAGERDUTY_KEY}'
+        description: '{{ template "pagerduty.description" . }}'
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']

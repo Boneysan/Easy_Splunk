@@ -1,0 +1,92 @@
+groups:
+  - name: splunk_cluster
+    rules:
+      - alert: SplunkIndexerDown
+        expr: up{job="splunk-indexer"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Splunk indexer {{ $labels.instance }} is down"
+          description: "Splunk indexer instance {{ $labels.instance }} has been down for more than 5 minutes"
+          
+      - alert: SplunkDiskSpaceHigh
+        expr: (splunk_disk_used_percent > 80)
+        for: 10m
+        labels:
+          severity: warning
+          category: capacity
+        annotations:
+          summary: "Splunk disk usage high on {{ $labels.instance }}"
+          description: "Disk usage on {{ $labels.instance }} is {{ $value }}%, which is above 80% threshold"
+
+      - alert: SplunkDiskSpaceCritical
+        expr: (splunk_disk_used_percent > 90)
+        for: 5m
+        labels:
+          severity: critical
+          category: capacity
+        annotations:
+          summary: "Splunk disk usage critical on {{ $labels.instance }}"
+          description: "Disk usage on {{ $labels.instance }} is {{ $value }}%, which is above 90% threshold"
+
+      - alert: SplunkLicenseUsageHigh
+        expr: (splunk_license_usage_percent > 90)
+        for: 5m
+        labels:
+          severity: critical
+          category: license
+        annotations:
+          summary: "Splunk license usage critical: {{ $value }}%"
+          description: "License usage has exceeded 90% of the allocated quota"
+
+      - alert: SplunkSearchHeadDown
+        expr: up{job="splunk-search-head"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Splunk search head {{ $labels.instance }} is down"
+          description: "Search head instance {{ $labels.instance }} has been down for more than 5 minutes"
+
+      - alert: SplunkHighCPUUsage
+        expr: rate(process_cpu_seconds_total{job=~"splunk.*"}[5m]) * 100 > 80
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+
+      - alert: SplunkHighMemoryUsage
+        expr: (process_resident_memory_bytes{job=~"splunk.*"} / node_memory_MemTotal_bytes * 100) > 80
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+
+      - alert: SplunkSlowSearches
+        expr: splunk_search_duration_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Slow searches detected on {{ $labels.instance }}"
+          description: "Search operations taking longer than 5 minutes to complete"
+
+      - alert: SplunkIndexingLatencyHigh
+        expr: splunk_indexing_latency_seconds > 60
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High indexing latency on {{ $labels.instance }}"
+          description: "Indexing latency is {{ $value }} seconds on {{ $labels.instance }}"
