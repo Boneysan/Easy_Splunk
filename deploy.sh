@@ -1,8 +1,9 @@
+```bash
 #!/usr/bin/env bash
 #
 # deploy.sh — One-shot wrapper for Easy Splunk
 #
-# Orchestrates: config selection → (optional) creds → deploy → (optional) Splunk config → (optional) health check.
+# Orchestrates: config selection → (optional) creds → digest resolution → deploy → (optional) Splunk config → (optional) health check.
 #
 # Usage:
 #   ./deploy.sh <small|medium|large|/path/to/conf> [options]
@@ -16,22 +17,35 @@
 #   --no-monitoring             Force-disable Prometheus+Grafana even if config enables it
 #   --skip-creds                Skip credential/cert generation (reuse existing)
 #   --skip-health               Skip post-deploy health check
+#   --skip-digests              Skip image digest resolution (use existing versions.env)
+#   --config-file <FILE>        Check legacy v2.0 config for migration issues
 #   -h | --help                 Show help
 #
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, generate-credentials.sh,
+#               orchestrator.sh, generate-splunk-configs.sh, health_check.sh, resolve-digests.sh,
+#               integration-guide.sh
 # Notes:
-# - This script expects to run from the repo root.
-# - It uses orchestrator's --config flag to load a template.
-# - To disable monitoring, we create a temporary override config.
+# - Expects to run from the repo root.
+# - Uses orchestrator's --config flag to load a template.
+# - Creates temporary override config for --no-monitoring.
+# Version: 1.0.0
 #
 
 set -euo pipefail
+IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 cd "$SCRIPT_DIR"
 
-# --- Source core libs for logging & error handling
+# --- Source core libs
 source "./lib/core.sh"
 source "./lib/error-handling.sh"
+source "./lib/security.sh"
+
+# --- Version Checks ---
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "deploy.sh requires security.sh version >= 1.0.0"
+fi
 
 # --- Defaults
 SIZE_OR_CONF=""
@@ -43,11 +57,13 @@ SPLUNK_API_PORT="8089"
 FORCE_NO_MONITORING="false"
 SKIP_CREDS="false"
 SKIP_HEALTH="false"
-
+SKIP_DIGESTS="false"
+CONFIG_FILE=""
+: "${SECRETS_DIR:=./secrets}"
 CONFIG_DIR="./config"
 TEMPLATES_DIR="./config-templates"
-ACTIVE_CONFIG=""              # resolved later
-TEMP_OVERRIDE_CONFIG=""       # if --no-monitoring, we create one
+ACTIVE_CONFIG=""
+TEMP_OVERRIDE_CONFIG=""
 
 # --- Helpers
 usage() {
@@ -56,7 +72,6 @@ usage() {
 }
 
 cleanup() {
-  # Remove temp override config if created
   if [[ -n "${TEMP_OVERRIDE_CONFIG:-}" && -f "$TEMP_OVERRIDE_CONFIG" ]]; then
     rm -f "$TEMP_OVERRIDE_CONFIG" || true
   fi
@@ -84,6 +99,8 @@ while [[ $# -gt 0 ]]; do
     --no-monitoring)    FORCE_NO_MONITORING="true"; shift ;;
     --skip-creds)       SKIP_CREDS="true"; shift ;;
     --skip-health)      SKIP_HEALTH="true"; shift ;;
+    --skip-digests)     SKIP_DIGESTS="true"; shift ;;
+    --config-file)      CONFIG_FILE="${2:-}"; shift 2 ;;
     -h|--help)          usage ;;
     *) die "$E_INVALID_INPUT" "Unknown option: $1" ;;
   esac
@@ -95,7 +112,6 @@ case "$SIZE_OR_CONF" in
   medium|medium-production) ACTIVE_CONFIG="${TEMPLATES_DIR}/medium-production.conf" ;;
   large|large-production)   ACTIVE_CONFIG="${TEMPLATES_DIR}/large-production.conf" ;;
   *)
-    # treat as file path
     ACTIVE_CONFIG="$SIZE_OR_CONF"
     ;;
 esac
@@ -104,14 +120,33 @@ if [[ ! -f "$ACTIVE_CONFIG" ]]; then
   die "$E_INVALID_INPUT" "Config not found: ${ACTIVE_CONFIG}"
 fi
 
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR" "$SECRETS_DIR"
+harden_file_permissions "$CONFIG_DIR" "700" "config directory" || true
+harden_file_permissions "$SECRETS_DIR" "700" "secrets directory" || true
+harden_file_permissions "$ACTIVE_CONFIG" "600" "active config" || true
 
-# If user requested --no-monitoring, create a temporary override config
+# --- Check legacy config
+if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+  log_info "📋 Checking legacy v2.0 configuration: ${CONFIG_FILE}"
+  ./integration-guide.sh "$CONFIG_FILE" --output text
+  log_warn "Review migration issues above before proceeding."
+fi
+
+# --- Resolve image digests
+if ! is_true "$SKIP_DIGESTS"; then
+  log_info "📸 Resolving image digests in versions.env..."
+  require_file "./resolve-digests.sh"
+  ./resolve-digests.sh
+else
+  log_info "📸 Skipping digest resolution (per --skip-digests)."
+fi
+
+# --- Create override config for --no-monitoring
 if is_true "$FORCE_NO_MONITORING"; then
   TEMP_OVERRIDE_CONFIG="$(mktemp -t easy-splunk-override-XXXX.conf)"
-  # Copy the base template, then override the flag
   cat "$ACTIVE_CONFIG" > "$TEMP_OVERRIDE_CONFIG"
   printf '\n# Wrapper override\nENABLE_MONITORING="false"\n' >> "$TEMP_OVERRIDE_CONFIG"
+  harden_file_permissions "$TEMP_OVERRIDE_CONFIG" "600" "override config" || true
   ACTIVE_CONFIG="$TEMP_OVERRIDE_CONFIG"
   log_info "Monitoring disabled via wrapper override."
 fi
@@ -122,13 +157,14 @@ if ! is_empty "$INDEX_NAME"; then
   log_info "🗂  Will configure Splunk index: ${INDEX_NAME}"
 fi
 
-# --- Preflight checks (files we will call)
+# --- Preflight checks
 require_file "./orchestrator.sh"
 require_file "./generate-credentials.sh"
 require_file "./health_check.sh"
 require_file "./generate-splunk-configs.sh"
+require_file "./versions.env"
 
-# --- Optional credentials
+# --- Generate credentials
 if ! is_true "$SKIP_CREDS"; then
   log_info "🔐 Generating credentials and self-signed certificates..."
   yes | ./generate-credentials.sh
@@ -138,10 +174,9 @@ fi
 
 # --- Deploy
 log_info "🚀 Launching orchestrator..."
-# Pass the chosen config; monitoring is driven by that config (or wrapper override)
 ./orchestrator.sh --config "$ACTIVE_CONFIG"
 
-# --- Optional Splunk config (index creation)
+# --- Configure Splunk index
 if ! is_empty "$INDEX_NAME"; then
   log_info "⚙️  Configuring Splunk index '${INDEX_NAME}' via API..."
   GEN_ARGS=(--splunk-user "$SPLUNK_USER" --index-name "$INDEX_NAME" --splunk-api-host "$SPLUNK_API_HOST" --splunk-api-port "$SPLUNK_API_PORT")
@@ -153,7 +188,7 @@ else
   log_info "ℹ️  No --index-name provided; skipping Splunk API configuration."
 fi
 
-# --- Optional health check
+# --- Health check
 if ! is_true "$SKIP_HEALTH"; then
   log_info "🩺 Running post-deployment health check..."
   ./health_check.sh
@@ -161,4 +196,8 @@ else
   log_info "🩺 Skipping health check (per --skip-health)."
 fi
 
+# --- Audit security
+audit_security_configuration "${SCRIPT_DIR}/security-audit.txt"
+
 log_success "✅ Deployment complete. Splunk UI should be available at http://localhost:8000"
+```
