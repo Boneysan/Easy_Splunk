@@ -18,6 +18,8 @@ readonly DEFAULT_SPLUNK_USER="admin"
 readonly CONFIG_DIR="${SCRIPT_DIR}/config"
 readonly TEMPLATES_DIR="${SCRIPT_DIR}/config-templates"
 readonly SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
+readonly CREDS_DIR="${SCRIPT_DIR}/credentials"
+readonly MIN_PASSWORD_LENGTH=8
 
 # Global variables
 CLUSTER_SIZE=""
@@ -29,6 +31,24 @@ SKIP_CREDS=false
 SKIP_HEALTH=false
 NO_MONITORING=false
 FORCE_DEPLOY=false
+DEPLOYMENT_ID="$(date +%Y%m%d_%H%M%S)"
+
+# Cleanup function for deployment
+cleanup_deployment() {
+    log_message INFO "Cleaning up deployment resources..."
+    
+    # Stop containers if deployment failed
+    if [[ -f "${CONFIG_DIR}/active.conf" ]]; then
+        log_message INFO "Stopping containers..."
+        "${SCRIPT_DIR}/orchestrator.sh" --teardown 2>&1 | while read line; do
+            log_message DEBUG "$line"
+        done
+    fi
+    
+    # Remove temporary files
+    rm -f "${CONFIG_DIR}/.deploy.lock" 2>/dev/null
+    rm -f "/tmp/deploy_${DEPLOYMENT_ID}.tmp" 2>/dev/null
+}
 
 # Usage function
 usage() {
@@ -49,6 +69,7 @@ Options:
     --skip-creds           Skip credential generation
     --skip-health          Skip post-deployment health check
     --force                Force deployment even if cluster exists
+    --debug                Enable debug output
     --help                 Display this help message
 
 Examples:
@@ -124,6 +145,10 @@ parse_arguments() {
                 FORCE_DEPLOY=true
                 shift
                 ;;
+            --debug)
+                DEBUG_MODE=true
+                shift
+                ;;
             --help|-h)
                 usage
                 ;;
@@ -168,3 +193,248 @@ validate_environment() {
         fi
     fi
     
+    # Validate configuration file
+    validate_path "$CONFIG_FILE" "file"
+    
+    # Check required directories exist
+    for dir in "$CONFIG_DIR" "$SCRIPTS_DIR"; do
+        validate_path "$dir" "directory"
+    done
+    
+    log_message SUCCESS "Environment validation completed"
+}
+
+# Load and validate configuration
+load_configuration() {
+    log_message INFO "Loading configuration from $CONFIG_FILE"
+    
+    # Source configuration file with error handling
+    if ! source "$CONFIG_FILE"; then
+        error_exit "Failed to load configuration file: $CONFIG_FILE"
+    fi
+    
+    # Validate required configuration parameters
+    local required_vars=(
+        "INDEXER_COUNT"
+        "SEARCH_HEAD_COUNT"
+        "CPU_INDEXER"
+        "MEMORY_INDEXER"
+        "CPU_SEARCH_HEAD"
+        "MEMORY_SEARCH_HEAD"
+    )
+    
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var:-}" ]]; then
+            error_exit "Missing required configuration parameter: $var"
+        fi
+    done
+    
+    # Validate numeric values
+    validate_input "$INDEXER_COUNT" "^[0-9]+$" "INDEXER_COUNT must be a positive integer"
+    validate_input "$SEARCH_HEAD_COUNT" "^[0-9]+$" "SEARCH_HEAD_COUNT must be a positive integer"
+    
+    # Override monitoring if specified
+    if [[ "$NO_MONITORING" == "true" ]]; then
+        export ENABLE_MONITORING=false
+    fi
+    
+    # Copy configuration to active
+    cp "$CONFIG_FILE" "${CONFIG_DIR}/active.conf" || \
+        error_exit "Failed to copy configuration to active.conf"
+    
+    log_message SUCCESS "Configuration loaded and validated"
+}
+
+# Generate or validate credentials
+handle_credentials() {
+    if [[ "$SKIP_CREDS" == "true" ]]; then
+        log_message INFO "Skipping credential generation (--skip-creds specified)"
+        
+        # Validate existing credentials
+        if [[ ! -d "$CREDS_DIR" ]]; then
+            error_exit "Credentials directory not found. Cannot skip credential generation."
+        fi
+        
+        if [[ ! -f "${CREDS_DIR}/splunk_admin_password" ]]; then
+            error_exit "Splunk admin password file not found. Cannot skip credential generation."
+        fi
+        
+        # Load existing password if not provided
+        if [[ -z "$SPLUNK_PASSWORD" ]]; then
+            SPLUNK_PASSWORD=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null) || \
+                error_exit "Failed to read existing Splunk password"
+        fi
+    else
+        log_message INFO "Generating credentials"
+        
+        # Create credentials directory if it doesn't exist
+        mkdir -p "$CREDS_DIR" || error_exit "Failed to create credentials directory"
+        
+        # Get password if not provided
+        if [[ -z "$SPLUNK_PASSWORD" ]]; then
+            read -s -p "Enter Splunk admin password (min $MIN_PASSWORD_LENGTH chars): " SPLUNK_PASSWORD
+            echo
+            read -s -p "Confirm password: " SPLUNK_PASSWORD_CONFIRM
+            echo
+            
+            if [[ "$SPLUNK_PASSWORD" != "$SPLUNK_PASSWORD_CONFIRM" ]]; then
+                error_exit "Passwords do not match"
+            fi
+        fi
+        
+        # Validate password strength
+        if [[ ${#SPLUNK_PASSWORD} -lt $MIN_PASSWORD_LENGTH ]]; then
+            error_exit "Password must be at least $MIN_PASSWORD_LENGTH characters long"
+        fi
+        
+        # Generate credentials with retry logic
+        retry_with_backoff "${SCRIPTS_DIR}/generate-credentials.sh" \
+            --user "$SPLUNK_USER" \
+            --password "$SPLUNK_PASSWORD" || \
+            error_exit "Failed to generate credentials"
+    fi
+    
+    # Export credentials for use by other scripts
+    export SPLUNK_USER
+    export SPLUNK_PASSWORD
+    
+    log_message SUCCESS "Credentials prepared"
+}
+
+# Deploy the cluster
+deploy_cluster() {
+    log_message INFO "Starting cluster deployment"
+    
+    # Acquire deployment lock
+    acquire_lock "${CONFIG_DIR}/.deploy.lock" 60
+    
+    # Register cleanup function
+    register_cleanup cleanup_deployment
+    
+    # Build orchestrator command
+    local orchestrator_cmd=("${SCRIPT_DIR}/orchestrator.sh")
+    
+    if [[ "${ENABLE_MONITORING:-true}" == "true" ]] && [[ "$NO_MONITORING" != "true" ]]; then
+        orchestrator_cmd+=("--with-monitoring")
+    fi
+    
+    if [[ "$FORCE_DEPLOY" == "true" ]]; then
+        orchestrator_cmd+=("--force")
+    fi
+    
+    # Deploy with retry logic for network-related failures
+    log_message INFO "Executing orchestrator with command: ${orchestrator_cmd[*]}"
+    
+    retry_network_operation "cluster deployment" "${orchestrator_cmd[@]}" || \
+        error_exit "Cluster deployment failed"
+    
+    log_message SUCCESS "Cluster deployment completed"
+}
+
+# Configure Splunk indexes
+configure_indexes() {
+    if [[ -n "$INDEX_NAME" ]]; then
+        log_message INFO "Configuring Splunk index: $INDEX_NAME"
+        
+        # Wait for Splunk to be ready
+        sleep 10
+        
+        # Generate Splunk configurations with retry
+        retry_with_backoff "${SCRIPTS_DIR}/generate-splunk-configs.sh" \
+            --index-name "$INDEX_NAME" \
+            --splunk-user "$SPLUNK_USER" \
+            --splunk-password "$SPLUNK_PASSWORD" || \
+            log_message WARNING "Failed to configure index $INDEX_NAME"
+    fi
+}
+
+# Run health checks
+run_health_checks() {
+    if [[ "$SKIP_HEALTH" == "true" ]]; then
+        log_message INFO "Skipping health checks (--skip-health specified)"
+        return 0
+    fi
+    
+    log_message INFO "Running health checks"
+    
+    # Give services time to stabilize
+    log_message INFO "Waiting for services to stabilize..."
+    sleep 15
+    
+    # Run health check with timeout
+    safe_execute 120 "${SCRIPT_DIR}/health_check.sh" || {
+        log_message WARNING "Some health checks failed. Please check the logs."
+        log_message INFO "You can manually run: ${SCRIPT_DIR}/health_check.sh"
+    }
+}
+
+# Display deployment summary
+display_summary() {
+    log_message SUCCESS "==================================================="
+    log_message SUCCESS "Splunk cluster deployment completed successfully!"
+    log_message SUCCESS "==================================================="
+    
+    echo -e "\n${GREEN}Deployment Summary:${NC}"
+    echo "  Cluster Size: $CLUSTER_SIZE"
+    echo "  Indexers: ${INDEXER_COUNT}"
+    echo "  Search Heads: ${SEARCH_HEAD_COUNT}"
+    
+    if [[ -n "$INDEX_NAME" ]]; then
+        echo "  Index Created: $INDEX_NAME"
+    fi
+    
+    if [[ "${ENABLE_MONITORING:-true}" == "true" ]] && [[ "$NO_MONITORING" != "true" ]]; then
+        echo "  Monitoring: Enabled"
+    fi
+    
+    echo -e "\n${GREEN}Access Information:${NC}"
+    echo "  Splunk Web UI: http://localhost:8000"
+    echo "  Username: $SPLUNK_USER"
+    echo "  Password: [hidden]"
+    
+    if [[ "${ENABLE_MONITORING:-true}" == "true" ]] && [[ "$NO_MONITORING" != "true" ]]; then
+        echo "  Prometheus: http://localhost:9090"
+        echo "  Grafana: http://localhost:3000"
+    fi
+    
+    echo -e "\n${GREEN}Useful Commands:${NC}"
+    echo "  View logs: ${CONTAINER_RUNTIME} compose logs -f"
+    echo "  Stop cluster: ${SCRIPT_DIR}/orchestrator.sh --teardown"
+    echo "  Health check: ${SCRIPT_DIR}/health_check.sh"
+    
+    echo -e "\nDeployment log: $LOG_FILE"
+}
+
+# Main execution
+main() {
+    log_message INFO "Starting Easy_Splunk deployment script"
+    
+    # Parse arguments
+    parse_arguments "$@"
+    
+    # Validate environment
+    validate_environment
+    
+    # Load configuration
+    load_configuration
+    
+    # Handle credentials
+    handle_credentials
+    
+    # Deploy cluster
+    deploy_cluster
+    
+    # Configure indexes
+    configure_indexes
+    
+    # Run health checks
+    run_health_checks
+    
+    # Display summary
+    display_summary
+    
+    log_message SUCCESS "Deployment script completed successfully"
+}
+
+# Execute main function
+main "$@"
