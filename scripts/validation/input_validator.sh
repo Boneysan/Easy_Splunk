@@ -4,7 +4,52 @@
 # Input validation and sanitization helpers to prevent injection and misconfigs.
 #
 # Dependencies: lib/error-handling.sh
-# Required by: Any script that needs input validation
+# Required by: Any script Validators:
+  cluster_size <size>        - Validat    cmd="$1"
+    shift
+    case "$cmd" in
+        cluster_size) validate_cluster_size "$1" ;;
+        index_name) validate_index_name "$1" ;;
+        hostname) validate_hostname "$1" ;;
+        sanitize) sanitize_config_value "$1" ;;
+        port) validate_port "$1" ;;
+        path) validate_path "$1" ;;
+        safe_path) validate_safe_path "$1" "${2:-}" ;;
+        env_var) validate_env_var_name "$1" ;;
+        input) validate_input "$1" "$2" "${3:-}" ;;
+        sql) validate_sql_input "$1" ;;
+        url) validate_url "$1" ;;
+        *) error_exit "Unknown validator. Use --help for usage information." ;;
+    esace (small, medium, large)
+  index_name <n>            - Validate Splunk index name
+  hostname <host>           - Validate hostname (RFC 1123)
+  sanitize <value>          - Sanitize configuration value
+  port <number>             - Validate port number
+  path <path>              - Validate file path
+  safe_path <path> [base]   - Enhanced path validation with base dir check
+  env_var <n>              - Validate environment variable name
+  input <value> <type>      - Validate input with type checking
+  sql <value>              - Validate and sanitize SQL input
+  url <value>              - Validate and sanitize URL
+
+Types for 'input':
+  int    - Integer
+  uint   - Unsigned integer
+  float  - Floating point number
+  bool   - Boolean value
+  size   - Size with units
+  sql    - SQL safe input
+  raw    - Raw input (minimal sanitization)
+
+Examples:
+  $0 cluster_size medium
+  $0 index_name my_index
+  $0 hostname splunk.example.com
+  $0 port 8089
+  $0 input 123 uint
+  $0 sql "user_name"
+  $0 url "https://example.com"
+  $0 safe_path "/path/to/file" "/base/dir" validation
 # Version: 1.0.0
 # ==============================================================================
 
@@ -23,8 +68,11 @@ readonly MAX_HOSTNAME_LENGTH=253  # RFC 1035
 readonly MAX_PORT=65535
 readonly MIN_PORT=1
 readonly MAX_PATH_LENGTH=4096
+readonly MAX_INPUT_LENGTH=8192
 readonly SAFE_PATH_PATTERN='^(/[a-zA-Z0-9][a-zA-Z0-9_.-]*)+$'
 readonly SAFE_ENV_VAR_PATTERN='^[a-zA-Z_][a-zA-Z0-9_]*$'
+readonly SAFE_INPUT_PATTERN='^[a-zA-Z0-9 _.,\-@+()]+$'
+readonly SQL_INJECTION_PATTERN='.*(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|\-\-|\/\*|\*\/|;).*'
 
 # Validate cluster size (small, medium, large)
 validate_cluster_size() {
@@ -133,11 +181,26 @@ validate_env_var_name() {
     fi
 }
 
-# Validate script input with type checking
+# Validate script input with type checking and sanitization
 validate_input() {
     local value="$1"
     local type="$2"
     local var_name="${3:-value}"
+    
+    # Check for empty input
+    if [[ -z "$value" ]]; then
+        error_exit "Empty input received for $var_name"
+    fi
+    
+    # Check input length
+    if [[ ${#value} -gt $MAX_INPUT_LENGTH ]]; then
+        error_exit "Input exceeds maximum length for $var_name"
+    fi
+    
+    # Check for unsafe characters unless explicitly typing as 'raw'
+    if [[ "$type" != "raw" ]] && [[ ! "$value" =~ $SAFE_INPUT_PATTERN ]]; then
+        error_exit "Input contains unsafe characters: $value"
+    fi
     
     case "$type" in
         int)
@@ -165,10 +228,100 @@ validate_input() {
                 error_exit "Invalid size for $var_name: $value"
             fi
             ;;
+        sql)
+            validate_sql_input "$value"
+            ;;
         *)
-            error_exit "Unknown validation type: $type"
+            if [[ "$type" != "raw" ]]; then
+                error_exit "Unknown validation type: $type"
+            fi
             ;;
     esac
+    
+    # Return sanitized input for non-raw types
+    if [[ "$type" != "raw" ]]; then
+        sanitize_input "$value"
+    else
+        echo "$value"
+    fi
+}
+
+# Sanitize general input
+sanitize_input() {
+    local input="$1"
+    echo "$input" | sed -e 's/[;&|`$(){}]//g' \
+                       -e 's/[\x00-\x1F\x7F]//g' \
+                       -e 's/\\/\\\\/g' \
+                       -e 's/"/\\"/g'
+}
+
+# SQL Injection Prevention
+validate_sql_input() {
+    local input="$1"
+    
+    # Check for common SQL injection patterns
+    if [[ "$input" =~ $SQL_INJECTION_PATTERN ]]; then
+        error_exit "Potential SQL injection detected: $input"
+    fi
+    
+    # Escape special characters for SQL
+    echo "$input" | sed -e "s/'/''/g" \
+                       -e 's/;/\\;/g' \
+                       -e 's/--/\\-\\-/g' \
+                       -e 's/\/\*/\\\/*\//g' \
+                       -e 's/\*\//\\*\\\//g'
+}
+
+# Enhanced path traversal protection
+validate_safe_path() {
+    local path="$1"
+    local base_dir="${2:-$SCRIPT_DIR}"
+    
+    # Normalize path
+    local normalized_path
+    normalized_path="$(cd "$(dirname "$path" 2>/dev/null)" && pwd)/$(basename "$path")" || {
+        error_exit "Invalid path: $path"
+    }
+    
+    # Check if path is within base directory
+    if [[ "$normalized_path" != "$base_dir"* ]]; then
+        error_exit "Path is outside allowed directory: $path"
+    fi
+    
+    # Additional safety checks
+    case "$path" in
+        *[[:space:]]*)
+            error_exit "Path contains whitespace: $path"
+            ;;
+        *[\\\$\'\"]*)
+            error_exit "Path contains shell metacharacters: $path"
+            ;;
+        */dev/*|*/proc/*|*/sys/*)
+            error_exit "Path points to system directory: $path"
+            ;;
+    esac
+    
+    echo "$normalized_path"
+}
+
+# URL Sanitization and Validation
+validate_url() {
+    local url="$1"
+    
+    # Basic URL validation
+    if ! [[ "$url" =~ ^https?:// ]]; then
+        error_exit "Invalid URL scheme (must be http:// or https://): $url"
+    fi
+    
+    # Extract and validate hostname
+    local hostname
+    hostname=$(echo "$url" | sed -E 's|^https?://([^/]+).*|\1|')
+    validate_hostname "$hostname" >/dev/null
+    
+    # Sanitize and return
+    echo "$url" | sed -e 's/[<>]//g' \
+                     -e 's/[;&|`$(){}]//g' \
+                     -e 's/[\x00-\x1F\x7F]//g'
 }
 
 # Only execute if run directly
