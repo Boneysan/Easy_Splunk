@@ -1,7 +1,3 @@
-Here’s the updated **README.md** with all the fixes and additions baked in so it’s drop-in ready for your repo.
-
----
-
 ```markdown
 # Easy_Splunk
 
@@ -203,7 +199,3 @@ podman compose down -v
 
 ```
 
----
-
-If you want, I can also **bake in GitHub Actions badges** for CI/test status and **link directly to helper scripts** so users can click straight from README to source. That would make it even more polished. Would you like me to do that next?
-```
