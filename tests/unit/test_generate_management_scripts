@@ -1,0 +1,112 @@
+```bash
+#!/usr/bin/env bash
+# ==============================================================================
+# tests/unit/test_generate_management_scripts.sh
+# Unit tests for generate-management-scripts.sh, covering script generation and placeholder replacement.
+#
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, generate-management-scripts.sh
+# Version: 1.0.0
+# ==============================================================================
+set -euo pipefail
+IFS=$'\n\t'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# Source dependencies
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/error-handling.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/security.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../generate-management-scripts.sh"
+
+# Test counter and results
+TEST_COUNT=0
+TEST_PASSED=0
+TEST_FAILED=0
+
+# Mock commands
+curl() { echo "Mock curl: $@"; return 0; }
+jq() { echo "Mock jq: $@"; return 0; }
+date() { echo "2025-08-13 12:00:00 UTC"; return 0; }
+stat() { echo "600"; return 0; }
+openssl() { echo "Mock openssl: $@"; return 0; }
+
+# Helper to run a test
+run_test() {
+  local test_name="$1"; shift
+  ((TEST_COUNT++))
+  log_info "Running test: ${test_name}"
+  if "$@"; then
+    log_success "Test passed: ${test_name}"
+    ((TEST_PASSED++))
+  else
+    log_error "Test failed: ${test_name}"
+    ((TEST_FAILED++))
+  fi
+}
+
+# Test 1: Generate scripts with defaults
+test_generate_defaults() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  touch "$tmp/secrets.env"
+  OUT_DIR="$tmp/management-scripts" SECRETS_ENV_FILE="$tmp/secrets.env" main
+  [[ -f "$tmp/management-scripts/get-health.sh" ]] && \
+  [[ -f "$tmp/management-scripts/list-users.sh" ]] && \
+  [[ -f "$tmp/management-scripts/add-user.sh" ]] && \
+  grep -q "SECRETS_ENV_FILE=$tmp/secrets.env" "$tmp/management-scripts/get-health.sh"
+}
+
+# Test 2: Generate with custom parameters
+test_generate_custom() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  touch "$tmp/custom.env"
+  OUT_DIR="$tmp/scripts" SECRETS_ENV_FILE="$tmp/custom.env" API_BASE_URL="https://api.example.com" KEY_VAR="CUSTOM_API_KEY" main
+  [[ -f "$tmp/scripts/get-health.sh" ]] && \
+  grep -q "API_BASE_URL=https://api.example.com" "$tmp/scripts/get-health.sh" && \
+  grep -q "KEY_VAR=CUSTOM_API_KEY" "$tmp/scripts/get-health.sh"
+}
+
+# Test 3: Missing secrets file
+test_missing_secrets() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  OUT_DIR="$tmp/scripts" SECRETS_ENV_FILE="$tmp/nonexistent.env" main 2>/dev/null && return 1
+  return 0
+}
+
+# Test 4: Verify script permissions
+test_script_permissions() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  touch "$tmp/secrets.env"
+  OUT_DIR="$tmp/scripts" SECRETS_ENV_FILE="$tmp/secrets.env" main
+  local perms
+  perms=$(stat -c %a "$tmp/scripts/get-health.sh" 2>/dev/null || stat -f %A "$tmp/scripts/get-health.sh")
+  [[ "$perms" == "700" ]]
+}
+
+# Test 5: Verify script execution
+test_script_execution() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  echo "THIRD_PARTY_API_KEY=testkey" > "$tmp/secrets.env"
+  OUT_DIR="$tmp/scripts" SECRETS_ENV_FILE="$tmp/secrets.env" main
+  bash "$tmp/scripts/get-health.sh" >/dev/null
+  return 0
+}
+
+# Run all tests
+run_test "Generate scripts with defaults" test_generate_defaults
+run_test "Generate with custom parameters" test_generate_custom
+run_test "Missing secrets file" test_missing_secrets
+run_test "Verify script permissions" test_script_permissions
+run_test "Verify script execution" test_script_execution
+
+# Summary
+log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
+[[ ${TEST_FAILED} -eq 0 ]]
+```
