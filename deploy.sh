@@ -1,203 +1,170 @@
-```bash
-#!/usr/bin/env bash
-#
-# deploy.sh — One-shot wrapper for Easy Splunk
-#
-# Orchestrates: config selection → (optional) creds → digest resolution → deploy → (optional) Splunk config → (optional) health check.
-#
-# Usage:
-#   ./deploy.sh <small|medium|large|/path/to/conf> [options]
-#
-# Options:
-#   --index-name <NAME>         Create/configure this index in Splunk after deploy
-#   --splunk-user <USER>        Splunk admin username   (default: admin)
-#   --splunk-password <PASS>    Splunk admin password   (default: prompt if not provided)
-#   --splunk-api-host <HOST>    Splunk mgmt API host    (default: 127.0.0.1)
-#   --splunk-api-port <PORT>    Splunk mgmt API port    (default: 8089)
-#   --no-monitoring             Force-disable Prometheus+Grafana even if config enables it
-#   --skip-creds                Skip credential/cert generation (reuse existing)
-#   --skip-health               Skip post-deploy health check
-#   --skip-digests              Skip image digest resolution (use existing versions.env)
-#   --config-file <FILE>        Check legacy v2.0 config for migration issues
-#   -h | --help                 Show help
-#
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, generate-credentials.sh,
-#               orchestrator.sh, generate-splunk-configs.sh, health_check.sh, resolve-digests.sh,
-#               integration-guide.sh
-# Notes:
-# - Expects to run from the repo root.
-# - Uses orchestrator's --config flag to load a template.
-# - Creates temporary override config for --no-monitoring.
-# Version: 1.0.0
-#
+#!/bin/bash
+# deploy.sh - Enhanced deployment wrapper with comprehensive error handling
+# Main entry point for Easy_Splunk cluster deployment
 
-set -euo pipefail
-IFS=$'\n\t'
+# Source error handling module
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/scripts/common/error_handling.sh" || {
+    echo "ERROR: Cannot load error handling module" >&2
+    exit 1
+}
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-cd "$SCRIPT_DIR"
+# Initialize error handling
+init_error_handling
 
-# --- Source core libs
-source "./lib/core.sh"
-source "./lib/error-handling.sh"
-source "./lib/security.sh"
+# Configuration
+readonly DEFAULT_CLUSTER_SIZE="medium"
+readonly DEFAULT_SPLUNK_USER="admin"
+readonly CONFIG_DIR="${SCRIPT_DIR}/config"
+readonly TEMPLATES_DIR="${SCRIPT_DIR}/config-templates"
+readonly SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
 
-# --- Version Checks ---
-if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
-  die "${E_GENERAL}" "deploy.sh requires security.sh version >= 1.0.0"
-fi
-
-# --- Defaults
-SIZE_OR_CONF=""
-INDEX_NAME=""
-SPLUNK_USER="admin"
-SPLUNK_PASSWORD=""
-SPLUNK_API_HOST="127.0.0.1"
-SPLUNK_API_PORT="8089"
-FORCE_NO_MONITORING="false"
-SKIP_CREDS="false"
-SKIP_HEALTH="false"
-SKIP_DIGESTS="false"
+# Global variables
+CLUSTER_SIZE=""
 CONFIG_FILE=""
-: "${SECRETS_DIR:=./secrets}"
-CONFIG_DIR="./config"
-TEMPLATES_DIR="./config-templates"
-ACTIVE_CONFIG=""
-TEMP_OVERRIDE_CONFIG=""
+INDEX_NAME=""
+SPLUNK_USER="${DEFAULT_SPLUNK_USER}"
+SPLUNK_PASSWORD=""
+SKIP_CREDS=false
+SKIP_HEALTH=false
+NO_MONITORING=false
+FORCE_DEPLOY=false
 
-# --- Helpers
+# Usage function
 usage() {
-  sed -n '1,100p' "$0" | sed -n '1,40p' | sed 's/^# \{0,1\}//'
-  exit 0
+    cat << EOF
+Usage: $0 <size|config> [options]
+
+Deploy a containerized Splunk cluster with optional monitoring.
+
+Arguments:
+    size            Cluster size: small, medium, or large
+    config          Path to custom configuration file
+
+Options:
+    --index-name NAME       Create and configure the specified index
+    --splunk-user USER      Splunk admin username (default: admin)
+    --splunk-password PASS  Splunk admin password (will prompt if not provided)
+    --no-monitoring         Disable Prometheus and Grafana
+    --skip-creds           Skip credential generation
+    --skip-health          Skip post-deployment health check
+    --force                Force deployment even if cluster exists
+    --help                 Display this help message
+
+Examples:
+    $0 medium --index-name prod_data
+    $0 large --no-monitoring --splunk-user splunkadmin
+    $0 ./custom.conf --skip-creds
+
+EOF
+    exit 0
 }
 
-cleanup() {
-  if [[ -n "${TEMP_OVERRIDE_CONFIG:-}" && -f "$TEMP_OVERRIDE_CONFIG" ]]; then
-    rm -f "$TEMP_OVERRIDE_CONFIG" || true
-  fi
+# Parse command line arguments
+parse_arguments() {
+    log_message INFO "Parsing command line arguments"
+    
+    # Check for minimum arguments
+    if [[ $# -eq 0 ]]; then
+        usage
+    fi
+    
+    # Get cluster size or config file
+    case "$1" in
+        small|medium|large)
+            CLUSTER_SIZE="$1"
+            CONFIG_FILE="${TEMPLATES_DIR}/${1}-production.conf"
+            ;;
+        --help|-h)
+            usage
+            ;;
+        *)
+            if [[ -f "$1" ]]; then
+                CONFIG_FILE="$1"
+                CLUSTER_SIZE="custom"
+            else
+                error_exit "Invalid cluster size or config file: $1"
+            fi
+            ;;
+    esac
+    shift
+    
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --index-name)
+                INDEX_NAME="$2"
+                validate_input "$INDEX_NAME" "^[a-zA-Z][a-zA-Z0-9_]*$" \
+                    "Index name must start with a letter and contain only alphanumeric characters and underscores"
+                shift 2
+                ;;
+            --splunk-user)
+                SPLUNK_USER="$2"
+                validate_input "$SPLUNK_USER" "^[a-zA-Z][a-zA-Z0-9_-]*$" \
+                    "Username must start with a letter and contain only alphanumeric characters, hyphens, and underscores"
+                shift 2
+                ;;
+            --splunk-password)
+                SPLUNK_PASSWORD="$2"
+                shift 2
+                ;;
+            --no-monitoring)
+                NO_MONITORING=true
+                shift
+                ;;
+            --skip-creds)
+                SKIP_CREDS=true
+                shift
+                ;;
+            --skip-health)
+                SKIP_HEALTH=true
+                shift
+                ;;
+            --force)
+                FORCE_DEPLOY=true
+                shift
+                ;;
+            --help|-h)
+                usage
+                ;;
+            *)
+                error_exit "Unknown option: $1"
+                ;;
+        esac
+    done
+    
+    log_message INFO "Configuration: size=$CLUSTER_SIZE, config=$CONFIG_FILE"
 }
-add_cleanup_task "cleanup"
 
-require_file() {
-  local f="$1"
-  [[ -f "$f" ]] || die "$E_MISSING_DEP" "Required file not found: $f"
-}
-
-# --- Parse args
-if [[ $# -lt 1 ]]; then
-  usage
-fi
-
-SIZE_OR_CONF="$1"; shift || true
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --index-name)       INDEX_NAME="${2:-}"; shift 2 ;;
-    --splunk-user)      SPLUNK_USER="${2:-}"; shift 2 ;;
-    --splunk-password)  SPLUNK_PASSWORD="${2:-}"; shift 2 ;;
-    --splunk-api-host)  SPLUNK_API_HOST="${2:-}"; shift 2 ;;
-    --splunk-api-port)  SPLUNK_API_PORT="${2:-}"; shift 2 ;;
-    --no-monitoring)    FORCE_NO_MONITORING="true"; shift ;;
-    --skip-creds)       SKIP_CREDS="true"; shift ;;
-    --skip-health)      SKIP_HEALTH="true"; shift ;;
-    --skip-digests)     SKIP_DIGESTS="true"; shift ;;
-    --config-file)      CONFIG_FILE="${2:-}"; shift 2 ;;
-    -h|--help)          usage ;;
-    *) die "$E_INVALID_INPUT" "Unknown option: $1" ;;
-  esac
-done
-
-# --- Resolve config
-case "$SIZE_OR_CONF" in
-  small|small-production)   ACTIVE_CONFIG="${TEMPLATES_DIR}/small-production.conf" ;;
-  medium|medium-production) ACTIVE_CONFIG="${TEMPLATES_DIR}/medium-production.conf" ;;
-  large|large-production)   ACTIVE_CONFIG="${TEMPLATES_DIR}/large-production.conf" ;;
-  *)
-    ACTIVE_CONFIG="$SIZE_OR_CONF"
-    ;;
-esac
-
-if [[ ! -f "$ACTIVE_CONFIG" ]]; then
-  die "$E_INVALID_INPUT" "Config not found: ${ACTIVE_CONFIG}"
-fi
-
-mkdir -p "$CONFIG_DIR" "$SECRETS_DIR"
-harden_file_permissions "$CONFIG_DIR" "700" "config directory" || true
-harden_file_permissions "$SECRETS_DIR" "700" "secrets directory" || true
-harden_file_permissions "$ACTIVE_CONFIG" "600" "active config" || true
-
-# --- Check legacy config
-if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
-  log_info "📋 Checking legacy v2.0 configuration: ${CONFIG_FILE}"
-  ./integration-guide.sh "$CONFIG_FILE" --output text
-  log_warn "Review migration issues above before proceeding."
-fi
-
-# --- Resolve image digests
-if ! is_true "$SKIP_DIGESTS"; then
-  log_info "📸 Resolving image digests in versions.env..."
-  require_file "./resolve-digests.sh"
-  ./resolve-digests.sh
-else
-  log_info "📸 Skipping digest resolution (per --skip-digests)."
-fi
-
-# --- Create override config for --no-monitoring
-if is_true "$FORCE_NO_MONITORING"; then
-  TEMP_OVERRIDE_CONFIG="$(mktemp -t easy-splunk-override-XXXX.conf)"
-  cat "$ACTIVE_CONFIG" > "$TEMP_OVERRIDE_CONFIG"
-  printf '\n# Wrapper override\nENABLE_MONITORING="false"\n' >> "$TEMP_OVERRIDE_CONFIG"
-  harden_file_permissions "$TEMP_OVERRIDE_CONFIG" "600" "override config" || true
-  ACTIVE_CONFIG="$TEMP_OVERRIDE_CONFIG"
-  log_info "Monitoring disabled via wrapper override."
-fi
-
-# --- Show plan
-log_info "📄 Using config: ${ACTIVE_CONFIG}"
-if ! is_empty "$INDEX_NAME"; then
-  log_info "🗂  Will configure Splunk index: ${INDEX_NAME}"
-fi
-
-# --- Preflight checks
-require_file "./orchestrator.sh"
-require_file "./generate-credentials.sh"
-require_file "./health_check.sh"
-require_file "./generate-splunk-configs.sh"
-require_file "./versions.env"
-
-# --- Generate credentials
-if ! is_true "$SKIP_CREDS"; then
-  log_info "🔐 Generating credentials and self-signed certificates..."
-  yes | ./generate-credentials.sh
-else
-  log_info "🔐 Skipping credential generation (per --skip-creds)."
-fi
-
-# --- Deploy
-log_info "🚀 Launching orchestrator..."
-./orchestrator.sh --config "$ACTIVE_CONFIG"
-
-# --- Configure Splunk index
-if ! is_empty "$INDEX_NAME"; then
-  log_info "⚙️  Configuring Splunk index '${INDEX_NAME}' via API..."
-  GEN_ARGS=(--splunk-user "$SPLUNK_USER" --index-name "$INDEX_NAME" --splunk-api-host "$SPLUNK_API_HOST" --splunk-api-port "$SPLUNK_API_PORT")
-  if [[ -n "$SPLUNK_PASSWORD" ]]; then
-    GEN_ARGS+=(--splunk-password "$SPLUNK_PASSWORD")
-  fi
-  ./generate-splunk-configs.sh "${GEN_ARGS[@]}"
-else
-  log_info "ℹ️  No --index-name provided; skipping Splunk API configuration."
-fi
-
-# --- Health check
-if ! is_true "$SKIP_HEALTH"; then
-  log_info "🩺 Running post-deployment health check..."
-  ./health_check.sh
-else
-  log_info "🩺 Skipping health check (per --skip-health)."
-fi
-
-# --- Audit security
-audit_security_configuration "${SCRIPT_DIR}/security-audit.txt"
-
-log_success "✅ Deployment complete. Splunk UI should be available at http://localhost:8000"
-```
+# Validate environment
+validate_environment() {
+    log_message INFO "Validating deployment environment"
+    
+    # Check required commands
+    validate_commands bash grep sed awk
+    
+    # Validate container runtime
+    validate_container_runtime
+    
+    # Check disk space (require at least 10GB)
+    check_disk_space "/" 10240
+    
+    # Validate network connectivity
+    if [[ "${SKIP_NETWORK_CHECK:-false}" != "true" ]]; then
+        validate_network "hub.docker.com" 443 10 || \
+            log_message WARNING "Cannot reach Docker Hub, deployment may fail if images are not cached"
+    fi
+    
+    # Check for existing deployment
+    if [[ "$FORCE_DEPLOY" != "true" ]]; then
+        if [[ -f "${CONFIG_DIR}/active.conf" ]]; then
+            log_message WARNING "Existing deployment detected"
+            read -p "A cluster appears to be already deployed. Continue? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                log_message INFO "Deployment cancelled by user"
+                exit 0
+            fi
+        fi
+    fi
+    
