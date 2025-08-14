@@ -30,6 +30,12 @@ source "${SCRIPT_DIR}/lib/error-handling.sh"
 main() {
     log_info "Starting test suite execution"
     
+    # Run security vulnerability scan
+    if ! run_security_scan; then
+        log_error "Security vulnerability scan failed"
+        exit 1
+    fi
+    
     # Run unit tests
     if ! run_unit_tests; then
         log_error "Unit tests failed"
@@ -61,6 +67,7 @@ Options:
     -f, --filter PATTERN    Only run tests matching PATTERN
     -p, --performance      Run performance tests (takes longer)
     -s, --skip-long        Skip long-running tests
+    --skip-security        Skip security vulnerability scan
     -h, --help             Show this help message
 EOF
 }
@@ -84,6 +91,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_LONG_TESTS=true
             shift
             ;;
+        --skip-security)
+            SKIP_SECURITY_SCAN=true
+            shift
+            ;;
         -h|--help)
             print_usage
             exit 0
@@ -100,6 +111,7 @@ VERBOSE=false
 TEST_FILTER=""
 RUN_PERFORMANCE_TESTS=false
 SKIP_LONG_TESTS=false
+SKIP_SECURITY_SCAN=false
 
 # --- Test Suite Functions -----------------------------------------------------
 run_unit_tests() {
@@ -178,6 +190,23 @@ run_performance_tests() {
     fi
     
     log_success "All performance tests passed"
+    return 0
+}
+
+run_security_scan() {
+    if [[ "${SKIP_SECURITY_SCAN}" == "true" ]]; then
+        log_info "Skipping security vulnerability scan"
+        return 0
+    fi
+    
+    log_section "Running Security Vulnerability Scan"
+    
+    if ! "${SCRIPT_DIR}/tests/security/security_scan.sh"; then
+        log_error "Security vulnerability scan failed"
+        return 1
+    fi
+    
+    log_success "Security vulnerability scan passed"
     return 0
 }
 RUN_UNIT=true
