@@ -18,7 +18,8 @@
 #   - Scripts are idempotent to regenerate and do not store the API key.
 #   - Placeholders are replaced safely (slashes, ampersands, backslashes escaped).
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh
+# Version: 1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -30,6 +31,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/security.sh
+source "${SCRIPT_DIR}/lib/security.sh"
+
+# --- Version Checks ------------------------------------------------------------
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "generate-management-scripts.sh requires security.sh version >= 1.0.0"
+fi
 
 # --- Defaults (overridable by flags) ---
 OUT_DIR="${OUT_DIR:-./management-scripts}"
@@ -63,25 +71,24 @@ done
 
 # --- Pre-flight ---
 mkdir -p "${OUT_DIR}"
+harden_file_permissions "${OUT_DIR}" "700" "management scripts directory" || true
 if [[ ! -f "${SECRETS_ENV_FILE}" ]]; then
   die "${E_MISSING_DEP:-3}" "Secrets file not found: ${SECRETS_ENV_FILE}. Run generate-credentials.sh first."
 fi
-
-# Best-effort: ensure the key var exists in the secrets file
+harden_file_permissions "${SECRETS_ENV_FILE}" "600" "secrets env file" || true
 if ! grep -E "^[[:space:]]*${KEY_VAR}=" "${SECRETS_ENV_FILE}" >/dev/null; then
   log_warn "Could not find ${KEY_VAR}= in ${SECRETS_ENV_FILE}. Scripts will still work if it's added later."
 fi
 
-# Safe replacement helper for sed replacement strings (escapes \ and &)
+# Safe replacement helper
 _sed_escape_repl() {
   local s="${1-}"
-  s="${s//\\/\\\\}"   # backslashes
-  s="${s//&/\\&}"     # ampersands
+  s="${s//\\/\\\\}"
+  s="${s//&/\\&}"
   printf '%s' "${s}"
 }
 
-# Small helper injected into all generated scripts: loads env & fetches key.
-# Also normalizes base URL by trimming any trailing slash.
+# Common prefix for generated scripts
 read -r -d '' _COMMON_PFX <<'EOS' || true
 #!/usr/bin/env bash
 set -euo pipefail
@@ -94,7 +101,7 @@ KEY_VAR="${KEY_VAR_PLACEHOLDER}"
 # Normalize base URL: drop trailing slash
 API_BASE_URL="${API_BASE_URL%/}"
 
-# Load secrets at runtime without exporting unrelated env:
+# Load secrets at runtime without exporting unrelated env
 if [[ ! -f "${SECRETS_ENV_FILE}" ]]; then
   echo "Secrets file not found: ${SECRETS_ENV_FILE}" >&2
   exit 2
@@ -112,10 +119,8 @@ _curl_json() {
   # usage: _curl_json GET /path [curl-args...]
   local method="$1"; shift
   local path="$1"; shift || true
-  curl -fsS --retry 2 --retry-delay 2 --max-time 20 --location \
-    -H "Authorization: Bearer ${API_KEY}" \
-    -H "Accept: application/json" \
-    -X "${method}" "${API_BASE_URL}${path}" "$@"
+  curl_auth "${API_BASE_URL}${path}" "${SECRETS_ENV_FILE}" \
+    -X "${method}" -H "Accept: application/json" "$@"
 }
 
 _pp_or_cat() {
@@ -124,11 +129,10 @@ _pp_or_cat() {
 EOS
 
 # --- Generators ---------------------------------------------------------------
-
 _generate_get_health_script() {
   local p="${OUT_DIR}/get-health.sh"
   log_info "  -> ${p}"
-  cat > "${p}" <<EOF
+  write_secret_file "${p}" "$(cat <<EOF
 ${_COMMON_PFX}
 # Check API health
 if _curl_json GET "/health" | _pp_or_cat; then
@@ -138,34 +142,28 @@ else
   exit 1
 fi
 EOF
-  chmod 700 "${p}"
+)" "get-health.sh"
+  harden_file_permissions "${p}" "700" "management script" || true
 }
 
 _generate_list_users_script() {
   local p="${OUT_DIR}/list-users.sh"
   log_info "  -> ${p}"
-  cat > "${p}" <<EOF
+  write_secret_file "${p}" "$(cat <<EOF
 ${_COMMON_PFX}
 # List users
 _curl_json GET "/users" | _pp_or_cat
 EOF
-  chmod 700 "${p}"
+)" "list-users.sh"
+  harden_file_permissions "${p}" "700" "management script" || true
 }
 
 _generate_add_user_script() {
   local p="${OUT_DIR}/add-user.sh"
   log_info "  -> ${p}"
-  cat > "${p}" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-IFS=$'\n\t'
-
-SECRETS_ENV_FILE="${SECRETS_ENV_FILE_PLACEHOLDER}"
-API_BASE_URL="${API_BASE_URL_PLACEHOLDER}"
-KEY_VAR="${KEY_VAR_PLACEHOLDER}"
-
-API_BASE_URL="${API_BASE_URL%/}"
-
+  write_secret_file "${p}" "$(cat <<'EOF'
+${_COMMON_PFX}
+# Add user
 if [[ $# -lt 2 || $# -gt 3 ]]; then
   echo "Usage: $0 <username> <password> [role]" >&2
   exit 64
@@ -173,72 +171,52 @@ fi
 
 USERNAME="$1"; PASSWORD="$2"; ROLE="${3:-user}"
 
-# Load secrets
-if [[ ! -f "${SECRETS_ENV_FILE}" ]]; then
-  echo "Secrets file not found: ${SECRETS_ENV_FILE}" >&2
-  exit 2
-fi
-# shellcheck disable=SC1090
-set -a; source "${SECRETS_ENV_FILE}"; set +a
-
-API_KEY="${!KEY_VAR:-}"
-if [[ -z "${API_KEY}" ]]; then
-  echo "API key env var '${KEY_VAR}' is empty/missing in ${SECRETS_ENV_FILE}" >&2
-  exit 3
-fi
-
-# Build JSON payload (prefer jq for safe escaping)
+# Build JSON payload
 if command -v jq >/dev/null 2>&1; then
   payload="$(jq -c --arg u "$USERNAME" --arg p "$PASSWORD" --arg r "$ROLE" \
     '{username:$u,password:$p,role:$r}')"
 else
-  # Basic fallback (may not handle exotic characters)
   payload=$(printf '{"username":"%s","password":"%s","role":"%s"}' "$USERNAME" "$PASSWORD" "$ROLE")
 fi
 
 # Send request
-if ! out=$(curl -fsS --retry 2 --retry-delay 2 --max-time 20 --location \
-      -H "Authorization: Bearer ${API_KEY}" \
-      -H "Content-Type: application/json" \
-      -d "$payload" \
-      -X POST "${API_BASE_URL}/users" 2>&1); then
+if ! out=$(_curl_json POST "/users" -H "Content-Type: application/json" -d "$payload" 2>&1); then
   echo "$out" >&2
   exit 1
 fi
 
-# Pretty print if possible
-if command -v jq >/dev/null 2>&1; then
-  printf '%s\n' "$out" | jq .
-else
-  printf '%s\n' "$out"
-fi
+# Pretty print
+printf '%s\n' "$out" | _pp_or_cat
 EOF
-  chmod 700 "${p}"
+)" "add-user.sh"
+  harden_file_permissions "${p}" "700" "management script" || true
 }
 
-# --- Write scripts ------------------------------------------------------------
-_generate_get_health_script
-_generate_list_users_script
-_generate_add_user_script
+# --- Main ---------------------------------------------------------------------
+main() {
+  log_info "🚀 Generating API Management Scripts"
+  mkdir -p "${OUT_DIR}"
+  _generate_get_health_script
+  _generate_list_users_script
+  _generate_add_user_script
+  _rep_secrets="$(_sed_escape_repl "${SECRETS_ENV_FILE}")"
+  _rep_baseurl="$(_sed_escape_repl "${API_BASE_URL}")"
+  _rep_keyvar="$(_sed_escape_repl "${KEY_VAR}")"
+  for f in "${OUT_DIR}/get-health.sh" "${OUT_DIR}/list-users.sh" "${OUT_DIR}/add-user.sh"; do
+    sed -i.bak \
+      -e "s|SECRETS_ENV_FILE_PLACEHOLDER|${_rep_secrets}|g" \
+      -e "s|API_BASE_URL_PLACEHOLDER|${_rep_baseurl}|g" \
+      -e "s|KEY_VAR_PLACEHOLDER|${_rep_keyvar}|g" \
+      "$f"
+    rm -f "${f}.bak"
+  done
+  audit_security_configuration "${OUT_DIR}/security-audit.txt"
+  log_warn "Generated scripts load the API key at runtime from: ${SECRETS_ENV_FILE}"
+  log_warn "Expected .env entry: ${KEY_VAR}=<your_api_key_here>"
+  log_info  "Run again with different flags to update paths/URL/variable."
+  log_success "✅ Management scripts generated in: ${OUT_DIR}"
+}
 
-# --- Post-process placeholders (safe replacement) -----------------------------
-_rep_secrets="$(_sed_escape_repl "${SECRETS_ENV_FILE}")"
-_rep_baseurl="$(_sed_escape_repl "${API_BASE_URL}")"
-_rep_keyvar="$(_sed_escape_repl "${KEY_VAR}")"
-
-for f in "${OUT_DIR}/get-health.sh" "${OUT_DIR}/list-users.sh" "${OUT_DIR}/add-user.sh"; do
-  # Use a backup suffix that works on GNU/BSD sed
-  sed -i.bak \
-    -e "s|SECRETS_ENV_FILE_PLACEHOLDER|${_rep_secrets}|g" \
-    -e "s|API_BASE_URL_PLACEHOLDER|${_rep_baseurl}|g" \
-    -e "s|KEY_VAR_PLACEHOLDER|${_rep_keyvar}|g" \
-    "$f"
-  rm -f "${f}.bak"
-done
-
-# --- Final messages -----------------------------------------------------------
-log_warn "Generated scripts load the API key at runtime from: ${SECRETS_ENV_FILE}"
-log_warn "Expected .env entry: ${KEY_VAR}=<your_api_key_here>"
-log_info  "Run again with different flags to update paths/URL/variable."
-log_success "✅ Management scripts generated in: ${OUT_DIR}"
+GENERATE_MANAGEMENT_SCRIPTS_VERSION="1.0.0"
+main
 ```
