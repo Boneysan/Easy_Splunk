@@ -1,11 +1,11 @@
 #!/bin/bash
-# generate-credentials.sh - Enhanced credential generation with input validation
+# generate-credentials.sh - Complete credential generation with comprehensive error handling
 # Securely generates and stores credentials for Splunk cluster
 
 # Source error handling module
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/scripts/common/error_handling.sh" || {
-    echo "ERROR: Cannot load error handling module" >&2
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Cannot load error handling module from lib/error-handling.sh" >&2
     exit 1
 }
 
@@ -21,6 +21,8 @@ readonly MAX_USERNAME_LENGTH=32
 readonly DEFAULT_USERNAME="admin"
 readonly CERT_VALIDITY_DAYS=365
 readonly KEY_SIZE=2048
+readonly MIN_CERT_DAYS=1
+readonly MAX_CERT_DAYS=3650
 
 # Password complexity requirements
 readonly REQUIRE_UPPERCASE=true
@@ -56,7 +58,7 @@ cleanup_credentials() {
     rm -f "${CREDS_DIR}/.tmp_*" 2>/dev/null
     
     # Secure permissions on credential directory
-    chmod 700 "$CREDS_DIR" 2>/dev/null
+    chmod 700 "$CREDS_DIR" 2>/dev/null || true
 }
 
 # Usage function
@@ -74,7 +76,8 @@ Options:
     --non-interactive      Run without prompts (requires --password)
     --validate-only        Validate existing credentials without generating
     --export-env           Export credentials as environment variables
-    --min-length LENGTH    Minimum password length (default: 8)
+    --cert-days DAYS       Certificate validity period (1-3650, default: 365)
+    --key-size SIZE        RSA key size (1024, 2048, 4096, default: 2048)
     --help                 Display this help message
 
 Password Requirements:
@@ -128,10 +131,21 @@ parse_arguments() {
                 EXPORT_ENV=true
                 shift
                 ;;
-            --min-length)
-                MIN_PASSWORD_LENGTH="$2"
-                validate_input "$MIN_PASSWORD_LENGTH" "^[0-9]+$" \
-                    "Minimum length must be a positive integer"
+            --cert-days)
+                CERT_VALIDITY_DAYS="$2"
+                validate_timeout "$CERT_VALIDITY_DAYS" "$MIN_CERT_DAYS" "$MAX_CERT_DAYS"
+                shift 2
+                ;;
+            --key-size)
+                KEY_SIZE="$2"
+                case "$KEY_SIZE" in
+                    1024|2048|4096)
+                        # Valid key sizes
+                        ;;
+                    *)
+                        error_exit "Invalid key size: $KEY_SIZE (must be 1024, 2048, or 4096)"
+                        ;;
+                esac
                 shift 2
                 ;;
             --help|-h)
@@ -344,6 +358,9 @@ generate_secret_key() {
 create_credentials_directory() {
     log_message INFO "Creating credentials directory"
     
+    # Validate path safety
+    validate_safe_path "$CREDS_DIR" "$SCRIPT_DIR"
+    
     if [[ -d "$CREDS_DIR" ]]; then
         if [[ "$FORCE_REGENERATE" != "true" ]]; then
             log_message WARNING "Credentials directory already exists"
@@ -363,12 +380,19 @@ create_credentials_directory() {
         # Backup existing credentials
         local backup_dir="${CREDS_DIR}.backup.$(date +%Y%m%d_%H%M%S)"
         log_message INFO "Backing up existing credentials to $backup_dir"
-        mv "$CREDS_DIR" "$backup_dir" || error_exit "Failed to backup existing credentials"
+        if ! mv "$CREDS_DIR" "$backup_dir"; then
+            error_exit "Failed to backup existing credentials"
+        fi
     fi
     
     # Create directory with secure permissions
-    mkdir -p "$CREDS_DIR" || error_exit "Failed to create credentials directory"
-    chmod 700 "$CREDS_DIR" || error_exit "Failed to set credentials directory permissions"
+    if ! mkdir -p "$CREDS_DIR"; then
+        error_exit "Failed to create credentials directory"
+    fi
+    
+    if ! chmod 700 "$CREDS_DIR"; then
+        error_exit "Failed to set credentials directory permissions"
+    fi
     
     log_message SUCCESS "Credentials directory created"
     return 0
@@ -386,13 +410,22 @@ write_credential() {
     
     # Write to temporary file first
     local temp_file="${CREDS_DIR}/.tmp_${filename}_$"
-    echo -n "$content" > "$temp_file" || error_exit "Failed to write $description"
+    if ! echo -n "$content" > "$temp_file"; then
+        rm -f "$temp_file" 2>/dev/null
+        error_exit "Failed to write $description"
+    fi
     
     # Set secure permissions
-    chmod 600 "$temp_file" || error_exit "Failed to set permissions for $description"
+    if ! chmod 600 "$temp_file"; then
+        rm -f "$temp_file" 2>/dev/null
+        error_exit "Failed to set permissions for $description"
+    fi
     
     # Move to final location
-    mv "$temp_file" "$filepath" || error_exit "Failed to save $description"
+    if ! mv "$temp_file" "$filepath"; then
+        rm -f "$temp_file" 2>/dev/null
+        error_exit "Failed to save $description"
+    fi
     
     log_message SUCCESS "$description saved"
 }
@@ -413,40 +446,52 @@ generate_ssl_certificates() {
     fi
     
     local cert_dir="${CREDS_DIR}/certs"
-    mkdir -p "$cert_dir" || error_exit "Failed to create certificate directory"
+    if ! mkdir -p "$cert_dir"; then
+        error_exit "Failed to create certificate directory"
+    fi
     
     # Generate CA key and certificate
     log_message INFO "Generating CA certificate"
     
-    openssl req -new -x509 -days "$CERT_VALIDITY_DAYS" \
+    if ! openssl req -new -x509 -days "$CERT_VALIDITY_DAYS" \
         -keyout "${cert_dir}/ca.key" \
         -out "${cert_dir}/ca.crt" \
         -nodes -subj "/C=US/ST=State/L=City/O=EasySplunk/CN=EasySplunk CA" \
-        2>/dev/null || error_exit "Failed to generate CA certificate"
+        2>/dev/null; then
+        error_exit "Failed to generate CA certificate"
+    fi
     
     # Generate server key and certificate
     log_message INFO "Generating server certificate"
     
-    openssl req -new -nodes \
+    if ! openssl req -new -nodes \
         -keyout "${cert_dir}/server.key" \
         -out "${cert_dir}/server.csr" \
         -subj "/C=US/ST=State/L=City/O=EasySplunk/CN=*.splunk.local" \
-        2>/dev/null || error_exit "Failed to generate server key"
+        2>/dev/null; then
+        error_exit "Failed to generate server key"
+    fi
     
-    openssl x509 -req -days "$CERT_VALIDITY_DAYS" \
+    if ! openssl x509 -req -days "$CERT_VALIDITY_DAYS" \
         -in "${cert_dir}/server.csr" \
         -CA "${cert_dir}/ca.crt" \
         -CAkey "${cert_dir}/ca.key" \
         -CAcreateserial \
         -out "${cert_dir}/server.crt" \
-        2>/dev/null || error_exit "Failed to sign server certificate"
+        2>/dev/null; then
+        error_exit "Failed to sign server certificate"
+    fi
     
     # Create combined certificate for Splunk
-    cat "${cert_dir}/server.crt" "${cert_dir}/server.key" > "${cert_dir}/splunk-server.pem"
+    if ! cat "${cert_dir}/server.crt" "${cert_dir}/server.key" > "${cert_dir}/splunk-server.pem"; then
+        error_exit "Failed to create combined certificate"
+    fi
     
     # Set secure permissions
-    chmod 600 "${cert_dir}"/*.key "${cert_dir}"/*.pem 2>/dev/null
-    chmod 644 "${cert_dir}"/*.crt 2>/dev/null
+    chmod 600 "${cert_dir}"/*.key "${cert_dir}"/*.pem 2>/dev/null || \
+        log_message WARNING "Could not set permissions on some certificate files"
+    chmod 644 "${cert_dir}"/*.crt 2>/dev/null || \
+        log_message WARNING "Could not set permissions on some certificate files"
     
     log_message SUCCESS "SSL certificates generated"
 }
@@ -539,8 +584,14 @@ validate_existing_credentials() {
             validation_passed=false
         else
             # Check file permissions
-            local perms=$(stat -c %a "$filepath" 2>/dev/null || stat -f %A "$filepath" 2>/dev/null)
-            if [[ "$perms" != "600" ]]; then
+            local perms
+            if ! perms=$(stat -c %a "$filepath" 2>/dev/null) && \
+               ! perms=$(stat -f %A "$filepath" 2>/dev/null); then
+                log_message WARNING "Could not check permissions for $file"
+                perms="unknown"
+            fi
+            
+            if [[ "$perms" != "600" ]] && [[ "$perms" != "unknown" ]]; then
                 log_message WARNING "Incorrect permissions on $file: $perms (should be 600)"
             fi
             
@@ -565,15 +616,21 @@ validate_existing_credentials() {
     
     # Load and validate username/password
     if [[ -f "${CREDS_DIR}/splunk_admin_user" ]] && [[ -f "${CREDS_DIR}/splunk_admin_password" ]]; then
-        local stored_user=$(cat "${CREDS_DIR}/splunk_admin_user" 2>/dev/null)
-        local stored_pass=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null)
+        local stored_user
+        local stored_pass
         
-        if ! validate_username "$stored_user" 2>/dev/null; then
+        if ! stored_user=$(cat "${CREDS_DIR}/splunk_admin_user" 2>/dev/null); then
+            log_message ERROR "Failed to read stored username"
+            validation_passed=false
+        elif ! validate_username "$stored_user" 2>/dev/null; then
             log_message ERROR "Invalid stored username"
             validation_passed=false
         fi
         
-        if ! validate_password "$stored_pass" "$stored_user" 2>/dev/null; then
+        if ! stored_pass=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null); then
+            log_message ERROR "Failed to read stored password"
+            validation_passed=false
+        elif ! validate_password "$stored_pass" "$stored_user" 2>/dev/null; then
             log_message ERROR "Invalid stored password"
             validation_passed=false
         fi
@@ -597,19 +654,35 @@ export_credentials() {
     log_message INFO "Exporting credentials as environment variables"
     
     if [[ -f "${CREDS_DIR}/splunk_admin_user" ]]; then
-        export SPLUNK_ADMIN_USER=$(cat "${CREDS_DIR}/splunk_admin_user")
+        if ! SPLUNK_ADMIN_USER=$(cat "${CREDS_DIR}/splunk_admin_user" 2>/dev/null); then
+            log_message WARNING "Could not read admin user for export"
+        else
+            export SPLUNK_ADMIN_USER
+        fi
     fi
     
     if [[ -f "${CREDS_DIR}/splunk_admin_password" ]]; then
-        export SPLUNK_ADMIN_PASSWORD=$(cat "${CREDS_DIR}/splunk_admin_password")
+        if ! SPLUNK_ADMIN_PASSWORD=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null); then
+            log_message WARNING "Could not read admin password for export"
+        else
+            export SPLUNK_ADMIN_PASSWORD
+        fi
     fi
     
     if [[ -f "${CREDS_DIR}/splunk_secret" ]]; then
-        export SPLUNK_SECRET=$(cat "${CREDS_DIR}/splunk_secret")
+        if ! SPLUNK_SECRET=$(cat "${CREDS_DIR}/splunk_secret" 2>/dev/null); then
+            log_message WARNING "Could not read splunk secret for export"
+        else
+            export SPLUNK_SECRET
+        fi
     fi
     
     if [[ -f "${CREDS_DIR}/cluster_secret" ]]; then
-        export CLUSTER_SECRET=$(cat "${CREDS_DIR}/cluster_secret")
+        if ! CLUSTER_SECRET=$(cat "${CREDS_DIR}/cluster_secret" 2>/dev/null); then
+            log_message WARNING "Could not read cluster secret for export"
+        else
+            export CLUSTER_SECRET
+        fi
     fi
     
     log_message SUCCESS "Credentials exported to environment"
@@ -638,6 +711,8 @@ display_summary() {
         echo "SSL Certificates:"
         echo -e "  ${GREEN}✓${NC} CA certificate and key"
         echo -e "  ${GREEN}✓${NC} Server certificate and key"
+        echo "  Validity: $CERT_VALIDITY_DAYS days"
+        echo "  Key Size: $KEY_SIZE bits"
     fi
     
     echo ""
