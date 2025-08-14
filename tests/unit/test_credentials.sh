@@ -38,12 +38,19 @@ test_password_strength() {
     local test_passed=0
     local test_failed=0
 
-    # Test valid passwords
-    local valid_passwords=(
-        "StrongP@ss123"
-        "C0mpl3x!P@ssw0rd"
-        "Sup3r$3cur3"
-        "P@ssw0rd!2023"
+    # Test password requirements
+    local -A password_tests=(
+        # Format: "password:expected_result:description"
+        ["StrongP@ss123"]:1:"Valid password with all requirements"
+        ["C0mpl3x!P@ssw0rd"]:1:"Valid complex password"
+        ["Sup3r$3cur3"]:1:"Valid minimal length password"
+        ["short"]:0:"Too short"
+        ["Password123"]:0:"Missing special char"
+        ["password@123"]:0:"Missing uppercase"
+        ["PASSWORD@123"]:0:"Missing lowercase"
+        ["Password@abc"]:0:"Missing number"
+        ["    Password123@    "]:0:"Contains whitespace"
+        ["VeryLongPasswordThatExceedsTheMaximumLengthLimit@123"]:0:"Too long"
     )
 
     for pass in "${valid_passwords[@]}"; do
@@ -79,13 +86,32 @@ test_password_strength() {
 
 # Test 2: Credential encryption/decryption
 test_credential_encryption() {
-    local test_secret="MySecretPassword123!"
-    local key_file=$(mktemp)
-    local encrypted_file=$(mktemp)
-    register_cleanup "rm -f '$key_file' '$encrypted_file'"
-
-    # Generate encryption key
-    generate_encryption_key > "$key_file" || return 1
+    local test_passed=0
+    local test_failed=0
+    
+    # Test various encryption scenarios
+    local test_dir=$(mktemp -d)
+    register_cleanup "rm -rf '$test_dir'"
+    
+    # Test key generation
+    local key_file="$test_dir/key"
+    if generate_encryption_key > "$key_file" && [[ -s "$key_file" ]]; then
+        ((test_passed++))
+        log_success "Key generation successful"
+    else
+        ((test_failed++))
+        log_error "Key generation failed"
+        return 1
+    fi
+    
+    # Test different credential types
+    local -A test_credentials=(
+        ["simple"]="password123"
+        ["complex"]="C0mpl3x!P@ssw0rd"
+        ["with_spaces"]="My Secret Password"
+        ["with_special"]="!@#$%^&*()"
+        ["very_long"]="$(head -c 1000 /dev/urandom | base64)"
+    )
 
     # Encrypt secret
     encrypt_credential "$test_secret" "$key_file" > "$encrypted_file" || return 1

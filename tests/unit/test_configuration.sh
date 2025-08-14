@@ -49,16 +49,58 @@ run_test() {
 
 # Test 1: Configuration file validation
 test_config_file_validation() {
-    local tmp_config=$(mktemp)
-    register_cleanup "rm -f '$tmp_config'"
-
-    # Test valid configuration
-    for config in "${TEST_CONFIG_VALUES[@]}"; do
-        echo "$config" >> "$tmp_config"
+    local test_passed=0
+    local test_failed=0
+    
+    # Test various configuration formats
+    local -A config_tests=(
+        ["simple.conf"]="key=value\nport=8000\nhost=localhost"
+        ["empty.conf"]=""
+        ["comments.conf"]="# Comment\nkey=value\n# Another comment\nport=8000"
+        ["whitespace.conf"]="  key = value  \n\nport=8000\n  "
+        ["nested.conf"]="[section1]\nkey1=value1\n[section2]\nkey2=value2"
+    )
+    
+    for test_name in "${!config_tests[@]}"; do
+        local tmp_config=$(mktemp)
+        register_cleanup "rm -f '$tmp_config'"
+        
+        echo -e "${config_tests[$test_name]}" > "$tmp_config"
+        
+        if validate_configuration_file "$tmp_config" 2>/dev/null; then
+            ((test_passed++))
+            log_success "Config validation passed: $test_name"
+        else
+            ((test_failed++))
+            log_error "Config validation failed: $test_name"
+        fi
     done
-
-    # Validate configuration
-    validate_configuration_file "$tmp_config"
+    
+    # Test various error conditions
+    local invalid_configs=(
+        "invalid=key=value"      # Multiple equals signs
+        "key=value;"            # Invalid character
+        "[invalid"              # Unclosed section
+        "key==value"           # Double equals
+        "=nokey"               # Missing key
+    )
+    
+    for invalid in "${invalid_configs[@]}"; do
+        local tmp_config=$(mktemp)
+        register_cleanup "rm -f '$tmp_config'"
+        
+        echo "$invalid" > "$tmp_config"
+        
+        if ! validate_configuration_file "$tmp_config" 2>/dev/null; then
+            ((test_passed++))
+            log_success "Invalid config correctly rejected: $invalid"
+        else
+            ((test_failed++))
+            log_error "Invalid config wrongly accepted: $invalid"
+        fi
+    done
+    
+    return $((test_failed > 0))
 }
 
 # Test 2: Configuration value sanitization

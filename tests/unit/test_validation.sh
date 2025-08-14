@@ -116,19 +116,31 @@ test_dir_validation() {
 
 # Test 6: Input validation and sanitization
 test_input_validation() {
-  local test_passed=0
-  local test_failed=0
+    local test_passed=0
+    local test_failed=0
 
-  # Test valid inputs
-  for input in "${VALID_INPUTS[@]}"; do
-    if sanitized=$(validate_input "$input" "raw" 2>/dev/null); then
-      ((test_passed++))
-      log_success "Valid input test passed: $input"
-    else
-      ((test_failed++))
-      log_error "Valid input test failed: $input"
-    fi
-  done
+    # Test all input types
+    local -A test_cases=(
+        ["123"]="int"
+        ["0"]="uint"
+        ["3.14"]="float"
+        ["true"]="bool"
+        ["false"]="bool"
+        ["1"]="bool"
+        ["10GB"]="size"
+        ["test123"]="raw"
+    )
+
+    for input in "${!test_cases[@]}"; do
+        local type="${test_cases[$input]}"
+        if sanitized=$(validate_input "$input" "$type" "test_$type" 2>/dev/null); then
+            ((test_passed++))
+            log_success "Valid $type input test passed: $input -> $sanitized"
+        else
+            ((test_failed++))
+            log_error "Valid $type input test failed: $input"
+        fi
+    done
 
   # Test invalid inputs
   for input in "${INVALID_INPUTS[@]}"; do
