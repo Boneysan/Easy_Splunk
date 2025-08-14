@@ -1,0 +1,143 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Splunk Cluster Overview",
+    "tags": ["splunk", "cluster", "monitoring"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Cluster Health Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=~\"splunk.*\"}",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "License Usage",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "splunk_license_usage_percent",
+            "legendFormat": "License Usage %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "min": 0,
+            "max": 100,
+            "unit": "percent",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 90}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Search Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(splunk_search_duration_seconds[5m])",
+            "legendFormat": "Avg Search Time - {{instance}}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Seconds",
+            "min": 0
+          }
+        ],
+        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Indexing Throughput",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(splunk_indexed_events_total[5m])",
+            "legendFormat": "Events/sec - {{instance}}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Events per Second",
+            "min": 0
+          }
+        ],
+        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 17}
+      },
+      {
+        "id": 5,
+        "title": "Resource Utilization",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "splunk_cpu_usage_percent",
+            "legendFormat": "CPU % - {{instance}}"
+          },
+          {
+            "expr": "splunk_memory_usage_bytes / 1024 / 1024 / 1024",
+            "legendFormat": "Memory GB - {{instance}}"
+          },
+          {
+            "expr": "splunk_disk_used_percent",
+            "legendFormat": "Disk % - {{instance}}"
+          }
+        ],
+        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 26}
+      },
+      {
+        "id": 6,
+        "title": "Performance Trends",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "splunk_search_duration_trend_slope",
+            "legendFormat": "Search Duration Trend"
+          },
+          {
+            "expr": "splunk_indexing_throughput_trend_slope",
+            "legendFormat": "Indexing Throughput Trend"
+          },
+          {
+            "expr": "splunk_capacity_utilization_score",
+            "legendFormat": "Capacity Score"
+          }
+        ],
+        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 35}
+      }
+    ],
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  }
+}
