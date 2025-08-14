@@ -24,7 +24,16 @@ fi
 : "${PROMETHEUS_SCRAPE_INTERVAL:=15s}"
 : "${PROMETHEUS_EVAL_INTERVAL:=15s}"
 : "${PROMETHEUS_PORT:=9090}"
-: "${GRAFANA_ADMIN_PASSWORD:=}"  # If unset, generated in generate_monitoring_config
+
+# Source the secret helper if available
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SECRET_HELPER="${SCRIPT_DIR}/secret-helper.sh"
+
+# Try to get Grafana password from secrets manager first
+if [[ -x "$SECRET_HELPER" ]]; then
+    GRAFANA_ADMIN_PASSWORD=$("$SECRET_HELPER" get_secret grafana "admin_password" "" "") || GRAFANA_ADMIN_PASSWORD=""
+fi
+: "${GRAFANA_ADMIN_PASSWORD:=}"  # If still unset, will be generated in generate_monitoring_config
 
 # Primary app metrics (default path is /metrics; override if needed)
 : "${APP_METRICS_TARGET:=app:8081}"      # host:port
@@ -223,7 +232,16 @@ generate_monitoring_config() {
   # Generate Grafana admin password if not set
   if [[ -z "${GRAFANA_ADMIN_PASSWORD}" ]]; then
     GRAFANA_ADMIN_PASSWORD="$(generate_random_password 32)"
-    write_secret_file "${SECRETS_DIR}/grafana_admin_password.txt" "${GRAFANA_ADMIN_PASSWORD}" "Grafana admin password"
+    if [[ -x "$SECRET_HELPER" ]]; then
+      # Store in secrets manager
+      "$SECRET_HELPER" get_secret grafana "admin_password" "" "$GRAFANA_ADMIN_PASSWORD" || {
+        log_warning "Failed to store Grafana password in secrets manager, falling back to file"
+        write_secret_file "${SECRETS_DIR}/grafana_admin_password.txt" "${GRAFANA_ADMIN_PASSWORD}" "Grafana admin password"
+      }
+    else
+      # Fall back to file storage
+      write_secret_file "${SECRETS_DIR}/grafana_admin_password.txt" "${GRAFANA_ADMIN_PASSWORD}" "Grafana admin password"
+    fi
   fi
   _generate_prometheus_yml
   _generate_prometheus_rules_yml
