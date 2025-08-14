@@ -11,8 +11,9 @@
 #               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped.sh,
 #               airgapped-quickstart.sh, generate-selinux-helpers.sh, podman-docker-setup.sh,
 #               start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh,
-#               restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh, tests/unit/test_*.sh
-# Version: 1.0.12
+#               restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh,
+#               verify-bundle.sh, tests/unit/test_*.sh
+# Version: 1.0.13
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
@@ -92,7 +93,7 @@ run_test_script() {
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies
-    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinx-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh; do
+    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh verify-bundle.sh; do
       # shellcheck source=/dev/null
       source "${SCRIPT_DIR}/lib/${dep}"
     done
@@ -114,7 +115,7 @@ run_test_script() {
     compose() { echo "Mock compose: $@" >&2; return 0; }
     docker() { echo "Mock docker: $@" >&2; return 0; }
     podman() { echo "Mock podman: $@" >&2; return 0; }
-    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh, start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh, restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh
+    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh, start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh, restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh, verify-bundle.sh
     get_total_memory() { echo "8192"; }
     get_cpu_cores() { echo "4"; }
     df() { echo "100GB"; return 0; }
@@ -141,6 +142,8 @@ run_test_script() {
     jq() { echo "Mock jq: $@"; return 0; }
     gpg() { echo "Mock gpg: $@"; touch "$6"; return 0; }
     tar() { echo "Mock tar: $@"; touch "$4"; return 0; }
+    shellcheck() { echo "Mock shellcheck: $@"; return 0; }
+    tree() { echo "Mock tree: $@"; return 0; }
     # Run the test script
     if bash "${script}"; then
       complete_step "test_${script_name}"
