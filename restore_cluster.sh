@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 #
 # ==============================================================================
@@ -19,7 +20,8 @@
 #   ./restore_cluster.sh --backup-file backups/plain.tgz --skip-rollback \
 #       --only-volumes dev_app-data,dev_redis-data
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, gpg (if .gpg)
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh, backup_cluster.sh, gpg (if .gpg)
+# Version: 1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -33,6 +35,18 @@ source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 # shellcheck source=lib/runtime-detection.sh
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+# shellcheck source=lib/security.sh
+source "${SCRIPT_DIR}/lib/security.sh"
+# shellcheck source=backup_cluster.sh
+source "${SCRIPT_DIR}/backup_cluster.sh"
+
+# --- Version Checks ------------------------------------------------------------
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "restore_cluster.sh requires security.sh version >= 1.0.0"
+fi
+if [[ "${BACKUP_CLUSTER_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "restore_cluster.sh requires backup_cluster.sh version >= 1.0.0"
+fi
 
 umask 077
 
@@ -40,12 +54,11 @@ umask 077
 BACKUP_FILE=""
 SKIP_ROLLBACK="false"
 ROLLBACK_GPG_RECIPIENT=""
-ONLY_VOLUMES_CSV=""      # explicit list of target volume names to restore
-MAP_PREFIX=""            # old:new (rename volumes during restore)
+ONLY_VOLUMES_CSV=""
+MAP_PREFIX=""
 AUTO_YES=0
-
-# Optional env: passphrase for GPG (used when possible)
 : "${GPG_PASSPHRASE:=}"
+: "${SECRETS_DIR:=./secrets}"
 
 usage() {
   cat <<'EOF'
@@ -83,6 +96,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${BACKUP_FILE}" && -f "${BACKUP_FILE}" ]] || die "${E_INVALID_INPUT:-2}" "Backup file missing: ${BACKUP_FILE}"
+mkdir -p "${SECRETS_DIR}"
+harden_file_permissions "${SECRETS_DIR}" "700" "secrets directory" || true
 
 # ---- Helpers ------------------------------------------------------------------
 _confirm_or_exit() {
@@ -109,7 +124,6 @@ _verify_checksum_if_present() {
     if _have_cmd sha256sum; then
       sha256sum -c "${base}.sha256"
     else
-      # macOS/BSD shasum; tolerate formats without filename if user edited file
       if ! grep -q " ${base}$" "${base}.sha256" 2>/dev/null; then
         log_warn "Checksum file may not include the filename; attempting validation anyway."
       fi
@@ -125,13 +139,11 @@ _verify_checksum_if_present() {
 _decrypt_if_needed() {
   local in="$1" out_dir="$2"
   local out_tgz="${out_dir}/backup.tar.gz"
-
   case "$in" in
     *.gpg)
       _have_cmd gpg || die "${E_MISSING_DEP:-3}" "gpg is required to decrypt ${in}"
       log_info "Decrypting backup..."
       if [[ -n "${GPG_PASSPHRASE}" ]]; then
-        # Try loopback pinentry for non-interactive environments
         gpg --batch --yes --pinentry-mode=loopback --passphrase "${GPG_PASSPHRASE}" \
             --decrypt --output "${out_tgz}" "${in}" \
           || die "${E_GENERAL:-1}" "GPG decryption failed (loopback)."
@@ -139,10 +151,12 @@ _decrypt_if_needed() {
         gpg --quiet --decrypt --output "${out_tgz}" "${in}" \
           || die "${E_GENERAL:-1}" "GPG decryption failed."
       fi
+      harden_file_permissions "${out_tgz}" "600" "decrypted backup" || true
       echo "${out_tgz}"
       ;;
     *.tar.gz|*.tgz)
       cp -f "${in}" "${out_tgz}"
+      harden_file_permissions "${out_tgz}" "600" "backup archive" || true
       echo "${out_tgz}"
       ;;
     *)
@@ -155,11 +169,8 @@ _tar_extract() {
   local tgz="$1" dest="$2"
   log_info "Unpacking backup archive..."
   tar -xzf "${tgz}" -C "${dest}"
+  audit_security_configuration "${dest}/security-audit.txt"
 }
-
-# Prefer alpine; fall back to busybox
-TMP_IMAGE_ALPINE="${TMP_IMAGE_ALPINE:-alpine:3.20}"
-TMP_IMAGE_BUSYBOX="${TMP_IMAGE_BUSYBOX:-busybox:1.36}"
 
 ensure_helper_image() {
   if "${CONTAINER_RUNTIME}" image inspect "${TMP_IMAGE_ALPINE}" >/dev/null 2>&1; then
@@ -177,7 +188,6 @@ ensure_helper_image() {
 }
 
 _safe_wipe_volume() {
-  # Avoid dangerous globs; delete only direct children
   local vol="$1" helper_image="$2"
   "${CONTAINER_RUNTIME}" run --rm -v "${vol}:/volume_data" "${helper_image}" \
     sh -c "find /volume_data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +"
@@ -185,7 +195,6 @@ _safe_wipe_volume() {
 
 _copy_into_volume() {
   local src_dir="$1" vol="$2" helper_image="$3"
-  # Use tar streaming for good fidelity across filesystems
   retry_command 2 3 bash -c \
     "'${CONTAINER_RUNTIME}' run --rm -v '${vol}:/volume_data' -v '${src_dir}:/backup_data:ro' ${helper_image} \
        sh -c \"cd /backup_data && tar -cpf - .\" \
@@ -208,18 +217,12 @@ _apply_prefix_map() {
 _discover_volumes_from_manifest_or_dirs() {
   local stage="$1"
   local -a vols=()
-
   if [[ -f "${stage}/MANIFEST.txt" ]]; then
-    # Manifest entries formatted as:
-    # Volumes:
-    #  - prefix_volume
     while IFS= read -r line; do
       [[ "$line" =~ ^[[:space:]]*-\ (.+)$ ]] || continue
       vols+=("${BASH_REMATCH[1]}")
     done < <(sed -n '/^Volumes:/,$p' "${stage}/MANIFEST.txt")
   fi
-
-  # Fallback: any first-level directories other than MANIFEST.txt
   if ((${#vols[@]}==0)); then
     while IFS= read -r d; do
       local base; base="$(basename "$d")"
@@ -227,7 +230,6 @@ _discover_volumes_from_manifest_or_dirs() {
       vols+=("${base}")
     done < <(find "${stage}" -mindepth 1 -maxdepth 1 -type d -print)
   fi
-
   printf '%s\n' "${vols[@]}"
 }
 
@@ -236,20 +238,17 @@ main() {
   log_info "🚀 Starting Cluster Restore"
   detect_container_runtime
   local helper_image; helper_image="$(ensure_helper_image)"
-
-  # 0) Sanity: ask user to confirm containers are stopped
   local running
   running="$("${CONTAINER_RUNTIME}" ps -q || true)"
   if [[ -n "${running}" ]]; then
     die "${E_GENERAL:-1}" "Active containers detected. Stop the cluster before restoring."
   fi
-
-  # 1) Optional rollback backup
   if ! is_true "${SKIP_ROLLBACK}"; then
     [[ -n "${ROLLBACK_GPG_RECIPIENT}" ]] || die "${E_INVALID_INPUT:-2}" "Missing --rollback-gpg-recipient (or use --skip-rollback)."
     log_warn "A rollback backup of CURRENT data will be created before restore."
     _confirm_or_exit "Proceed with rollback backup?"
     mkdir -p "${SCRIPT_DIR}/rollback_backups"
+    harden_file_permissions "${SCRIPT_DIR}/rollback_backups" "700" "rollback backups directory" || true
     "${SCRIPT_DIR}/backup_cluster.sh" --output-dir "${SCRIPT_DIR}/rollback_backups" \
       --gpg-recipient "${ROLLBACK_GPG_RECIPIENT}" \
       || die "${E_GENERAL:-1}" "Failed to create rollback backup."
@@ -257,51 +256,38 @@ main() {
   else
     log_warn "Skipping rollback backup at user request."
   fi
-
-  # 2) Verify checksum if present
   _verify_checksum_if_present "${BACKUP_FILE}"
-
-  # 3) Decrypt (if needed) and unpack into staging
   local staging; staging="$(mktemp -d -t cluster-restore-XXXXXX)"
   register_cleanup "rm -rf '${staging}'"
+  harden_file_permissions "${staging}" "700" "staging directory" || true
   local tgz; tgz="$(_decrypt_if_needed "${BACKUP_FILE}" "${staging}")"
   _tar_extract "${tgz}" "${staging}"
-
-  # 4) Determine which volumes to restore
   declare -a src_vols
   if [[ -n "${ONLY_VOLUMES_CSV}" ]]; then
     IFS=',' read -r -a src_vols <<< "${ONLY_VOLUMES_CSV}"
   else
     mapfile -t src_vols < <(_discover_volumes_from_manifest_or_dirs "${staging}")
   fi
-
   ((${#src_vols[@]})) || die "${E_GENERAL:-1}" "No source volumes discovered in backup."
-
   log_info "Volumes to restore (source names): ${src_vols[*]}"
   [[ -n "${MAP_PREFIX}" ]] && log_info "Applying prefix map: ${MAP_PREFIX}"
-
-  # 5) Restore loop
   for src_name in "${src_vols[@]}"; do
     local src_dir="${staging}/${src_name}"
     if [[ ! -d "${src_dir}" ]]; then
       log_warn "Source directory missing in backup: ${src_name} — skipping."
       continue
     fi
-
     local dest_vol; dest_vol="$(_apply_prefix_map "${src_name}")"
     log_info "  -> Restoring '${src_name}' -> volume '${dest_vol}'"
-
-    # Ensure volume exists
     "${CONTAINER_RUNTIME}" volume create "${dest_vol}" >/dev/null
-
-    # Wipe existing content safely, then copy
     _safe_wipe_volume "${dest_vol}" "${helper_image}"
     _copy_into_volume "${src_dir}" "${dest_vol}" "${helper_image}"
-
     log_success "     Restored volume '${dest_vol}'."
   done
-
+  audit_security_configuration "${staging}/security-audit.txt"
   log_success "✅ Restore complete. You can now start the cluster (e.g., ./start_cluster.sh)."
 }
 
+RESTORE_CLUSTER_VERSION="1.0.0"
 main "$@"
+```
