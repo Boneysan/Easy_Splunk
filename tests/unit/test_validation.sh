@@ -5,7 +5,8 @@
 # Unit tests for validation.sh, covering system resources, disk space, ports,
 # and Splunk-specific checks.
 #
-# Dependencies: lib/core.sh, lib/validation.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, lib/validation.sh
+# Version: 1.0.0
 # ==============================================================================
 set -euo pipefail
 IFS=$'\n\t'
@@ -14,6 +15,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # Source dependencies
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/error-handling.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/security.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/../../lib/validation.sh"
 
@@ -27,6 +32,9 @@ get_total_memory() { echo "8192"; }
 get_cpu_cores() { echo "4"; }
 df() { echo "100GB"; return 0; }
 ss() { return 1; } # Port free
+date() { echo "2025-08-13 12:00:00 UTC"; return 0; }
+stat() { echo "600"; return 0; }
+openssl() { echo "Mock openssl: $@"; return 0; }
 
 # Helper to run a test
 run_test() {
@@ -51,7 +59,9 @@ test_system_resources() {
 test_disk_space() {
   local tmp=$(mktemp -d)
   register_cleanup "rm -rf '$tmp'"
+  harden_file_permissions "$tmp" "700" "test directory" || true
   validate_disk_space "$tmp" 10
+  audit_security_configuration "$tmp/security-audit.txt"
 }
 
 # Test 3: Port free
@@ -70,7 +80,9 @@ test_rf_sf() {
 test_dir_validation() {
   local tmp=$(mktemp -d)
   register_cleanup "rm -rf '$tmp'"
+  harden_file_permissions "$tmp" "700" "test directory" || true
   validate_dir_var_set "$tmp" "test dir"
+  audit_security_configuration "$tmp/security-audit.txt"
 }
 
 # Run all tests

@@ -13,7 +13,7 @@
 #               start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh,
 #               restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh,
 #               verify-bundle.sh, resolve-digests.sh, integration-guide.sh, tests/unit/test_*.sh
-# Version: 1.0.15
+# Version: 1.0.16
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
