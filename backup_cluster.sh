@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 #
 # ==============================================================================
@@ -16,7 +17,8 @@
 #   ./backup_cluster.sh --output-dir ./backups --no-encrypt \
 #       --volumes my-app_app-data,my-app_redis-data
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, gpg (unless --no-encrypt)
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh, gpg (unless --no-encrypt)
+# Version: 1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -30,25 +32,30 @@ source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 # shellcheck source=lib/runtime-detection.sh
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+# shellcheck source=lib/security.sh
+source "${SCRIPT_DIR}/lib/security.sh"
 
-umask 077  # keep artifacts private
+# --- Version Checks ------------------------------------------------------------
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "backup_cluster.sh requires security.sh version >= 1.0.0"
+fi
+
+umask 077
 
 # ---- Defaults -----------------------------------------------------------------
 OUTPUT_DIR=""
 GPG_RECIPIENT=""
-ALGO="gpg"           # gpg | gpg-symmetric
+ALGO="gpg"
 NO_ENCRYPT="false"
-VOLUMES_CSV=""       # explicit list "vol1,vol2"
-PROJECT_PREFIX=""    # auto-discover volumes starting with this prefix
-GZIP_LEVEL="6"       # 1..9
-MANIFEST="true"      # write manifest file of contents
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"  # only used for hints/logs
+VOLUMES_CSV=""
+PROJECT_PREFIX=""
+GZIP_LEVEL="6"
+MANIFEST="true"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 TMP_IMAGE_ALPINE="${TMP_IMAGE_ALPINE:-alpine:3.20}"
 TMP_IMAGE_BUSYBOX="${TMP_IMAGE_BUSYBOX:-busybox:1.36}"
-
-# Optional (for CI/non-interactive symmetric encryption):
-#   export GPG_PASSPHRASE="your-long-passphrase"
 : "${GPG_PASSPHRASE:=}"
+: "${SECRETS_DIR:=./secrets}"
 
 usage() {
   cat <<EOF
@@ -92,7 +99,6 @@ done
 if is_empty "${OUTPUT_DIR}"; then
   die "${E_INVALID_INPUT:-2}" "Missing --output-dir"
 fi
-
 if [[ "${NO_ENCRYPT}" != "true" ]]; then
   if [[ "${ALGO}" == "gpg" && -z "${GPG_RECIPIENT}" ]]; then
     die "${E_INVALID_INPUT:-2}" "Encryption selected but no --gpg-recipient provided. Use --no-encrypt or --algo gpg-symmetric."
@@ -104,27 +110,22 @@ if [[ "${NO_ENCRYPT}" != "true" ]]; then
     die "${E_INVALID_INPUT:-2}" "GPG recipient '${GPG_RECIPIENT}' not found in keyring."
   fi
 fi
-
 if [[ -n "${VOLUMES_CSV}" && -n "${PROJECT_PREFIX}" ]]; then
   die "${E_INVALID_INPUT:-2}" "Use either --volumes or --project, not both."
 fi
-
 if ! [[ "${GZIP_LEVEL}" =~ ^[1-9]$ ]]; then
   die "${E_INVALID_INPUT:-2}" "--gzip-level must be 1..9"
 fi
-
 mkdir -p "${OUTPUT_DIR}"
+harden_file_permissions "${OUTPUT_DIR}" "700" "backup directory" || true
 
 # ---- Runtime & volume discovery ----------------------------------------------
 detect_container_runtime
 
-# Escape a string for use in ERE (grep -E) safely
 _escape_ere() {
-  # sed class escapes: . \ + * ? [ ^ ] $ ( ) { } = ! < > | :
   printf '%s' "$1" | sed -e 's/[.[\*^$()+?{}|\\]/\\&/g'
 }
 
-# Build list of volumes
 declare -a VOLUMES_TO_BACKUP=()
 if [[ -n "${VOLUMES_CSV}" ]]; then
   IFS=',' read -r -a VOLUMES_TO_BACKUP <<< "${VOLUMES_CSV}"
@@ -135,13 +136,11 @@ elif [[ -n "${PROJECT_PREFIX}" ]]; then
     die "${E_INVALID_INPUT:-2}" "No volumes found with prefix '${PROJECT_PREFIX}_'."
   fi
 else
-  # Fallback: conservative defaults (adjust to your project)
   VOLUMES_TO_BACKUP=( "my-app_app-data" "my-app_redis-data" "my-app_prometheus-data" "my-app_grafana-data" )
   log_warn "No --volumes/--project provided; using default volume list: ${VOLUMES_TO_BACKUP[*]}"
 fi
 
 # ---- Helpers ------------------------------------------------------------------
-# Ensure a helper image is locally available; try alpine then busybox
 ensure_helper_image() {
   if "${CONTAINER_RUNTIME}" image inspect "${TMP_IMAGE_ALPINE}" >/dev/null 2>&1; then
     echo "${TMP_IMAGE_ALPINE}"
@@ -160,23 +159,16 @@ ensure_helper_image() {
   die "${E_GENERAL:-1}" "No suitable helper image (alpine/busybox) available to copy volumes."
 }
 
-# Copy a named volume into the staging dir, preserving ownership/mtimes/links
 _copy_volume_into_stage() {
   local volume="$1" stage_dir="$2" helper_image="$3"
   log_info "  -> Backing up volume: ${volume}"
-
-  # Create destination
   mkdir -p "${stage_dir}/${volume}"
-
-  # Stream tar from inside the container for best fidelity
   if [[ "${helper_image}" == "${TMP_IMAGE_ALPINE}" ]]; then
-    # Alpine has GNU tar
     retry_command 2 3 bash -c \
       "'${CONTAINER_RUNTIME}' run --rm -v '${volume}:/volume_data:ro' ${helper_image} \
         sh -c \"cd /volume_data && tar -cpf - .\" \
         | tar -xpf - -C '${stage_dir}/${volume}'"
   else
-    # BusyBox tar (compatible)
     retry_command 2 3 bash -c \
       "'${CONTAINER_RUNTIME}' run --rm -v '${volume}:/volume_data:ro' ${helper_image} \
         sh -c \"cd /volume_data && tar -cpf - .\" \
@@ -188,9 +180,9 @@ write_checksum() {
   local file="$1"
   local out="${file}.sha256"
   if command -v sha256sum &>/dev/null; then
-    ( cd "$(dirname -- "${file}")" && sha256sum "$(basename -- "${file}")" ) > "${out}"
+    ( cd "$(dirname -- "${file}")" && sha256sum "$(basename -- "${file}")" ) | write_secret_file "${out}" - "checksum"
   else
-    ( cd "$(dirname -- "${file}")" && shasum -a 256 "$(basename -- "${file}")" ) > "${out}"
+    ( cd "$(dirname -- "${file}")" && shasum -a 256 "$(basename -- "${file}")" ) | write_secret_file "${out}" - "checksum"
   fi
   log_info "Checksum written: ${out}"
 }
@@ -199,17 +191,12 @@ write_checksum() {
 main() {
   log_info "🚀 Starting Encrypted Backup"
   log_info "Runtime: ${CONTAINER_RUNTIME}"
-
   local helper_image
   helper_image="$(ensure_helper_image)"
-
-  # Staging
   local staging_dir
   staging_dir="$(mktemp -d -t cluster-backup-XXXXXX)"
   register_cleanup "rm -rf '${staging_dir}'"
   log_debug "Staging: ${staging_dir}"
-
-  # Extract volumes
   log_info "Extracting data from volumes..."
   local any_found="false"
   for v in "${VOLUMES_TO_BACKUP[@]}"; do
@@ -223,10 +210,8 @@ main() {
   if ! is_true "${any_found}"; then
     die "${E_INVALID_INPUT:-2}" "No valid volumes were found to back up."
   fi
-
-  # Manifest (what & when)
   if is_true "${MANIFEST}"; then
-    cat > "${staging_dir}/MANIFEST.txt" <<EOF
+    write_secret_file "${staging_dir}/MANIFEST.txt" "$(cat <<EOF
 # Backup Manifest
 Created: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
 Runtime: ${CONTAINER_RUNTIME}
@@ -234,9 +219,8 @@ Compose file (hint): ${COMPOSE_FILE}
 Volumes:
 $(printf -- ' - %s\n' "${VOLUMES_TO_BACKUP[@]}")
 EOF
+)" "MANIFEST.txt"
   fi
-
-  # Create tarball
   local ts archive_name archive_path
   ts="$(date +%Y%m%d-%H%M%S)"
   archive_name="backup-${ts}.tar.gz"
@@ -245,23 +229,19 @@ EOF
   ( cd "${staging_dir}" && GZIP="-${GZIP_LEVEL}" tar -czf "${archive_path}" --owner=0 --group=0 . )
   [[ -s "${archive_path}" ]] || die "${E_GENERAL:-1}" "Archive creation failed."
   log_success "Archive created."
-
-  # Move to output dir
   local final_plain="${OUTPUT_DIR}/${archive_name}"
   mv -f "${archive_path}" "${final_plain}"
-
+  harden_file_permissions "${final_plain}" "600" "backup archive" || true
   if [[ "${NO_ENCRYPT}" == "true" ]]; then
     log_warn "Encryption disabled by --no-encrypt. Writing plaintext archive."
     write_checksum "${final_plain}"
+    audit_security_configuration "${OUTPUT_DIR}/security-audit.txt"
     log_success "✅ Backup complete (UNENCRYPTED): ${final_plain}"
     return 0
   fi
-
-  # Encrypt
   local encrypted="${final_plain}.gpg"
   log_info "Encrypting archive -> ${encrypted}"
   if [[ "${ALGO}" == "gpg-symmetric" ]]; then
-    # Use loopback if passphrase env provided (CI-friendly)
     if [[ -n "${GPG_PASSPHRASE}" ]]; then
       gpg --batch --yes --pinentry-mode=loopback --passphrase "${GPG_PASSPHRASE}" \
           --symmetric --cipher-algo AES256 --output "${encrypted}" "${final_plain}" \
@@ -271,21 +251,18 @@ EOF
         || die "${E_GENERAL:-1}" "GPG symmetric encryption failed (no passphrase in env; interactive prompt may be required)."
     fi
   else
-    # Recipient-based
     gpg --batch --yes --encrypt --recipient "${GPG_RECIPIENT}" --output "${encrypted}" "${final_plain}" \
       || die "${E_GENERAL:-1}" "GPG recipient encryption failed."
   fi
-
   [[ -s "${encrypted}" ]] || die "${E_GENERAL:-1}" "Encrypted archive is empty."
-
-  # Tamper-evident checksum of the encrypted blob
+  harden_file_permissions "${encrypted}" "600" "encrypted backup" || true
   write_checksum "${encrypted}"
-
-  # Remove plaintext after successful encryption
   rm -f "${final_plain}"
-
+  audit_security_configuration "${OUTPUT_DIR}/security-audit.txt"
   log_success "✅ Encrypted backup created: ${encrypted}"
   log_info    "   Checksum file: ${encrypted}.sha256"
 }
 
+BACKUP_CLUSTER_VERSION="1.0.0"
 main "$@"
+```
