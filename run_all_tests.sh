@@ -10,8 +10,8 @@
 #               lib/universal-forwarder.sh, lib/platform-helpers.sh, orchestrator.sh,
 #               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped.sh,
 #               airgapped-quickstart.sh, generate-selinux-helpers.sh, podman-docker-setup.sh,
-#               start_cluster.sh, tests/unit/test_*.sh
-# Version: 1.0.6
+#               start_cluster.sh, stop_cluster.sh, health_check.sh, tests/unit/test_*.sh
+# Version: 1.0.8
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
@@ -91,7 +91,7 @@ run_test_script() {
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies
-    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh; do
+    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh; do
       # shellcheck source=/dev/null
       source "${SCRIPT_DIR}/lib/${dep}"
     done
@@ -113,7 +113,7 @@ run_test_script() {
     compose() { echo "Mock compose: $@" >&2; return 0; }
     docker() { echo "Mock docker: $@" >&2; return 0; }
     podman() { echo "Mock podman: $@" >&2; return 0; }
-    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh, start_cluster.sh
+    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh, start_cluster.sh, stop_cluster.sh, health_check.sh
     get_total_memory() { echo "8192"; }
     get_cpu_cores() { echo "4"; }
     df() { echo "100GB"; return 0; }
@@ -137,6 +137,7 @@ run_test_script() {
     restorecon() { echo "Mock restorecon: $@"; return 0; }
     sudo() { "$@"; } # Bypass sudo for mocks
     cat() { echo "ID=rhel" > /etc/os-release; } # Mock RHEL-like system
+    jq() { echo "Mock jq: $@"; return 0; }
     # Run the test script
     if bash "${script}"; then
       complete_step "test_${script_name}"
