@@ -1,217 +1,716 @@
-```bash
-#!/usr/bin/env bash
-# ==============================================================================
-# generate-credentials.sh
-# Generate secrets (.env), curl auth config, and TLS certificates.
-#
-# Flags:
-#   --yes, -y               Run non-interactively (no confirmation)
-#   --domain <cn>           CN/SAN base for TLS cert (default: localhost)
-#   --secrets-dir <dir>     Directory for .env secrets (default: ./config/secrets)
-#   --certs-dir <dir>       Directory for TLS artifacts (default: ./config/certs)
-#   --env-file <path>       Path to write .env (default: <secrets-dir>/production.env)
-#   --write-netrc           Also create ~/.netrc with ADMIN_ creds (0600)
-#   --with-splunk           Generate Splunk secrets and certificates
-#   --curl-verify <mode>    Curl SSL verification: secure/insecure (default: secure)
-#
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh
-# Version: 1.0.0
-# ==============================================================================
+#!/bin/bash
+# generate-credentials.sh - Enhanced credential generation with input validation
+# Securely generates and stores credentials for Splunk cluster
 
-set -eEuo pipefail
-IFS=$'\n\t'
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# Source error handling module
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/scripts/common/error_handling.sh" || {
+    echo "ERROR: Cannot load error handling module" >&2
+    exit 1
+}
 
-# --- Source libs ----------------------------------------------------------------
-# shellcheck source=lib/core.sh
-source "${SCRIPT_DIR}/lib/core.sh"
-# shellcheck source=lib/error-handling.sh
-source "${SCRIPT_DIR}/lib/error-handling.sh"
-# shellcheck source=lib/security.sh
-source "${SCRIPT_DIR}/lib/security.sh"
+# Initialize error handling
+init_error_handling
 
-# --- Version Check --------------------------------------------------------------
-if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
-  die "${E_GENERAL}" "generate-credentials.sh requires security.sh version >= 1.0.0"
-fi
+# Configuration
+readonly CREDS_DIR="${SCRIPT_DIR}/credentials"
+readonly MIN_PASSWORD_LENGTH=8
+readonly MAX_PASSWORD_LENGTH=128
+readonly MIN_USERNAME_LENGTH=3
+readonly MAX_USERNAME_LENGTH=32
+readonly DEFAULT_USERNAME="admin"
+readonly CERT_VALIDITY_DAYS=365
+readonly KEY_SIZE=2048
 
-# --- Defaults -------------------------------------------------------------------
-APP_DOMAIN="localhost"
-SECRETS_DIR="./config/secrets"
-CERTS_DIR="./config/certs"
-SECRETS_ENV_FILE=""
-WRITE_NETRC=0
-AUTO_YES=0
-WITH_SPLUNK=0
-CURL_VERIFY="secure"
+# Password complexity requirements
+readonly REQUIRE_UPPERCASE=true
+readonly REQUIRE_LOWERCASE=true
+readonly REQUIRE_NUMBERS=true
+readonly REQUIRE_SPECIAL=true
+readonly SPECIAL_CHARS='!@#$%^&*()_+-=[]{}|;:,.<>?'
 
-# Honor CURL_SECRET_PATH default from lib/security.sh, but allow override via env
-: "${CURL_SECRET_PATH:=/run/secrets/curl_auth}"
+# Global variables
+SPLUNK_USER=""
+SPLUNK_PASSWORD=""
+GENERATE_CERTS=true
+FORCE_REGENERATE=false
+INTERACTIVE=true
+VALIDATE_ONLY=false
+EXPORT_ENV=false
 
-# --- CLI ------------------------------------------------------------------------
+# Files to generate
+declare -A CREDENTIAL_FILES=(
+    ["splunk_admin_user"]="Splunk admin username"
+    ["splunk_admin_password"]="Splunk admin password"
+    ["splunk_secret"]="Splunk secret key"
+    ["cluster_secret"]="Cluster secret key"
+    ["indexer_discovery_secret"]="Indexer discovery secret"
+    ["shc_secret"]="Search head cluster secret"
+)
+
+# Cleanup function
+cleanup_credentials() {
+    log_message INFO "Cleaning up credential generation resources..."
+    
+    # Remove temporary files
+    rm -f "${CREDS_DIR}/.tmp_*" 2>/dev/null
+    
+    # Secure permissions on credential directory
+    chmod 700 "$CREDS_DIR" 2>/dev/null
+}
+
+# Usage function
 usage() {
-  cat <<EOF
-Usage: $(basename "$0") [options]
+    cat << EOF
+Usage: $0 [options]
+
+Generate secure credentials for Splunk cluster deployment.
 
 Options:
-  --yes, -y               Run non-interactively (no confirmation)
-  --domain <cn>           CN/SAN base for TLS cert (default: ${APP_DOMAIN})
-  --secrets-dir <dir>     Directory for .env secrets (default: ${SECRETS_DIR})
-  --certs-dir <dir>       Directory for TLS artifacts (default: ${CERTS_DIR})
-  --env-file <path>       Path to write .env (default: <secrets-dir>/production.env)
-  --write-netrc           Also create ~/.netrc with admin creds (0600)
-  --with-splunk           Generate Splunk secrets and certificates
-  --curl-verify <mode>    Curl SSL verification: secure/insecure (default: ${CURL_VERIFY})
-  -h, --help              Show this help
+    --user USERNAME         Splunk admin username (default: admin)
+    --password PASSWORD     Splunk admin password (will prompt if not provided)
+    --no-certs             Skip SSL certificate generation
+    --force                Force regeneration of existing credentials
+    --non-interactive      Run without prompts (requires --password)
+    --validate-only        Validate existing credentials without generating
+    --export-env           Export credentials as environment variables
+    --min-length LENGTH    Minimum password length (default: 8)
+    --help                 Display this help message
+
+Password Requirements:
+    - Minimum $MIN_PASSWORD_LENGTH characters
+    - Must contain uppercase and lowercase letters
+    - Must contain numbers
+    - Must contain special characters
+    - Cannot contain username
+
+Examples:
+    $0
+    $0 --user splunkadmin
+    $0 --user admin --password 'SecureP@ss123!' --no-certs
+    $0 --validate-only
+
 EOF
+    exit 0
 }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -y|--yes) AUTO_YES=1; shift;;
-    --domain) APP_DOMAIN="${2:?}"; shift 2;;
-    --secrets-dir) SECRETS_DIR="${2:?}"; shift 2;;
-    --certs-dir) CERTS_DIR="${2:?}"; shift 2;;
-    --env-file) SECRETS_ENV_FILE="${2:?}"; shift 2;;
-    --write-netrc) WRITE_NETRC=1; shift;;
-    --with-splunk) WITH_SPLUNK=1; shift;;
-    --curl-verify) CURL_VERIFY="${2:?}"; shift 2;;
-    -h|--help) usage; exit 0;;
-    *) die "${E_INVALID_INPUT}" "Unknown option: $1";;
-  esac
-done
-
-if [[ -z "${SECRETS_ENV_FILE}" ]]; then
-  SECRETS_ENV_FILE="${SECRETS_DIR}/production.env"
-fi
-
-# Validate curl verify mode
-if [[ "${CURL_VERIFY}" != "secure" && "${CURL_VERIFY}" != "insecure" ]]; then
-  die "${E_INVALID_INPUT}" "Invalid --curl-verify mode: ${CURL_VERIFY}. Use 'secure' or 'insecure'."
-fi
-
-# --- Confirm helper -------------------------------------------------------------
-confirm_or_exit() {
-  local prompt="${1:-Proceed?}"
-  if (( AUTO_YES == 1 )); then return 0; fi
-  while true; do
-    read -r -p "${prompt} [y/N] " response </dev/tty || response=""
-    case "${response}" in
-      [yY]|[yY][eE][sS]) return 0;;
-      [nN]|[nN][oO]|"")  die 0 "Operation cancelled by user.";;
-      *) log_warn "Please answer 'y' or 'n'.";;
-    esac
-  done
+# Parse command line arguments
+parse_arguments() {
+    log_message INFO "Parsing credential generation arguments"
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --user)
+                SPLUNK_USER="$2"
+                shift 2
+                ;;
+            --password)
+                SPLUNK_PASSWORD="$2"
+                shift 2
+                ;;
+            --no-certs)
+                GENERATE_CERTS=false
+                shift
+                ;;
+            --force)
+                FORCE_REGENERATE=true
+                shift
+                ;;
+            --non-interactive)
+                INTERACTIVE=false
+                shift
+                ;;
+            --validate-only)
+                VALIDATE_ONLY=true
+                shift
+                ;;
+            --export-env)
+                EXPORT_ENV=true
+                shift
+                ;;
+            --min-length)
+                MIN_PASSWORD_LENGTH="$2"
+                validate_input "$MIN_PASSWORD_LENGTH" "^[0-9]+$" \
+                    "Minimum length must be a positive integer"
+                shift 2
+                ;;
+            --help|-h)
+                usage
+                ;;
+            *)
+                error_exit "Unknown option: $1"
+                ;;
+        esac
+    done
 }
 
-# --- Main -----------------------------------------------------------------------
+# Validate username
+validate_username() {
+    local username="$1"
+    
+    log_message DEBUG "Validating username: $username"
+    
+    # Check if empty
+    if [[ -z "$username" ]]; then
+        error_exit "Username cannot be empty"
+    fi
+    
+    # Check length
+    if [[ ${#username} -lt $MIN_USERNAME_LENGTH ]]; then
+        error_exit "Username must be at least $MIN_USERNAME_LENGTH characters long"
+    fi
+    
+    if [[ ${#username} -gt $MAX_USERNAME_LENGTH ]]; then
+        error_exit "Username cannot exceed $MAX_USERNAME_LENGTH characters"
+    fi
+    
+    # Check format (alphanumeric, underscore, hyphen)
+    if ! [[ "$username" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+        error_exit "Username must start with a letter and contain only letters, numbers, underscores, and hyphens"
+    fi
+    
+    # Check for reserved usernames
+    local reserved_users=("root" "nobody" "daemon" "bin" "sys" "sync" "games" "man" "lp" "mail" "news" "uucp" "proxy")
+    
+    for reserved in "${reserved_users[@]}"; do
+        if [[ "$username" == "$reserved" ]]; then
+            error_exit "Username '$username' is reserved and cannot be used"
+        fi
+    done
+    
+    log_message SUCCESS "Username validation passed"
+    return 0
+}
+
+# Validate password complexity
+validate_password() {
+    local password="$1"
+    local username="${2:-}"
+    
+    log_message DEBUG "Validating password complexity"
+    
+    # Check if empty
+    if [[ -z "$password" ]]; then
+        error_exit "Password cannot be empty"
+    fi
+    
+    # Check length
+    if [[ ${#password} -lt $MIN_PASSWORD_LENGTH ]]; then
+        error_exit "Password must be at least $MIN_PASSWORD_LENGTH characters long"
+    fi
+    
+    if [[ ${#password} -gt $MAX_PASSWORD_LENGTH ]]; then
+        error_exit "Password cannot exceed $MAX_PASSWORD_LENGTH characters"
+    fi
+    
+    # Check for username in password
+    if [[ -n "$username" ]] && [[ "${password,,}" == *"${username,,}"* ]]; then
+        error_exit "Password cannot contain the username"
+    fi
+    
+    # Check complexity requirements
+    local has_upper=false
+    local has_lower=false
+    local has_number=false
+    local has_special=false
+    
+    if [[ "$password" =~ [A-Z] ]]; then has_upper=true; fi
+    if [[ "$password" =~ [a-z] ]]; then has_lower=true; fi
+    if [[ "$password" =~ [0-9] ]]; then has_number=true; fi
+    if [[ "$password" =~ [\!\@\#\$\%\^\&\*\(\)\_\+\-\=\[\]\{\}\|\;\:\,\.\<\>\?] ]]; then has_special=true; fi
+    
+    # Validate against requirements
+    if [[ "$REQUIRE_UPPERCASE" == "true" ]] && [[ "$has_upper" != "true" ]]; then
+        error_exit "Password must contain at least one uppercase letter"
+    fi
+    
+    if [[ "$REQUIRE_LOWERCASE" == "true" ]] && [[ "$has_lower" != "true" ]]; then
+        error_exit "Password must contain at least one lowercase letter"
+    fi
+    
+    if [[ "$REQUIRE_NUMBERS" == "true" ]] && [[ "$has_number" != "true" ]]; then
+        error_exit "Password must contain at least one number"
+    fi
+    
+    if [[ "$REQUIRE_SPECIAL" == "true" ]] && [[ "$has_special" != "true" ]]; then
+        error_exit "Password must contain at least one special character ($SPECIAL_CHARS)"
+    fi
+    
+    # Check for common weak passwords
+    check_weak_password "$password"
+    
+    log_message SUCCESS "Password validation passed"
+    return 0
+}
+
+# Check for weak passwords
+check_weak_password() {
+    local password="$1"
+    
+    # Common weak passwords to check against
+    local weak_passwords=(
+        "password" "Password1" "Password123" "Admin123" "admin123"
+        "12345678" "123456789" "qwerty123" "Qwerty123" "Welcome1"
+        "Welcome123" "Splunk123" "splunk123" "changeme" "ChangeMe123"
+    )
+    
+    for weak in "${weak_passwords[@]}"; do
+        if [[ "${password,,}" == "${weak,,}" ]]; then
+            error_exit "Password is too common. Please choose a stronger password."
+        fi
+    done
+    
+    # Check for sequential characters
+    if [[ "$password" =~ (012|123|234|345|456|567|678|789|abc|bcd|cde|def) ]]; then
+        log_message WARNING "Password contains sequential characters, consider using a stronger password"
+    fi
+    
+    # Check for repeated characters
+    if [[ "$password" =~ (.)\1{3,} ]]; then
+        log_message WARNING "Password contains repeated characters, consider using a stronger password"
+    fi
+}
+
+# Generate secure random password
+generate_secure_password() {
+    local length="${1:-16}"
+    
+    log_message DEBUG "Generating secure password of length $length"
+    
+    local password=""
+    local chars=""
+    
+    # Build character set based on requirements
+    [[ "$REQUIRE_UPPERCASE" == "true" ]] && chars="${chars}ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    [[ "$REQUIRE_LOWERCASE" == "true" ]] && chars="${chars}abcdefghijklmnopqrstuvwxyz"
+    [[ "$REQUIRE_NUMBERS" == "true" ]] && chars="${chars}0123456789"
+    [[ "$REQUIRE_SPECIAL" == "true" ]] && chars="${chars}${SPECIAL_CHARS}"
+    
+    # Generate password
+    while [[ ${#password} -lt $length ]]; do
+        password="${password}${chars:RANDOM % ${#chars}:1}"
+    done
+    
+    # Ensure password meets all requirements
+    local valid=false
+    local attempts=0
+    
+    while [[ "$valid" != "true" ]] && [[ $attempts -lt 10 ]]; do
+        if validate_password "$password" "" 2>/dev/null; then
+            valid=true
+        else
+            # Regenerate if validation fails
+            password=""
+            while [[ ${#password} -lt $length ]]; do
+                password="${password}${chars:RANDOM % ${#chars}:1}"
+            done
+        fi
+        attempts=$((attempts + 1))
+    done
+    
+    if [[ "$valid" != "true" ]]; then
+        error_exit "Failed to generate valid password after $attempts attempts"
+    fi
+    
+    echo "$password"
+}
+
+# Generate secret key
+generate_secret_key() {
+    local length="${1:-32}"
+    
+    log_message DEBUG "Generating secret key of length $length"
+    
+    # Use /dev/urandom for cryptographically secure random data
+    if [[ -r /dev/urandom ]]; then
+        tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$length"
+    else
+        # Fallback to openssl if available
+        if command -v openssl &>/dev/null; then
+            openssl rand -base64 "$length" | tr -d '\n=' | cut -c1-"$length"
+        else
+            # Last resort: use bash RANDOM
+            local key=""
+            local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+            for i in $(seq 1 "$length"); do
+                key="${key}${chars:RANDOM % ${#chars}:1}"
+            done
+            echo "$key"
+        fi
+    fi
+}
+
+# Create credentials directory with proper permissions
+create_credentials_directory() {
+    log_message INFO "Creating credentials directory"
+    
+    if [[ -d "$CREDS_DIR" ]]; then
+        if [[ "$FORCE_REGENERATE" != "true" ]]; then
+            log_message WARNING "Credentials directory already exists"
+            
+            if [[ "$INTERACTIVE" == "true" ]]; then
+                read -p "Overwrite existing credentials? (y/N): " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    log_message INFO "Keeping existing credentials"
+                    return 1
+                fi
+            else
+                error_exit "Credentials already exist. Use --force to regenerate."
+            fi
+        fi
+        
+        # Backup existing credentials
+        local backup_dir="${CREDS_DIR}.backup.$(date +%Y%m%d_%H%M%S)"
+        log_message INFO "Backing up existing credentials to $backup_dir"
+        mv "$CREDS_DIR" "$backup_dir" || error_exit "Failed to backup existing credentials"
+    fi
+    
+    # Create directory with secure permissions
+    mkdir -p "$CREDS_DIR" || error_exit "Failed to create credentials directory"
+    chmod 700 "$CREDS_DIR" || error_exit "Failed to set credentials directory permissions"
+    
+    log_message SUCCESS "Credentials directory created"
+    return 0
+}
+
+# Write credential to file securely
+write_credential() {
+    local filename="$1"
+    local content="$2"
+    local description="${3:-Credential}"
+    
+    local filepath="${CREDS_DIR}/${filename}"
+    
+    log_message DEBUG "Writing $description to $filename"
+    
+    # Write to temporary file first
+    local temp_file="${CREDS_DIR}/.tmp_${filename}_$"
+    echo -n "$content" > "$temp_file" || error_exit "Failed to write $description"
+    
+    # Set secure permissions
+    chmod 600 "$temp_file" || error_exit "Failed to set permissions for $description"
+    
+    # Move to final location
+    mv "$temp_file" "$filepath" || error_exit "Failed to save $description"
+    
+    log_message SUCCESS "$description saved"
+}
+
+# Generate SSL certificates
+generate_ssl_certificates() {
+    if [[ "$GENERATE_CERTS" != "true" ]]; then
+        log_message INFO "Skipping SSL certificate generation"
+        return 0
+    fi
+    
+    log_message INFO "Generating SSL certificates"
+    
+    # Check for OpenSSL
+    if ! command -v openssl &>/dev/null; then
+        log_message WARNING "OpenSSL not found, skipping certificate generation"
+        return 1
+    fi
+    
+    local cert_dir="${CREDS_DIR}/certs"
+    mkdir -p "$cert_dir" || error_exit "Failed to create certificate directory"
+    
+    # Generate CA key and certificate
+    log_message INFO "Generating CA certificate"
+    
+    openssl req -new -x509 -days "$CERT_VALIDITY_DAYS" \
+        -keyout "${cert_dir}/ca.key" \
+        -out "${cert_dir}/ca.crt" \
+        -nodes -subj "/C=US/ST=State/L=City/O=EasySplunk/CN=EasySplunk CA" \
+        2>/dev/null || error_exit "Failed to generate CA certificate"
+    
+    # Generate server key and certificate
+    log_message INFO "Generating server certificate"
+    
+    openssl req -new -nodes \
+        -keyout "${cert_dir}/server.key" \
+        -out "${cert_dir}/server.csr" \
+        -subj "/C=US/ST=State/L=City/O=EasySplunk/CN=*.splunk.local" \
+        2>/dev/null || error_exit "Failed to generate server key"
+    
+    openssl x509 -req -days "$CERT_VALIDITY_DAYS" \
+        -in "${cert_dir}/server.csr" \
+        -CA "${cert_dir}/ca.crt" \
+        -CAkey "${cert_dir}/ca.key" \
+        -CAcreateserial \
+        -out "${cert_dir}/server.crt" \
+        2>/dev/null || error_exit "Failed to sign server certificate"
+    
+    # Create combined certificate for Splunk
+    cat "${cert_dir}/server.crt" "${cert_dir}/server.key" > "${cert_dir}/splunk-server.pem"
+    
+    # Set secure permissions
+    chmod 600 "${cert_dir}"/*.key "${cert_dir}"/*.pem 2>/dev/null
+    chmod 644 "${cert_dir}"/*.crt 2>/dev/null
+    
+    log_message SUCCESS "SSL certificates generated"
+}
+
+# Get credentials interactively
+get_credentials_interactive() {
+    if [[ "$INTERACTIVE" != "true" ]]; then
+        return 0
+    fi
+    
+    log_message INFO "Getting credentials interactively"
+    
+    # Get username if not provided
+    if [[ -z "$SPLUNK_USER" ]]; then
+        read -p "Enter Splunk admin username (default: $DEFAULT_USERNAME): " SPLUNK_USER
+        SPLUNK_USER="${SPLUNK_USER:-$DEFAULT_USERNAME}"
+    fi
+    
+    # Get password if not provided
+    if [[ -z "$SPLUNK_PASSWORD" ]]; then
+        echo "Password Requirements:"
+        echo "  - Minimum $MIN_PASSWORD_LENGTH characters"
+        echo "  - Must contain uppercase and lowercase letters"
+        echo "  - Must contain numbers"
+        echo "  - Must contain special characters"
+        echo ""
+        
+        local password_valid=false
+        local attempts=0
+        
+        while [[ "$password_valid" != "true" ]] && [[ $attempts -lt 3 ]]; do
+            read -s -p "Enter Splunk admin password: " SPLUNK_PASSWORD
+            echo
+            
+            if [[ -z "$SPLUNK_PASSWORD" ]]; then
+                # Offer to generate password
+                read -p "Would you like to generate a secure password? (Y/n): " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                    SPLUNK_PASSWORD=$(generate_secure_password 16)
+                    echo "Generated password: $SPLUNK_PASSWORD"
+                    echo "Please save this password securely!"
+                    password_valid=true
+                fi
+            else
+                # Confirm password
+                read -s -p "Confirm password: " password_confirm
+                echo
+                
+                if [[ "$SPLUNK_PASSWORD" != "$password_confirm" ]]; then
+                    echo -e "${RED}Passwords do not match${NC}"
+                    attempts=$((attempts + 1))
+                    continue
+                fi
+                
+                # Validate password
+                if validate_password "$SPLUNK_PASSWORD" "$SPLUNK_USER" 2>/dev/null; then
+                    password_valid=true
+                else
+                    attempts=$((attempts + 1))
+                fi
+            fi
+        done
+        
+        if [[ "$password_valid" != "true" ]]; then
+            error_exit "Failed to get valid password after $attempts attempts"
+        fi
+    fi
+}
+
+# Validate existing credentials
+validate_existing_credentials() {
+    log_message INFO "Validating existing credentials"
+    
+    local validation_passed=true
+    
+    # Check if credentials directory exists
+    if [[ ! -d "$CREDS_DIR" ]]; then
+        log_message ERROR "Credentials directory not found"
+        return 1
+    fi
+    
+    # Check each credential file
+    for file in "${!CREDENTIAL_FILES[@]}"; do
+        local filepath="${CREDS_DIR}/${file}"
+        local description="${CREDENTIAL_FILES[$file]}"
+        
+        if [[ ! -f "$filepath" ]]; then
+            log_message ERROR "Missing: $description ($file)"
+            validation_passed=false
+        else
+            # Check file permissions
+            local perms=$(stat -c %a "$filepath" 2>/dev/null || stat -f %A "$filepath" 2>/dev/null)
+            if [[ "$perms" != "600" ]]; then
+                log_message WARNING "Incorrect permissions on $file: $perms (should be 600)"
+            fi
+            
+            # Check file content
+            if [[ ! -s "$filepath" ]]; then
+                log_message ERROR "Empty file: $file"
+                validation_passed=false
+            fi
+        fi
+    done
+    
+    # Validate certificate files if expected
+    if [[ "$GENERATE_CERTS" == "true" ]]; then
+        local cert_files=("certs/ca.crt" "certs/ca.key" "certs/server.crt" "certs/server.key")
+        
+        for cert_file in "${cert_files[@]}"; do
+            if [[ ! -f "${CREDS_DIR}/${cert_file}" ]]; then
+                log_message WARNING "Missing certificate: $cert_file"
+            fi
+        done
+    fi
+    
+    # Load and validate username/password
+    if [[ -f "${CREDS_DIR}/splunk_admin_user" ]] && [[ -f "${CREDS_DIR}/splunk_admin_password" ]]; then
+        local stored_user=$(cat "${CREDS_DIR}/splunk_admin_user" 2>/dev/null)
+        local stored_pass=$(cat "${CREDS_DIR}/splunk_admin_password" 2>/dev/null)
+        
+        if ! validate_username "$stored_user" 2>/dev/null; then
+            log_message ERROR "Invalid stored username"
+            validation_passed=false
+        fi
+        
+        if ! validate_password "$stored_pass" "$stored_user" 2>/dev/null; then
+            log_message ERROR "Invalid stored password"
+            validation_passed=false
+        fi
+    fi
+    
+    if [[ "$validation_passed" == "true" ]]; then
+        log_message SUCCESS "All credentials validated successfully"
+        return 0
+    else
+        log_message ERROR "Credential validation failed"
+        return 1
+    fi
+}
+
+# Export credentials as environment variables
+export_credentials() {
+    if [[ "$EXPORT_ENV" != "true" ]]; then
+        return 0
+    fi
+    
+    log_message INFO "Exporting credentials as environment variables"
+    
+    if [[ -f "${CREDS_DIR}/splunk_admin_user" ]]; then
+        export SPLUNK_ADMIN_USER=$(cat "${CREDS_DIR}/splunk_admin_user")
+    fi
+    
+    if [[ -f "${CREDS_DIR}/splunk_admin_password" ]]; then
+        export SPLUNK_ADMIN_PASSWORD=$(cat "${CREDS_DIR}/splunk_admin_password")
+    fi
+    
+    if [[ -f "${CREDS_DIR}/splunk_secret" ]]; then
+        export SPLUNK_SECRET=$(cat "${CREDS_DIR}/splunk_secret")
+    fi
+    
+    if [[ -f "${CREDS_DIR}/cluster_secret" ]]; then
+        export CLUSTER_SECRET=$(cat "${CREDS_DIR}/cluster_secret")
+    fi
+    
+    log_message SUCCESS "Credentials exported to environment"
+}
+
+# Display credential summary
+display_summary() {
+    echo ""
+    echo "====================================="
+    echo "Credential Generation Summary"
+    echo "====================================="
+    echo "Location: $CREDS_DIR"
+    echo ""
+    echo "Generated Files:"
+    
+    for file in "${!CREDENTIAL_FILES[@]}"; do
+        if [[ -f "${CREDS_DIR}/${file}" ]]; then
+            echo -e "  ${GREEN}✓${NC} $file - ${CREDENTIAL_FILES[$file]}"
+        else
+            echo -e "  ${RED}✗${NC} $file - ${CREDENTIAL_FILES[$file]}"
+        fi
+    done
+    
+    if [[ "$GENERATE_CERTS" == "true" ]] && [[ -d "${CREDS_DIR}/certs" ]]; then
+        echo ""
+        echo "SSL Certificates:"
+        echo -e "  ${GREEN}✓${NC} CA certificate and key"
+        echo -e "  ${GREEN}✓${NC} Server certificate and key"
+    fi
+    
+    echo ""
+    echo "Security Notes:"
+    echo "  • Keep these credentials secure"
+    echo "  • Do not commit to version control"
+    echo "  • Regularly rotate passwords"
+    echo "  • Use unique passwords for production"
+    echo "====================================="
+}
+
+# Main execution
 main() {
-  log_info "🔐 Starting credential generation..."
-  log_warn "This will create/update secrets and (re)issue TLS if needed."
-  log_warn "Existing certs are respected; .env will be replaced."
-  confirm_or_exit "Continue?"
-
-  # 1) Ensure directories (restrictive perms)
-  ensure_dir_secure "${SECRETS_DIR}" 700
-  ensure_dir_secure "${CERTS_DIR}" 700
-  log_info "Using secrets dir: ${SECRETS_DIR}"
-  log_info "Using certs dir:   ${CERTS_DIR}"
-
-  # 2) TLS certificates (idempotent; SANs include localhost/127.0.0.1/::1)
-  generate_self_signed_cert \
-    "${APP_DOMAIN}" \
-    "${CERTS_DIR}/app.key" \
-    "${CERTS_DIR}/app.crt"
-
-  # 3) Passwords and API keys (never echo values)
-  log_info "Generating admin/database/API credentials..."
-  local admin_password db_password api_key splunk_password splunk_secret
-  admin_password="$(generate_random_password 32)"
-  db_password="$(generate_random_password 32)"
-  api_key="$(generate_random_password 64)"
-  if (( WITH_SPLUNK == 1 )); then
-    splunk_password="$(generate_random_password 32)"
-    splunk_secret="$(generate_splunk_secret 64)"
-  fi
-
-  # 4) Write .env atomically (0600) — do NOT log secrets
-  log_info "Writing .env to: ${SECRETS_ENV_FILE}"
-  umask 077
-  {
-    echo "# =========================================================="
-    echo "# Auto-generated by generate-credentials.sh on $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-    echo "# This file contains sensitive information."
-    echo "# DO NOT COMMIT THIS FILE TO VERSION CONTROL."
-    echo "# =========================================================="
-    echo
-    echo "# Application Admin Credentials"
-    echo 'ADMIN_USER=admin'
-    printf 'ADMIN_PASSWORD=%s\n' "%s" | sed "s/%s/${admin_password//\\/\\\\}/"
-    echo
-    echo "# Internal Database Credentials"
-    echo 'DB_USER=app_user'
-    printf 'DB_PASSWORD=%s\n' "%s" | sed "s/%s/${db_password//\\/\\\\}/"
-    echo
-    echo "# External Service API Key"
-    printf 'THIRD_PARTY_API_KEY=%s\n' "%s" | sed "s/%s/${api_key//\\/\\\\}/"
-    if (( WITH_SPLUNK == 1 )); then
-      echo
-      echo "# Splunk Credentials"
-      printf 'SPLUNK_PASSWORD=%s\n' "%s" | sed "s/%s/${splunk_password//\\/\\\\}/"
-      printf 'SPLUNK_SECRET=%s\n' "%s" | sed "s/%s/${splunk_secret//\\/\\\\}/"
+    log_message INFO "Starting credential generation"
+    
+    # Register cleanup
+    register_cleanup cleanup_credentials
+    
+    # Parse arguments
+    parse_arguments "$@"
+    
+    # Validate only mode
+    if [[ "$VALIDATE_ONLY" == "true" ]]; then
+        validate_existing_credentials
+        exit $?
     fi
-  } | atomic_write "${SECRETS_ENV_FILE}" "600"
-
-  # 5) Create curl auth config at $CURL_SECRET_PATH (0600) for mgmt API
-  local curl_dir
-  curl_dir="$(dirname -- "${CURL_SECRET_PATH}")"
-  ensure_dir_secure "${curl_dir}" 700 || true
-  write_curl_secret_config "admin" "${admin_password}" "${CURL_VERIFY}" "${CURL_SECRET_PATH}"
-  log_info "curl auth config written at ${CURL_SECRET_PATH} (0600)"
-
-  # 6) Optional: write ~/.netrc (0600) if requested
-  if (( WRITE_NETRC == 1 )); then
-    create_netrc "localhost" "admin" "${admin_password}" "${HOME}/.netrc"
-    log_info "Wrote ~/.netrc for localhost (0600)"
-  fi
-
-  # 7) Optional: Splunk secrets and certificates
-  if (( WITH_SPLUNK == 1 )); then
-    setup_splunk_secrets "${splunk_password}" "${splunk_secret}" "${SECRETS_DIR}/splunk"
-    generate_splunk_ssl_cert "splunk-cm" "${CERTS_DIR}/splunk"
-  fi
-
-  # 8) Harden key files (defensive; generation already sets perms)
-  harden_file_permissions "${CERTS_DIR}/app.key" "600" || true
-  harden_file_permissions "${CERTS_DIR}/app.crt" "644" || true
-  if (( WITH_SPLUNK == 1 )); then
-    harden_file_permissions "${CERTS_DIR}/splunk/splunk-cm.key" "600" || true
-    harden_file_permissions "${CERTS_DIR}/splunk/splunk-cm.crt" "644" || true
-    harden_file_permissions "${CERTS_DIR}/splunk/splunk-cm.pem" "600" || true
-  fi
-
-  # 9) Run security audit
-  audit_security_configuration "${SECRETS_DIR}/security-audit.txt"
-
-  # 10) Validate presence
-  if [[ ! -f "${SECRETS_ENV_FILE}" || ! -f "${CERTS_DIR}/app.key" || ! -f "${CERTS_DIR}/app.crt" ]]; then
-    die "${E_GENERAL}" "Validation failed: expected files missing."
-  fi
-  if (( WITH_SPLUNK == 1 )); then
-    if [[ ! -f "${SECRETS_DIR}/splunk/admin_password" || ! -f "${CERTS_DIR}/splunk/splunk-cm.pem" ]]; then
-      die "${E_GENERAL}" "Validation failed: expected Splunk files missing."
+    
+    # Get credentials
+    get_credentials_interactive
+    
+    # Validate username if provided
+    if [[ -n "$SPLUNK_USER" ]]; then
+        validate_username "$SPLUNK_USER"
+    else
+        SPLUNK_USER="$DEFAULT_USERNAME"
     fi
-  fi
-
-  log_success "✅ Credentials ready."
-  log_info "Secrets: ${SECRETS_ENV_FILE} (600)"
-  log_info "TLS:     ${CERTS_DIR}/app.crt , ${CERTS_DIR}/app.key"
-  log_info "cURL:    ${CURL_SECRET_PATH} (600)"
-  if (( WITH_SPLUNK == 1 )); then
-    log_info "Splunk Secrets: ${SECRETS_DIR}/splunk"
-    log_info "Splunk TLS:     ${CERTS_DIR}/splunk/splunk-cm.{key,crt,pem}"
-  fi
+    
+    # Validate or generate password
+    if [[ -n "$SPLUNK_PASSWORD" ]]; then
+        validate_password "$SPLUNK_PASSWORD" "$SPLUNK_USER"
+    elif [[ "$INTERACTIVE" != "true" ]]; then
+        error_exit "Password required in non-interactive mode"
+    fi
+    
+    # Create credentials directory
+    if ! create_credentials_directory; then
+        # Directory exists and user chose not to overwrite
+        log_message INFO "Using existing credentials"
+        export_credentials
+        exit 0
+    fi
+    
+    # Generate and save credentials
+    write_credential "splunk_admin_user" "$SPLUNK_USER" "Splunk admin username"
+    write_credential "splunk_admin_password" "$SPLUNK_PASSWORD" "Splunk admin password"
+    
+    # Generate secrets
+    write_credential "splunk_secret" "$(generate_secret_key 32)" "Splunk secret key"
+    write_credential "cluster_secret" "$(generate_secret_key 32)" "Cluster secret key"
+    write_credential "indexer_discovery_secret" "$(generate_secret_key 24)" "Indexer discovery secret"
+    write_credential "shc_secret" "$(generate_secret_key 24)" "Search head cluster secret"
+    
+    # Generate SSL certificates
+    generate_ssl_certificates
+    
+    # Export credentials if requested
+    export_credentials
+    
+    # Display summary
+    display_summary
+    
+    log_message SUCCESS "Credential generation completed successfully"
 }
 
+# Execute main function
 main "$@"
-```
