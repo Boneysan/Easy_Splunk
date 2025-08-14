@@ -1,7 +1,13 @@
+```bash
 #!/usr/bin/env bash
 #
 # tests/integration/test_full_deployment.sh
 # End-to-end release validation
+#
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh,
+#               generate-credentials.sh, generate-monitoring-config.sh, orchestrator.sh,
+#               health_check.sh, stop_cluster.sh
+# Version: 1.0.0
 # ==============================================================================
 
 # Intentionally avoid `set -e`; we want to capture failures and keep going.
@@ -12,10 +18,17 @@ IFS=$'\n\t'
 source "./lib/core.sh"
 source "./lib/error-handling.sh"
 source "./lib/runtime-detection.sh"
+source "./lib/security.sh"
 set +e  # neutralize strict -e set by core.sh
+
+# --- Version Checks ---
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "test_full_deployment.sh requires security.sh version >= 1.0.0"
+fi
 
 TEST_COUNT=0
 FAIL_COUNT=0
+: "${SECRETS_DIR:=./secrets}"
 
 # Detect runtime once for scoped checks
 detect_container_runtime
@@ -24,7 +37,6 @@ read -r -a COMPOSE_COMMAND_ARRAY <<< "$COMPOSE_COMMAND"
 # --- Tiny test harness ---
 
 _run_cmd() { # _run_cmd "<shell command>"
-  # Run via bash so pipelines/redirections work; capture combined output & rc
   local out rc
   out="$(bash -o pipefail -c "$1" 2>&1)"; rc=$?
   printf '%s\0%d' "$out" "$rc"
@@ -52,6 +64,8 @@ assert_success() { # assert_success "description" "<shell command>"
 
 setup() {
   log_info "--- Preparing clean test environment ---"
+  mkdir -p "${SECRETS_DIR}"
+  harden_file_permissions "${SECRETS_DIR}" "700" "secrets directory" || true
 
   # Best-effort: stop any prior stack (with volumes) using compose if available
   if [[ -f docker-compose.yml ]]; then
@@ -68,6 +82,7 @@ setup() {
   rm -rf ./config ./management-scripts
   rm -f ./*.bak
 
+  audit_security_configuration "./security-audit.txt"
   log_success "Environment is clean."
 }
 
@@ -79,6 +94,9 @@ teardown() {
   if [[ -x ./stop_cluster.sh ]]; then
     ./stop_cluster.sh &>/dev/null || true
   fi
+  harden_file_permissions "./config" "700" "config directory" || true
+  harden_file_permissions "./docker-compose.yml" "600" "compose file" || true
+  audit_security_configuration "./security-audit.txt"
   log_success "Teardown complete."
 }
 
@@ -105,7 +123,6 @@ run_deployment_test() {
   assert_success "health_check.sh reports healthy" "./health_check.sh"
 
   log_info $'\n--- Step 4: App endpoint responds ---'
-  # If APP_PORT is configurable, default to 8080 for this test
   assert_success "GET http://localhost:8080 returns 2xx" \
     "curl --fail --silent --max-time 10 http://localhost:8080 >/dev/null"
 
@@ -114,7 +131,6 @@ run_deployment_test() {
 
   log_info $'\n--- Step 6: Teardown verification (scoped to this compose) ---'
   if [[ -f docker-compose.yml ]]; then
-    # If compose file still present, check that no services remain for it
     local leftover
     leftover="$("${COMPOSE_COMMAND_ARRAY[@]}" -f docker-compose.yml ps -q 2>/dev/null)"
     if [[ -z "$leftover" ]]; then
@@ -124,7 +140,6 @@ run_deployment_test() {
       FAIL_COUNT=$((FAIL_COUNT+1))
     fi
   else
-    # Fallback check: ensure no containers with our expected names are running
     local names=(my_app_main my_app_redis my_app_prometheus my_app_grafana)
     local any_left=false
     for n in "${names[@]}"; do
@@ -156,4 +171,6 @@ main() {
   fi
 }
 
+TEST_FULL_DEPLOYMENT_VERSION="1.0.0"
 main
+```
