@@ -1,0 +1,117 @@
+```bash
+#!/usr/bin/env bash
+# ==============================================================================
+# tests/unit/test_backup_cluster.sh
+# Unit tests for backup_cluster.sh, covering volume backup, encryption, and manifest generation.
+#
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh, backup_cluster.sh
+# Version: 1.0.0
+# ==============================================================================
+set -euo pipefail
+IFS=$'\n\t'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# Source dependencies
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/error-handling.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/runtime-detection.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../lib/security.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/../../backup_cluster.sh"
+
+# Test counter and results
+TEST_COUNT=0
+TEST_PASSED=0
+TEST_FAILED=0
+
+# Mock commands
+docker() { echo "Mock docker: $@"; return 0; }
+podman() { echo "Mock podman: $@"; return 0; }
+gpg() { echo "Mock gpg: $@"; touch "$6"; return 0; }
+sha256sum() { echo "abc123"; return 0; }
+date() { echo "2025-08-13-120000"; return 0; }
+stat() { echo "600"; return 0; }
+tar() { echo "Mock tar: $@"; touch "$4"; return 0; }
+openssl() { echo "Mock openssl: $@"; return 0; }
+
+# Mock runtime detection
+CONTAINER_RUNTIME="docker"
+
+# Helper to run a test
+run_test() {
+  local test_name="$1"; shift
+  ((TEST_COUNT++))
+  log_info "Running test: ${test_name}"
+  if "$@"; then
+    log_success "Test passed: ${test_name}"
+    ((TEST_PASSED++))
+  else
+    log_error "Test failed: ${test_name}"
+    ((TEST_FAILED++))
+  fi
+}
+
+# Test 1: Backup with explicit volumes
+test_backup_volumes() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  docker() { echo "Mock docker: $@"; return 0; } # Simulate volume exists
+  OUTPUT_DIR="$tmp/backups" VOLUMES_CSV="test_volume" NO_ENCRYPT="true" main
+  [[ -f "$tmp/backups/backup-20250813-120000.tar.gz" ]] && \
+  [[ -f "$tmp/backups/backup-20250813-120000.tar.gz.sha256" ]] && \
+  [[ -f "$tmp/backups/MANIFEST.txt" ]]
+}
+
+# Test 2: Backup with project prefix
+test_backup_project() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  docker() { echo "my-app_test_volume" > "$tmp/volumes"; return 0; }
+  OUTPUT_DIR="$tmp/backups" PROJECT_PREFIX="my-app" NO_ENCRYPT="true" main
+  [[ -f "$tmp/backups/backup-20250813-120000.tar.gz" ]]
+}
+
+# Test 3: GPG recipient encryption
+test_gpg_recipient() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  docker() { echo "Mock docker: $@"; return 0; }
+  gpg() { echo "Mock gpg: $@"; touch "$6"; return 0; }
+  OUTPUT_DIR="$tmp/backups" VOLUMES_CSV="test_volume" GPG_RECIPIENT="ops@example.com" main
+  [[ -f "$tmp/backups/backup-20250813-120000.tar.gz.gpg" ]]
+}
+
+# Test 4: Symmetric encryption
+test_symmetric_encryption() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  docker() { echo "Mock docker: $@"; return 0; }
+  gpg() { echo "Mock gpg: $@"; touch "$6"; return 0; }
+  OUTPUT_DIR="$tmp/backups" VOLUMES_CSV="test_volume" ALGO="gpg-symmetric" GPG_PASSPHRASE="testpass" main
+  [[ -f "$tmp/backups/backup-20250813-120000.tar.gz.gpg" ]]
+}
+
+# Test 5: Missing volumes
+test_missing_volumes() {
+  local tmp=$(mktemp -d)
+  register_cleanup "rm -rf '$tmp'"
+  docker() { return 1; } # Simulate no volumes
+  OUTPUT_DIR="$tmp/backups" VOLUMES_CSV="nonexistent" main 2>/dev/null && return 1
+  return 0
+}
+
+# Run all tests
+run_test "Backup with explicit volumes" test_backup_volumes
+run_test "Backup with project prefix" test_backup_project
+run_test "GPG recipient encryption" test_gpg_recipient
+run_test "Symmetric encryption" test_symmetric_encryption
+run_test "Missing volumes" test_missing_volumes
+
+# Summary
+log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
+[[ ${TEST_FAILED} -eq 0 ]]
+```
