@@ -1,7 +1,7 @@
 #!/bin/bash
-# lib/error_handling.sh
-# Enhanced error handling module for Easy_Splunk toolkit
-# Provides robust error handling, retry logic, and validation functions
+# lib/error-handling.sh
+# Complete error handling module with all validation functions for Easy_Splunk toolkit
+# Provides robust error handling, retry logic, and comprehensive validation functions
 
 # Strict error handling
 set -euo pipefail
@@ -156,7 +156,11 @@ setup_error_trapping() {
     trap 'cleanup_on_error' EXIT INT TERM
 }
 
-# Input validation functions
+# ============================================
+# INPUT VALIDATION FUNCTIONS
+# ============================================
+
+# Basic input validation with regex
 validate_input() {
     local input="${1:-}"
     local pattern="$2"
@@ -214,6 +218,172 @@ validate_path() {
     log_message DEBUG "Path validation passed: $path ($type)"
 }
 
+# Validate cluster configuration values
+validate_cluster_config() {
+    local indexer_count="$1"
+    local search_head_count="$2"
+    
+    # Validate indexer count (1-20 reasonable range)
+    if [[ $indexer_count -lt 1 ]] || [[ $indexer_count -gt 20 ]]; then
+        error_exit "Invalid indexer count: $indexer_count (must be between 1 and 20)"
+    fi
+    
+    # Validate search head count (1-10 reasonable range)  
+    if [[ $search_head_count -lt 1 ]] || [[ $search_head_count -gt 10 ]]; then
+        error_exit "Invalid search head count: $search_head_count (must be between 1 and 10)"
+    fi
+    
+    log_message DEBUG "Cluster config validated: ${indexer_count} indexers, ${search_head_count} search heads"
+}
+
+# Validate resource allocation values
+validate_resource_allocation() {
+    local cpu="$1"
+    local memory="$2"
+    
+    # Validate CPU (format: number or decimal)
+    if ! [[ "$cpu" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        error_exit "Invalid CPU allocation: $cpu (must be a number)"
+    fi
+    
+    # Validate memory (format: number followed by G or M)
+    if ! [[ "$memory" =~ ^[0-9]+[GM]$ ]]; then
+        error_exit "Invalid memory allocation: $memory (must be in format like 4G or 512M)"
+    fi
+    
+    log_message DEBUG "Resource allocation validated: ${cpu} CPU, ${memory} memory"
+}
+
+# Validate service names
+validate_service_name() {
+    local service="$1"
+    
+    # Service name must be alphanumeric with hyphens/underscores
+    if ! [[ "$service" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+        error_exit "Invalid service name: $service"
+    fi
+    
+    # Check length constraints
+    if [[ ${#service} -gt 63 ]]; then
+        error_exit "Service name too long: $service (max 63 characters)"
+    fi
+    
+    log_message DEBUG "Service name validated: $service"
+}
+
+# Validate port numbers
+validate_port() {
+    local port="$1"
+    local description="${2:-Port}"
+    
+    # Check if numeric
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        error_exit "$description must be a number: $port"
+    fi
+    
+    # Check valid range (1-65535)
+    if [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
+        error_exit "$description out of valid range (1-65535): $port"
+    fi
+    
+    # Check for privileged ports (warn only)
+    if [[ $port -lt 1024 ]]; then
+        log_message WARNING "$description $port is a privileged port (requires root)"
+    fi
+    
+    log_message DEBUG "Port validated: $port"
+}
+
+# Validate file paths (prevent directory traversal)
+validate_safe_path() {
+    local path="$1"
+    local base_dir="${2:-$SCRIPT_DIR}"
+    
+    # Check for directory traversal attempts
+    if [[ "$path" == *".."* ]]; then
+        error_exit "Path contains directory traversal: $path"
+    fi
+    
+    # Ensure path is within base directory (if it's an absolute path)
+    if [[ "$path" == /* ]]; then
+        local abs_path="$path"
+    else
+        local abs_path="$(cd "$(dirname "$path")" 2>/dev/null && pwd)/$(basename "$path")"
+    fi
+    
+    local abs_base="$(cd "$base_dir" 2>/dev/null && pwd)"
+    
+    if [[ "$abs_path" != "$abs_base"* ]]; then
+        log_message WARNING "Path is outside base directory: $path"
+    fi
+    
+    log_message DEBUG "Path validated as safe: $path"
+}
+
+# Validate URL format
+validate_url() {
+    local url="$1"
+    
+    # Basic URL validation
+    if ! [[ "$url" =~ ^https?://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$ ]]; then
+        error_exit "Invalid URL format: $url"
+    fi
+    
+    log_message DEBUG "URL validated: $url"
+}
+
+# Validate IP address
+validate_ip() {
+    local ip="$1"
+    
+    # IPv4 validation
+    if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        # Check each octet
+        IFS='.' read -ra OCTETS <<< "$ip"
+        for octet in "${OCTETS[@]}"; do
+            if [[ $octet -gt 255 ]]; then
+                error_exit "Invalid IP address: $ip"
+            fi
+        done
+    else
+        error_exit "Invalid IP address format: $ip"
+    fi
+    
+    log_message DEBUG "IP address validated: $ip"
+}
+
+# Validate timeout values
+validate_timeout() {
+    local timeout="$1"
+    local min="${2:-1}"
+    local max="${3:-3600}"
+    
+    if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
+        error_exit "Timeout must be a positive integer: $timeout"
+    fi
+    
+    if [[ $timeout -lt $min ]] || [[ $timeout -gt $max ]]; then
+        error_exit "Timeout out of range ($min-$max): $timeout"
+    fi
+    
+    log_message DEBUG "Timeout validated: $timeout seconds"
+}
+
+# Sanitize user input for shell execution
+sanitize_input() {
+    local input="$1"
+    
+    # Remove potentially dangerous characters
+    local sanitized="${input//[\$\`\\]/}"
+    
+    # Check if input was modified (potential injection attempt)
+    if [[ "$input" != "$sanitized" ]]; then
+        log_message WARNING "Input contained potentially dangerous characters and was sanitized"
+    fi
+    
+    echo "$sanitized"
+}
+
 # Validate network connectivity
 validate_network() {
     local host="${1:-8.8.8.8}"
@@ -234,6 +404,10 @@ validate_network() {
     
     log_message DEBUG "Network connectivity verified"
 }
+
+# ============================================
+# RETRY AND EXECUTION FUNCTIONS
+# ============================================
 
 # Retry function with exponential backoff
 retry_with_backoff() {
@@ -316,6 +490,10 @@ safe_execute() {
     fi
 }
 
+# ============================================
+# SYSTEM CHECK FUNCTIONS
+# ============================================
+
 # Check disk space
 check_disk_space() {
     local path="${1:-/}"
@@ -331,64 +509,6 @@ check_disk_space() {
     fi
     
     log_message DEBUG "Disk space check passed: ${available_mb}MB available"
-}
-
-# Lock file management for preventing concurrent executions
-acquire_lock() {
-    local lock_file="${1:-/tmp/easy_splunk.lock}"
-    local timeout="${2:-30}"
-    local elapsed=0
-    
-    while [[ $elapsed -lt $timeout ]]; do
-        if mkdir "$lock_file" 2>/dev/null; then
-            log_message DEBUG "Lock acquired: $lock_file"
-            echo $$ > "$lock_file/pid"
-            
-            # Register cleanup to remove lock
-            register_cleanup "release_lock '$lock_file'"
-            return 0
-        fi
-        
-        # Check if the process holding the lock is still running
-        if [[ -f "$lock_file/pid" ]]; then
-            local lock_pid=$(cat "$lock_file/pid" 2>/dev/null)
-            if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
-                log_message WARNING "Removing stale lock from PID $lock_pid"
-                release_lock "$lock_file"
-                continue
-            fi
-        fi
-        
-        sleep 1
-        ((elapsed++))
-    done
-    
-    error_exit "Could not acquire lock after ${timeout}s: $lock_file"
-}
-
-release_lock() {
-    local lock_file="${1:-/tmp/easy_splunk.lock}"
-    
-    if [[ -d "$lock_file" ]]; then
-        rm -rf "$lock_file"
-        log_message DEBUG "Lock released: $lock_file"
-    fi
-}
-
-# Progress indicator for long-running operations
-show_progress() {
-    local pid=$1
-    local message="${2:-Processing}"
-    local spin='-\|/'
-    local i=0
-    
-    while kill -0 "$pid" 2>/dev/null; do
-        i=$(( (i+1) % 4 ))
-        printf "\r%s... %c" "$message" "${spin:$i:1}"
-        sleep 0.1
-    done
-    
-    printf "\r%s... Done\n" "$message"
 }
 
 # Validate container runtime
@@ -414,6 +534,72 @@ validate_container_runtime() {
     log_message INFO "Using container runtime: $runtime"
 }
 
+# ============================================
+# LOCK FILE MANAGEMENT
+# ============================================
+
+# Lock file management for preventing concurrent executions
+acquire_lock() {
+    local lock_file="${1:-/tmp/easy_splunk.lock}"
+    local timeout="${2:-30}"
+    local elapsed=0
+    
+    while [[ $elapsed -lt $timeout ]]; do
+        if mkdir "$lock_file" 2>/dev/null; then
+            log_message DEBUG "Lock acquired: $lock_file"
+            echo $$ > "$lock_file/pid"
+            
+            # Register cleanup to remove lock
+            register_cleanup "release_lock '$lock_file'"
+            return 0
+        fi
+        
+        # Check if the process holding the lock is still running
+        if [[ -f "$lock_file/pid" ]]; then
+            local lock_pid=$(cat "$lock_file/pid" 2>/dev/null || echo "")
+            if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+                log_message WARNING "Removing stale lock from PID $lock_pid"
+                release_lock "$lock_file"
+                continue
+            fi
+        fi
+        
+        sleep 1
+        ((elapsed++))
+    done
+    
+    error_exit "Could not acquire lock after ${timeout}s: $lock_file"
+}
+
+release_lock() {
+    local lock_file="${1:-/tmp/easy_splunk.lock}"
+    
+    if [[ -d "$lock_file" ]]; then
+        rm -rf "$lock_file"
+        log_message DEBUG "Lock released: $lock_file"
+    fi
+}
+
+# ============================================
+# UTILITY FUNCTIONS
+# ============================================
+
+# Progress indicator for long-running operations
+show_progress() {
+    local pid=$1
+    local message="${2:-Processing}"
+    local spin='-\|/'
+    local i=0
+    
+    while kill -0 "$pid" 2>/dev/null; do
+        i=$(( (i+1) % 4 ))
+        printf "\r%s... %c" "$message" "${spin:$i:1}"
+        sleep 0.1
+    done
+    
+    printf "\r%s... Done\n" "$message"
+}
+
 # Initialize error handling (call this at the start of scripts)
 init_error_handling() {
     init_logging
@@ -427,3 +613,12 @@ export -f log_message
 export -f validate_input
 export -f retry_with_backoff
 export -f safe_execute
+export -f validate_cluster_config
+export -f validate_resource_allocation
+export -f validate_service_name
+export -f validate_port
+export -f validate_safe_path
+export -f validate_url
+export -f validate_ip
+export -f validate_timeout
+export -f sanitize_input
