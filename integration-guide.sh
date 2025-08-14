@@ -1,11 +1,14 @@
+```bash
 #!/usr/bin/env bash
 #
+# ==============================================================================
 # integration-guide.sh — v2.0 → current migration guide (read-only)
 #
 # Checks a legacy config for renamed/removed keys and structure changes.
 # Outputs a human-friendly report (text by default, or markdown with --output).
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh
+# Version: 1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -16,11 +19,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/security.sh
+source "${SCRIPT_DIR}/lib/security.sh"
+
+# --- Version Checks ------------------------------------------------------------
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "integration-guide.sh requires security.sh version >= 1.0.0"
+fi
 
 ISSUES_FOUND=0
 WARNINGS_FOUND=0
-OUTPUT_FORMAT="text"      # text|markdown
-REPORT_FILE=""            # optional: write full report to file
+OUTPUT_FORMAT="text"
+REPORT_FILE=""
+: "${SECRETS_DIR:=./secrets}"
 
 usage() {
   cat <<EOF
@@ -38,11 +49,8 @@ Example:
 EOF
 }
 
-# ------------- Helpers ---------------------------------------------------------
-
-# Trim both ends in awk
-# We treat "key=value" with optional leading 'export' and whitespace.
-_has_key() { # _has_key <file> <keyname>
+# --- Helpers ---
+_has_key() {
   awk -v k="$2" '
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*$/ { next }
@@ -50,7 +58,6 @@ _has_key() { # _has_key <file> <keyname>
       line=$0
       sub(/^[[:space:]]*export[[:space:]]+/, "", line)
       split(line, a, "=")
-      # trim both ends
       sub(/^[[:space:]]+/, "", a[1]); sub(/[[:space:]]+$/, "", a[1])
       if (a[1]==k) { found=1; exit }
     }
@@ -58,7 +65,7 @@ _has_key() { # _has_key <file> <keyname>
   ' "$1"
 }
 
-_find_lines_for_key() { # _find_lines_for_key <file> <keyname>
+_find_lines_for_key() {
   awk -v k="$2" '
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*$/ { next }
@@ -75,7 +82,7 @@ _find_lines_for_key() { # _find_lines_for_key <file> <keyname>
   ' "$1"
 }
 
-_list_all_keys() { # _list_all_keys <file>
+_list_all_keys() {
   awk '
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*$/ { next }
@@ -89,16 +96,15 @@ _list_all_keys() { # _list_all_keys <file>
   ' "$1"
 }
 
-_has_crlf() { grep -Iq $'\r' "$1"; } # returns 0 if CRLF bytes are present
+_has_crlf() { grep -Iq $'\r' "$1"; }
 
-# Emitters respect OUTPUT_FORMAT for headings and bullets
-_indent_md() { # _indent_md <level>
+_indent_md() {
   local lvl="${1:-1}"
   (( lvl<=1 )) && { printf ''; return; }
-  printf '%*s' $(( (lvl-1)*2 )) ''  # 2 spaces per level beyond 1
+  printf '%*s' $(( (lvl-1)*2 )) ''
 }
 
-_emit_h() { # _emit_h <level 1..3> <text>
+_emit_h() {
   local lvl="$1" txt="$2"
   if [[ "$OUTPUT_FORMAT" == "markdown" ]]; then
     printf '%s %s\n' "$(printf '#%.0s' $(seq 1 "$lvl"))" "$txt"
@@ -110,7 +116,7 @@ _emit_h() { # _emit_h <level 1..3> <text>
   fi
 }
 
-_emit_bullet() { # _emit_bullet <text> <level>
+_emit_bullet() {
   local txt="$1" lvl="${2:-1}"
   if [[ "$OUTPUT_FORMAT" == "markdown" ]]; then
     printf '%s- %s\n' "$(_indent_md "$lvl")" "$txt"
@@ -122,27 +128,22 @@ _emit_bullet() { # _emit_bullet <text> <level>
   fi
 }
 
-_record_issue()  { ISSUES_FOUND=$((ISSUES_FOUND+1)); }
-_record_warn()   { WARNINGS_FOUND=$((WARNINGS_FOUND+1)); }
+_record_issue() { ISSUES_FOUND=$((ISSUES_FOUND+1)); }
+_record_warn() { WARNINGS_FOUND=$((WARNINGS_FOUND+1)); }
 
-# ------------- Rules -----------------------------------------------------------
-
-# Renamed variables: old -> message (suggested replacement)
+# --- Rules ---
 declare -A RENAMED=(
   [DOCKER_IMAGE_TAG]="Use versions.env: APP_VERSION + APP_IMAGE_REPO (and friends)."
   [DATA_PATH]="Renamed to DATA_DIR."
 )
 
-# Removed variables entirely
 declare -A REMOVED=(
   [ENABLE_LEGACY_MODE]="Legacy mode was removed. Remove the setting; feature no longer exists."
 )
 
-# Keys that likely moved to versions.env (warn if seen here)
 LIKELY_IN_VERSIONS_ENV=("APP_VERSION" "APP_IMAGE_REPO" "REDIS_VERSION" "PROMETHEUS_VERSION" "GRAFANA_VERSION")
 
-# ------------- Main checks -----------------------------------------------------
-
+# --- Main checks ---
 check_renamed() {
   local cfg="$1"
   _emit_h 2 "Renamed variables"
@@ -230,8 +231,24 @@ check_likely_versions_env_misplacements() {
   [[ "$hit" == false ]] && _emit_bullet "No misplaced version keys detected." 2
 }
 
-# ------------- Orchestration ---------------------------------------------------
+check_sensitive_data() {
+  local cfg="$1"
+  _emit_h 2 "Sensitive data check"
+  local sensitive_patterns="password|secret|key|token|credential"
+  local findings
+  findings="$(grep -Ei "$sensitive_patterns" "$cfg" || true)"
+  if [[ -n "$findings" ]]; then
+    _emit_bullet "Potential sensitive data detected (lines may contain passwords, keys, or tokens):" 2
+    while IFS= read -r line; do
+      _emit_bullet "$line" 3
+    done <<<"$findings"
+    _record_warn
+  else
+    _emit_bullet "No obvious sensitive data detected (based on common patterns)." 2
+  fi
+}
 
+# --- Orchestration ---
 run_checks() {
   local cfg="$1"
   _emit_h 1 "v2.0 Migration Compatibility Checker"
@@ -250,6 +267,8 @@ run_checks() {
   check_crlf "$cfg"
   echo
   check_likely_versions_env_misplacements "$cfg"
+  echo
+  check_sensitive_data "$cfg"
 
   echo
   _emit_h 1 "Summary"
@@ -271,20 +290,19 @@ main() {
       *) cfg="$1"; shift ;;
     esac
   done
-
   [[ -n "$cfg" && -f "$cfg" ]] || die "${E_INVALID_INPUT:-2}" "v2.0 configuration file not found or not specified."
-
   if [[ "$OUTPUT_FORMAT" != "text" && "$OUTPUT_FORMAT" != "markdown" ]]; then
     die "${E_INVALID_INPUT:-2}" "--output must be 'text' or 'markdown'"
   fi
-
+  mkdir -p "${SECRETS_DIR}"
+  harden_file_permissions "${SECRETS_DIR}" "700" "secrets directory" || true
   if [[ -n "$REPORT_FILE" ]]; then
-    { run_checks "$cfg"; } | tee "$REPORT_FILE"
+    run_checks "$cfg" | tee "$REPORT_FILE"
+    harden_file_permissions "${REPORT_FILE}" "600" "migration report" || true
   else
     run_checks "$cfg"
   fi
-
-  # Exit code reflects blocking issues
+  audit_security_configuration "${SCRIPT_DIR}/security-audit.txt"
   if (( ISSUES_FOUND > 0 )); then
     exit 1
   else
@@ -292,4 +310,6 @@ main() {
   fi
 }
 
+INTEGRATION_GUIDE_VERSION="1.0.0"
 main "$@"
+```
