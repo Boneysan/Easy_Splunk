@@ -9,12 +9,12 @@
 #               lib/security.sh, lib/monitoring.sh, lib/parse-args.sh, lib/air-gapped.sh,
 #               lib/universal-forwarder.sh, lib/platform-helpers.sh, orchestrator.sh,
 #               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped.sh,
-#               airgapped-quickstart.sh, generate-selinux-helpers.sh, podman-docker-setup.sh,
+#               airgapped-quickstart.sh, generate-selinx-helpers.sh, podman-docker-setup.sh,
 #               start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh,
 #               restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh,
-#               verify-bundle.sh, resolve-digests.sh, integration-guide.sh, tests/unit/test_*.sh,
-#               tests/integration/test_*.sh
-# Version: 1.0.17
+#               verify-bundle.sh, resolve-digests.sh, integration-guide.sh, install-prerequisites.sh,
+#               deploy.sh, tests/unit/test_*.sh, tests/integration/test_*.sh
+# Version: 1.0.21
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
@@ -122,7 +122,7 @@ run_test_script() {
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies
-    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh verify-bundle.sh resolve-digests.sh integration-guide.sh; do
+    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinx-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh verify-bundle.sh resolve-digests.sh integration-guide.sh install-prerequisites.sh deploy.sh; do
       # shellcheck source=/dev/null
       source "${SCRIPT_DIR}/lib/${dep}"
     done
@@ -161,6 +161,8 @@ run_test_script() {
       systemctl() { echo "Mock systemctl: $@"; return 0; }
       dnf() { echo "Mock dnf: $@"; return 0; }
       yum() { echo "Mock yum: $@"; return 0; }
+      apt_get() { echo "Mock apt-get: $@"; return 0; }
+      brew() { echo "Mock brew: $@"; return 0; }
       getenforce() { echo "enforcing"; return 0; }
       sestatus() { echo "SELinux status: enforcing"; return 0; }
       setsebool() { echo "Mock setsebool: $@"; return 0; }
