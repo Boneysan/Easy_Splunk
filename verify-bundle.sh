@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 #
 # ==============================================================================
@@ -16,8 +17,9 @@
 # Exit codes
 #   0 = PASS, non-zero = FAIL
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh
 # Optional    : lib/runtime-detection.sh (for compose validation), jq, shellcheck
+# Version: 1.0.0
 # ==============================================================================
 
 set -euo pipefail
@@ -28,10 +30,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+# shellcheck source=lib/security.sh
+source "${SCRIPT_DIR}/lib/security.sh"
 
-# -------------------------- Config / Defaults ----------------------------------
-# Required items expected inside the unpacked root.
-# Note: images archive name is validated via manifest.json or best-effort search.
+# --- Version Checks ------------------------------------------------------------
+if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "verify-bundle.sh requires security.sh version >= 1.0.0"
+fi
+
+# --- Config / Defaults ---
 readonly REQUIRED_FILES_BASE=(
   "airgapped-quickstart.sh"
   "docker-compose.yml"
@@ -43,8 +50,8 @@ readonly REQUIRED_FILES_BASE=(
 )
 
 OVERALL_STATUS="GOOD"
-DO_COMPOSE_VALIDATE="auto"   # auto|always|never
-LIST_TREE=0                  # --list to show a quick tree of the bundle
+DO_COMPOSE_VALIDATE="auto"
+LIST_TREE=0
 
 usage() {
   cat <<EOF
@@ -61,12 +68,10 @@ Examples:
 EOF
 }
 
-# -------------------------- Helpers --------------------------------------------
-
+# --- Helpers ---
 _have() { command -v "$1" >/dev/null 2>&1; }
 
 _verify_checksum_file_pair() {
-  # _verify_checksum_file_pair <file> [<checksum-file>]
   local target="$1"
   local chk="${2:-${target}.sha256}"
   if [[ ! -f "${chk}" ]]; then
@@ -89,8 +94,6 @@ _verify_checksum_file_pair() {
 }
 
 _find_images_archive() {
-  # Echo the archive path relative to $1 or empty if not found.
-  # Preference order: manifest.archive -> images.tar* present.
   local root="$1"
   local from_manifest=""
   if [[ -f "${root}/manifest.json" ]]; then
@@ -105,7 +108,6 @@ _find_images_archive() {
       return 0
     fi
   fi
-  # Fallback: first images.tar*
   local cand
   cand="$(ls -1 "${root}"/images.tar* 2>/dev/null | head -n1 || true)"
   [[ -n "${cand}" ]] && printf '%s\n' "${cand}"
@@ -113,18 +115,15 @@ _find_images_archive() {
 
 _scan_scripts() {
   local root="$1"
-
-  # 1) Executable bit on *.sh
   local non_exec
   non_exec="$(find "${root}" -type f -name "*.sh" ! -perm -u+x -print || true)"
   if [[ -n "${non_exec}" ]]; then
     log_warn "Some *.sh are not executable:"
     echo "${non_exec}"
+    OVERALL_STATUS="BAD"
   else
     log_success "All *.sh files are executable."
   fi
-
-  # 2) Shebang on *.sh (line 1 should begin with #!)
   local bad_shebang=""
   while IFS= read -r -d '' f; do
     head -n1 "$f" | grep -qE '^#!' || bad_shebang+="$f"$'\n'
@@ -132,21 +131,19 @@ _scan_scripts() {
   if [[ -n "${bad_shebang}" ]]; then
     log_warn "Some shell scripts lack a shebang on the first line:"
     printf '%s' "${bad_shebang}"
+    OVERALL_STATUS="BAD"
   else
     log_success "Shebang check OK for *.sh."
   fi
-
-  # 3) No CRLF endings anywhere
   local bad_crlf
   bad_crlf="$(grep -RIl $'\r' "${root}" || true)"
   if [[ -n "${bad_crlf}" ]]; then
     log_warn "Files with CRLF line endings detected:"
     echo "${bad_crlf}"
+    OVERALL_STATUS="BAD"
   else
     log_success "No CRLF line endings detected."
   fi
-
-  # 4) Optional shellcheck
   if _have shellcheck; then
     log_info "Running shellcheck (best-effort) on *.sh ..."
     mapfile -t shfiles < <(find "${root}" -type f -name "*.sh" -print)
@@ -174,7 +171,6 @@ _sensitive_scan() {
 _compose_validate_if_possible() {
   local root="$1"
   local compose_file="${root}/docker-compose.yml"
-
   case "${DO_COMPOSE_VALIDATE}" in
     never) log_info "Compose validation disabled (never)."; return 0 ;;
   esac
@@ -183,17 +179,14 @@ _compose_validate_if_possible() {
     OVERALL_STATUS="BAD"
     return 0
   fi
-
-  # Prefer local runtime-detection lib if available; else ad-hoc detection.
   local compose_cmd=""
-  if [[ -f "${SCRIPT_DIR}/lib/runtime-detection.sh" ]]; then
-    # shellcheck source=lib/runtime-detection.sh
-    source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+  if [[ -f "${root}/lib/runtime-detection.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${root}/lib/runtime-detection.sh"
     if detect_container_runtime &>/dev/null; then
       compose_cmd="${COMPOSE_COMMAND}"
     fi
   fi
-
   if [[ -z "${compose_cmd}" ]]; then
     if _have docker && docker compose version >/dev/null 2>&1; then
       compose_cmd="docker compose"
@@ -203,7 +196,6 @@ _compose_validate_if_possible() {
       compose_cmd="podman compose"
     fi
   fi
-
   if [[ -z "${compose_cmd}" ]]; then
     case "${DO_COMPOSE_VALIDATE}" in
       always)
@@ -216,7 +208,6 @@ _compose_validate_if_possible() {
     esac
     return 0
   fi
-
   read -r -a COMPOSE_COMMAND_ARRAY <<< "${compose_cmd}"
   log_info "Validating docker-compose.yml using: ${compose_cmd}"
   if ! "${COMPOSE_COMMAND_ARRAY[@]}" -f "${compose_file}" config >/dev/null; then
@@ -237,10 +228,8 @@ _show_tree() {
   fi
 }
 
-# -------------------------- Main ----------------------------------------------
-
+# --- Main ---
 main() {
-  # Parse args
   if [[ $# -lt 1 ]]; then usage; exit 0; fi
   local bundle_file=""
   while [[ $# -gt 0 ]]; do
@@ -252,30 +241,23 @@ main() {
       *)                    bundle_file="$1"; shift ;;
     esac
   done
-
   [[ -n "${bundle_file}" && -f "${bundle_file}" ]] || die "${E_INVALID_INPUT:-2}" "Bundle file not found: ${bundle_file}"
   [[ "${DO_COMPOSE_VALIDATE}" =~ ^(auto|always|never)$ ]] || die "${E_INVALID_INPUT:-2}" "--compose-validate must be auto|always|never"
-
   log_info "🚀 Verifying bundle: ${bundle_file}"
-
-  # Step 1: Verify outer checksum (if present)
   log_info "\n--- Step 1: Top-level checksum ---"
   if ! _verify_checksum_file_pair "${bundle_file}"; then
     die "${E_GENERAL:-1}" "Main bundle checksum verification FAILED."
   fi
   log_success "Top-level checksum OK (or not present)."
-
-  # Step 2: Unpack bundle (strip top-level dir)
   log_info "\n--- Step 2: Unpack and structure checks ---"
   local staging_dir
   staging_dir="$(mktemp -d -t bundle-verify-XXXXXX)"
   add_cleanup_task "rm -rf '${staging_dir}'"
+  harden_file_permissions "${staging_dir}" "700" "staging directory" || true
   log_debug "Staging at: ${staging_dir}"
   tar -xzf "${bundle_file}" -C "${staging_dir}" --strip-components=1
-
+  audit_security_configuration "${staging_dir}/security-audit.txt"
   (( LIST_TREE == 1 )) && _show_tree "${staging_dir}"
-
-  # Step 3: Required files present?
   for f in "${REQUIRED_FILES_BASE[@]}"; do
     if [[ -e "${staging_dir}/${f}" ]]; then
       log_success "  ✔ Required: ${f}"
@@ -284,8 +266,6 @@ main() {
       OVERALL_STATUS="BAD"
     fi
   done
-
-  # Step 4: Manifest sanity + inner images archive integrity
   log_info "\n--- Step 3: Manifest & inner images archive ---"
   local img_archive img_sha
   img_archive="$(_find_images_archive "${staging_dir}")"
@@ -306,20 +286,12 @@ main() {
       log_warn "No checksum for inner images archive; skipping verification."
     fi
   fi
-
-  # Step 5: Script hygiene
   log_info "\n--- Step 4: Script hygiene checks ---"
   _scan_scripts "${staging_dir}"
-
-  # Step 6: Sensitive/unwanted file scan
   log_info "\n--- Step 5: Sensitive file scan ---"
   _sensitive_scan "${staging_dir}"
-
-  # Step 7: Compose validation (optional)
   log_info "\n--- Step 6: Compose file validation ---"
   _compose_validate_if_possible "${staging_dir}"
-
-  # Final summary
   log_info "\n--- Verification Summary ---"
   if [[ "${OVERALL_STATUS}" == "GOOD" ]]; then
     log_success "✅ Bundle verification PASSED."
@@ -329,4 +301,6 @@ main() {
   fi
 }
 
+VERIFY_BUNDLE_VERSION="1.0.0"
 main "$@"
+```
