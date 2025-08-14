@@ -1,429 +1,429 @@
-#!/usr/bin/env bash
-# ==============================================================================
-# lib/error-handling.sh
-# Robust error handling, retries with backoff+jitter, deadlines/timeouts,
-# atomic file operations, and resumable progress tracking.
-#
-# Dependencies: lib/core.sh (expects: log_*, die, E_*, register_cleanup, have_cmd)
-# Version: 1.0.4
-#
-# Usage Examples:
-#   with_retry --retries 3 --base-delay 2 -- curl -f https://example.com
-#   deadline_run 10 -- sleep 5
-#   echo "content" | atomic_write /path/to/file 644
-#   begin_step "install"; ...; complete_step "install"
-#   pkg_install_retry apt-get podman
-#   secure_store_password "splunk_password" "secret"
-# ==============================================================================
+#!/bin/bash
+# lib/error_handling.sh
+# Enhanced error handling module for Easy_Splunk toolkit
+# Provides robust error handling, retry logic, and validation functions
 
-# ---- Dependency guard ----------------------------------------------------------
-if ! command -v log_info >/dev/null 2>&1; then
-  echo "FATAL: lib/core.sh must be sourced before lib/error-handling.sh" >&2
-  exit 1
-fi
-if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
-  die "${E_GENERAL}" "lib/error-handling.sh requires core.sh version >= 1.0.0"
-fi
+# Strict error handling
+set -euo pipefail
+IFS=$'\n\t'
 
-# ---- Defaults / Tunables -------------------------------------------------------
-: "${RETRY_MAX:=5}"             # default retry attempts
-: "${RETRY_BASE_DELAY:=1}"      # base backoff seconds (float ok)
-: "${RETRY_MAX_DELAY:=30}"      # max backoff seconds
-: "${RETRY_JITTER_MS:=250}"     # +/- jitter in milliseconds (0..250)
-: "${RETRY_ON_CODES:=}"         # space-separated exit codes; empty = retry any nonzero
-: "${RETRY_STRATEGY:=exp}"      # exp | full_jitter
-: "${PKG_INSTALL_RETRIES:=5}"   # retries for package installations
+# Color codes for output
+readonly RED='\033[0;31m'
+readonly YELLOW='\033[1;33m'
+readonly GREEN='\033[0;32m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
 
-# State directory for step tracking and secure storage (overrideable)
-STATE_DIR_DEFAULT="${XDG_RUNTIME_DIR:-/tmp}/splunk-pkg-state"
-: "${STATE_DIR:=${STATE_DIR_DEFAULT}}"
+# Global variables for error context
+SCRIPT_NAME="${0##*/}"
+LOG_FILE="${LOG_FILE:-/tmp/easy_splunk_$(date +%Y%m%d_%H%M%S).log}"
+CLEANUP_FUNCTIONS=()
+DEBUG_MODE="${DEBUG:-false}"
 
-# Ensure state directory exists and is private
-mkdir -p -- "${STATE_DIR}"
-chmod 700 "${STATE_DIR}" 2>/dev/null || log_debug "Failed to set permissions on ${STATE_DIR}"
-
-# ==============================================================================
-# Internal utilities
-# ==============================================================================
-
-# _sleep_s <seconds>  — sleeps fractional seconds if supported
-_sleep_s() {
-  local sec="${1:-0}"
-  # Prefer perl, then python, then awk; fallback to integer sleep
-  if have_cmd perl; then
-    perl -e "select(undef, undef, undef, ${sec});"
-  elif have_cmd python3; then
-    python3 - <<PY
-import time
-time.sleep(${sec})
-PY
-  elif have_cmd awk; then
-    # Use awk to busy-wait (very short periods); prefer integer sleep for larger values
-    if awk 'BEGIN{exit !(('"${sec}"')>0.5)}'; then
-      local whole
-      whole="$(printf '%.0f' "${sec}")"
-      (( whole < 1 )) && whole=1
-      sleep "${whole}"
-    else
-      awk -v s="${sec}" 'BEGIN{t=systime()+s; while (systime()<t) {}}' && log_debug "_sleep_s: used CPU-intensive awk busy-wait for ${sec}s"
+# Initialize logging
+init_logging() {
+    local log_dir="${LOG_DIR:-/tmp}"
+    
+    # Ensure log directory exists
+    if [[ ! -d "$log_dir" ]]; then
+        mkdir -p "$log_dir" 2>/dev/null || log_dir="/tmp"
     fi
-  else
-    local whole
-    whole="$(printf '%.0f' "${sec}")"
-    if [[ "${whole}" -eq 0 && "${sec}" != "0" ]]; then whole=1; fi
-    sleep "${whole}"
-  fi
+    
+    LOG_FILE="${log_dir}/easy_splunk_$(date +%Y%m%d_%H%M%S).log"
+    
+    # Create log file with header
+    {
+        echo "==============================================="
+        echo "Easy_Splunk Execution Log"
+        echo "Script: ${SCRIPT_NAME}"
+        echo "Started: $(date)"
+        echo "PID: $$"
+        echo "User: $(whoami)"
+        echo "==============================================="
+    } >> "$LOG_FILE"
 }
 
-# _rand_u32 — fast random unsigned 32-bit
-_rand_u32() {
-  # Prefer /dev/urandom for better entropy; fallback to $RANDOM
-  if [[ -r /dev/urandom ]]; then
-    od -An -N4 -tu4 /dev/urandom 2>/dev/null | tr -d '[:space:]' || echo $((RANDOM<<16 ^ RANDOM))
-  else
-    echo $((RANDOM<<16 ^ RANDOM))
-  fi
-}
-
-# _rand_ms  — random 0..999 millisecond value
-_rand_ms() {
-  local u32; u32="$(_rand_u32)"
-  printf '%d\n' "$(( u32 % 1000 ))"
-}
-
-# _is_retry_code <rc> <codes...>  — returns 0 if rc is in the set
-_is_retry_code() {
-  local rc="$1"; shift
-  [[ $# -eq 0 ]] && return 0  # empty set -> retry any nonzero
-  local c
-  for c in "$@"; do
-    [[ "${rc}" -eq "${c}" ]] && return 0
-  done
-  return 1
-}
-
-# _min_float a b  ,  _max_float a b
-_min_float() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.6f\n", (a<b)?a:b}'; }
-_max_float() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.6f\n", (a>b)?a:b}'; }
-
-# ==============================================================================
-# Retry / Backoff
-# ==============================================================================
-
-# with_retry [--retries N] [--base-delay S] [--max-delay S] [--jitter-ms MS] [--retry-on "codes"]
-#            [--strategy exp|full_jitter]
-#            -- <command ...>
-# Retries the command on failure with backoff + jitter.
-with_retry() {
-  local retries="${RETRY_MAX}"
-  local base="${RETRY_BASE_DELAY}"
-  local maxd="${RETRY_MAX_DELAY}"
-  local jitter_ms="${RETRY_JITTER_MS}"
-  local retry_codes="${RETRY_ON_CODES}"
-  local strategy="${RETRY_STRATEGY}"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --retries)     retries="$2"; shift 2;;
-      --base-delay)  base="$2"; shift 2;;
-      --max-delay)   maxd="$2"; shift 2;;
-      --jitter-ms)   jitter_ms="$2"; shift 2;;
-      --retry-on)    retry_codes="$2"; shift 2;;
-      --strategy)    strategy="$2"; shift 2;;
-      --) shift; break;;
-      *)  break;;
+# Logging function
+log_message() {
+    local level="$1"
+    shift
+    local message="$*"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Log to file
+    echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
+    
+    # Console output with colors
+    case "$level" in
+        ERROR)
+            echo -e "${RED}[ERROR]${NC} $message" >&2
+            ;;
+        WARNING)
+            echo -e "${YELLOW}[WARNING]${NC} $message" >&2
+            ;;
+        INFO)
+            echo -e "${BLUE}[INFO]${NC} $message"
+            ;;
+        SUCCESS)
+            echo -e "${GREEN}[SUCCESS]${NC} $message"
+            ;;
+        DEBUG)
+            [[ "$DEBUG_MODE" == "true" ]] && echo -e "[DEBUG] $message" >&2
+            ;;
+        *)
+            echo "$message"
+            ;;
     esac
-  done
+}
 
-  local -a cmd=( "$@" )
-  if [[ ${#cmd[@]} -eq 0 ]]; then
-    die "${E_INVALID_INPUT}" "with_retry: no command provided"
-  fi
+# Register cleanup functions
+register_cleanup() {
+    local func="$1"
+    CLEANUP_FUNCTIONS+=("$func")
+    log_message DEBUG "Registered cleanup function: $func"
+}
 
-  local attempt=1
-  local delay="${base}"
-
-  while true; do
-    log_debug "with_retry: attempt ${attempt}/${retries}: ${cmd[*]}"
-    "${cmd[@]}"; local rc=$?
-
-    if [[ $rc -eq 0 ]]; then
-      log_debug "with_retry: success on attempt ${attempt}"
-      return 0
-    fi
-
-    # Check retryability
-    if (( attempt >= retries )) || ! _is_retry_code "$rc" ${retry_codes}; then
-      log_error "with_retry: command failed (rc=${rc}) after ${attempt} attempt(s): ${cmd[*]}"
-      return "${rc}"
-    fi
-
-    # --- Backoff calculation ---
-    local delay_s next_delay
-    case "${strategy}" in
-      full_jitter)
-        # AWS full jitter: sleep U(0, min(maxd, base*2^attempt))
-        if have_cmd awk; then
-          local cap
-          cap="$(awk -v b="${base}" -v m="${maxd}" -v a="${attempt}" 'BEGIN{v=b*2^a; if (v>m) v=m; printf "%.6f\n", v}')"
-          # random fraction in [0,1)
-          local frac
-          frac="$(awk -v r="$(_rand_u32)" 'BEGIN{srand(r); printf "%.6f\n", rand()}')"
-          delay_s="$(awk -v c="${cap}" -v f="${frac}" 'BEGIN{printf "%.6f\n", c*f}')"
-        else
-          log_debug "with_retry: falling back to integer delay due to missing awk"
-          local a2=$(( attempt < 10 ? (1<<attempt) : 1024 ))
-          next_delay=$(( a2 * ${base%.*} ))
-          (( next_delay > ${maxd%.*} )) && next_delay="${maxd%.*}"
-          local r=$((_rand_u32 % ( (next_delay>1)? next_delay : 1 )))
-          delay_s="${r}"
+# Execute all registered cleanup functions
+cleanup_on_error() {
+    local exit_code=$?
+    
+    log_message INFO "Executing cleanup procedures..."
+    
+    # Execute registered cleanup functions in reverse order
+    for ((i=${#CLEANUP_FUNCTIONS[@]}-1; i>=0; i--)); do
+        local func="${CLEANUP_FUNCTIONS[$i]}"
+        log_message DEBUG "Running cleanup: $func"
+        
+        if type "$func" &>/dev/null; then
+            "$func" 2>&1 | while read line; do
+                log_message DEBUG "Cleanup: $line"
+            done
         fi
-        ;;
-      *)
-        # exp: delay' = min(maxd, delay*2) +/- jitter
-        local jms="$(_rand_ms)"
-        local span=$(( jitter_ms > 0 ? jitter_ms : 0 ))
-        local sign=$(( (RANDOM % 2) == 0 ? 1 : -1 ))
-        local jitter_adj_ms=$(( sign * (jms % (span == 0 ? 1 : span)) ))
-        if have_cmd awk; then
-          next_delay="$(awk -v d="${delay}" -v m="${maxd}" 'BEGIN{n=d*2; if (n>m) n=m; printf "%.6f\n", n}')"
-          delay_s="$(awk -v n="${next_delay}" -v j="${jitter_adj_ms}" 'BEGIN{printf "%.6f\n", n + (j/1000.0)}')"
-        else
-          log_debug "with_retry: falling back to integer delay due to missing awk"
-          local d_int m_int
-          d_int="$(printf '%.0f' "${delay}")"
-          m_int="$(printf '%.0f' "${maxd}")"
-          next_delay=$(( d_int * 2 )); (( next_delay > m_int )) && next_delay="${m_int}"
-          delay_s=$(( next_delay ))  # ignore jitter without awk
+    done
+    
+    # Common cleanup tasks
+    if [[ -n "${TEMP_DIR:-}" ]] && [[ -d "$TEMP_DIR" ]]; then
+        log_message DEBUG "Removing temporary directory: $TEMP_DIR"
+        rm -rf "$TEMP_DIR"
+    fi
+    
+    log_message INFO "Cleanup completed. Log file: $LOG_FILE"
+    
+    return $exit_code
+}
+
+# Enhanced error exit function
+error_exit() {
+    local message="${1:-Unknown error occurred}"
+    local exit_code="${2:-1}"
+    local line_no="${3:-}"
+    
+    # Capture stack trace
+    local frame=0
+    log_message ERROR "Stack trace:"
+    while caller $frame >> "$LOG_FILE" 2>/dev/null; do
+        ((frame++))
+    done
+    
+    # Log error details
+    log_message ERROR "$message"
+    
+    if [[ -n "$line_no" ]]; then
+        log_message ERROR "Error occurred at line $line_no in $SCRIPT_NAME"
+    fi
+    
+    # Perform cleanup
+    cleanup_on_error
+    
+    # Exit with specified code
+    exit "$exit_code"
+}
+
+# Trap handler for errors
+trap_handler() {
+    local line_no="$1"
+    local bash_lineno="$2"
+    local last_command="$3"
+    
+    log_message ERROR "Command failed: $last_command"
+    error_exit "Script failed at line $line_no" 1 "$line_no"
+}
+
+# Set up error trapping
+setup_error_trapping() {
+    set -euo pipefail
+    trap 'trap_handler ${LINENO} ${BASH_LINENO} "${BASH_COMMAND}"' ERR
+    trap 'cleanup_on_error' EXIT INT TERM
+}
+
+# Input validation functions
+validate_input() {
+    local input="${1:-}"
+    local pattern="$2"
+    local error_msg="${3:-Invalid input}"
+    
+    if [[ -z "$input" ]]; then
+        error_exit "$error_msg: Input is empty"
+    fi
+    
+    if [[ ! $input =~ $pattern ]]; then
+        error_exit "$error_msg: '$input' does not match required pattern"
+    fi
+    
+    log_message DEBUG "Input validation passed: $input"
+    return 0
+}
+
+# Validate required commands exist
+validate_commands() {
+    local missing_commands=()
+    
+    for cmd in "$@"; do
+        if ! command -v "$cmd" &>/dev/null; then
+            missing_commands+=("$cmd")
         fi
-        # never negative; set a small floor if jitter pushed below zero
-        if [[ "${delay_s:0:1}" == "-" || "${delay_s}" == "0" ]]; then delay_s="0.100"; fi
-        ;;
-    esac
-
-    log_warn "with_retry: rc=${rc}; retrying in ${delay_s}s (next attempt $((attempt+1))/${retries})"
-    _sleep_s "${delay_s}"
-    delay="${next_delay:-$delay}"
-    ((attempt++))
-  done
-}
-
-# pkg_install_retry <manager> <args...>
-# Specialized retry for package installations with higher retry count
-pkg_install_retry() {
-  local mgr="${1:?pkg mgr required}"; shift
-  log_info "Installing packages with ${mgr} $*"
-  if [[ "${mgr}" == "apt-get" ]]; then
-    with_retry --retries "${PKG_INSTALL_RETRIES}" -- sudo apt-get update -y
-  fi
-  with_retry --retries "${PKG_INSTALL_RETRIES}" -- sudo "${mgr}" install -y "$@"
-}
-
-# secure_store_password <name> <password>
-# Stores a password securely in a temporary file
-secure_store_password() {
-  local name="${1:?name required}"
-  local password="${2:?password required}"
-  local file="${STATE_DIR}/${name}.secret"
-  echo "${password}" | atomic_write "${file}" 600
-  log_debug "Stored password securely: ${file}"
-  echo "${file}"
-}
-
-# ==============================================================================
-# Deadlines / Timeouts
-# ==============================================================================
-
-# _run_with_timeout <timeout_s> -- <command ...>
-# Returns command rc, or 124 on timeout (GNU timeout-compatible).
-_run_with_timeout() {
-  local timeout_s="${1:-}"; shift || true
-  [[ -n "${timeout_s}" ]] || die "${E_INVALID_INPUT}" "_run_with_timeout: timeout seconds required"
-  [[ "$1" == "--" ]] && shift
-
-  local -a cmd=( "$@" )
-  [[ ${#cmd[@]} -gt 0 ]] || die "${E_INVALID_INPUT}" "_run_with_timeout: command required"
-
-  if have_cmd timeout; then
-    timeout --preserve-status --kill-after=5s "${timeout_s}s" "${cmd[@]}"
-    return $?
-  elif have_cmd gtimeout; then
-    gtimeout --preserve-status --kill-after=5s "${timeout_s}s" "${cmd[@]}"
-    return $?
-  fi
-
-  # Fallback: run the command in its own process group and watchdog it.
-  local child pgid watchdog status
-  if have_cmd setsid; then
-    setsid bash -c 'exec "$@"' _ "${cmd[@]}" &
-  else
-    bash -c 'exec "$@"' _ "${cmd[@]}" &
-  fi
-  child=$!
-  log_debug "_run_with_timeout: starting child (pid=${child})"
-
-  # Try to get the process group id (pgid == pid if it's a group leader)
-  pgid="$(ps -o pgid= -p "${child}" 2>/dev/null | tr -d ' ' || echo "${child}")"
-  log_debug "_run_with_timeout: child pgid=${pgid}"
-
-  (
-    _sleep_s "${timeout_s}"
-    kill -TERM -"${pgid}" 2>/dev/null || kill -TERM "${child}" 2>/dev/null || log_debug "_run_with_timeout: failed to send SIGTERM to child ${child}"
-    _sleep_s 5
-    kill -KILL -"${pgid}" 2>/dev/null || kill -KILL "${child}" 2>/dev/null || log_debug "_run_with_timeout: failed to send SIGKILL to child ${child}"
-  ) &
-  watchdog=$!
-  log_debug "_run_with_timeout: started watchdog (pid=${watchdog})"
-
-  # Wait for the child
-  wait "${child}"; status=$?
-  log_debug "_run_with_timeout: child exited with status ${status}"
-
-  # If child finished first, stop the watchdog
-  kill "${watchdog}" 2>/dev/null || true
-  wait "${watchdog}" 2>/dev/null || true
-
-  if [[ ${status} -eq 143 || ${status} -eq 137 ]]; then
-    log_debug "_run_with_timeout: mapping exit status ${status} to timeout (124)"
-    return 124
-  fi
-  return "${status}"
-}
-
-# deadline_run <timeout_s> -- <command ...>
-deadline_run() {
-  _run_with_timeout "$@"
-}
-
-# deadline_retry <timeout_s> [with_retry args...] -- <command ...>
-# Retries under an overall deadline.
-deadline_retry() {
-  local timeout_s="${1:-}"; shift || true
-  [[ -n "${timeout_s}" ]] || die "${E_INVALID_INPUT}" "deadline_retry: timeout seconds required"
-
-  local start_ts end_ts
-  start_ts="$(date +%s)"
-
-  # Collect with_retry config until we hit "--"
-  local -a wr_opts=()
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --) shift; break;;
-      *)  wr_opts+=("$1"); shift;;
-    esac
-  done
-
-  local -a cmd=( "$@" )
-  [[ ${#cmd[@]} -gt 0 ]] || die "${E_INVALID_INPUT}" "deadline_retry: command required"
-
-  while true; do
-    end_ts="$(date +%s)"
-    local elapsed=$(( end_ts - start_ts ))
-    local remaining=$(( timeout_s - elapsed ))
-    if (( remaining <= 0 )); then
-      log_error "deadline_retry: timed out after ${timeout_s}s: ${cmd[*]}"
-      return 124
+    done
+    
+    if [[ ${#missing_commands[@]} -gt 0 ]]; then
+        error_exit "Missing required commands: ${missing_commands[*]}"
     fi
-    _run_with_timeout "${remaining}" -- with_retry "${wr_opts[@]}" -- "${cmd[@]}"
-    local rc=$?
-    case "${rc}" in
-      0)   return 0 ;;
-      124) log_error "deadline_retry: timed out while retrying: ${cmd[*]}"; return 124 ;;
-      *)   ;; # continue; with_retry already handled sleep/backoff
-    esac
-  done
+    
+    log_message DEBUG "All required commands available: $*"
 }
 
-# ==============================================================================
-# Atomic File Operations
-# ==============================================================================
+# Validate file/directory existence
+validate_path() {
+    local path="$1"
+    local type="${2:-file}"  # file, directory, or any
+    
+    case "$type" in
+        file)
+            [[ -f "$path" ]] || error_exit "File not found: $path"
+            ;;
+        directory)
+            [[ -d "$path" ]] || error_exit "Directory not found: $path"
+            ;;
+        any)
+            [[ -e "$path" ]] || error_exit "Path not found: $path"
+            ;;
+        *)
+            error_exit "Invalid path type: $type"
+            ;;
+    esac
+    
+    log_message DEBUG "Path validation passed: $path ($type)"
+}
 
-# atomic_write_file <src> <dest> [mode]
-# Moves a prepared file into place atomically; optional chmod mode.
-# Guarantees atomicity by staging into the destination directory first to avoid cross-FS rename.
-atomic_write_file() {
-  local src="${1:?src required}"
-  local dest="${2:?dest required}"
-  local mode="${3:-}"
-
-  [[ -f "${src}" ]] || die "${E_INVALID_INPUT}" "atomic_write_file: source not found: ${src}"
-
-  local dest_dir base tmp
-  dest_dir="$(dirname -- "${dest}")"
-  base="$(basename -- "${dest}")"
-  mkdir -p -- "${dest_dir}"
-
-  tmp="$(mktemp "${dest_dir}/.${base}.tmp.XXXXXX")" || die "${E_GENERAL}" "atomic_write_file: mktemp failed"
-  register_cleanup "rm -f '${tmp}'"
-
-  if have_cmd install; then
-    # Try to preserve timestamps (-p) and set mode if provided
-    if [[ -n "${mode}" ]]; then
-      install -m "${mode}" -p -- "${src}" "${tmp}" 2>/dev/null || cp -p -- "${src}" "${tmp}"
-      chmod "${mode}" "${tmp}" || true
+# Validate network connectivity
+validate_network() {
+    local host="${1:-8.8.8.8}"
+    local port="${2:-443}"
+    local timeout="${3:-5}"
+    
+    log_message DEBUG "Checking network connectivity to $host:$port"
+    
+    if command -v nc &>/dev/null; then
+        nc -z -w "$timeout" "$host" "$port" 2>/dev/null || \
+            error_exit "Cannot connect to $host:$port"
+    elif command -v timeout &>/dev/null; then
+        timeout "$timeout" bash -c "cat < /dev/null > /dev/tcp/$host/$port" 2>/dev/null || \
+            error_exit "Cannot connect to $host:$port"
     else
-      install -p -- "${src}" "${tmp}" 2>/dev/null || cp -p -- "${src}" "${tmp}"
+        log_message WARNING "Cannot validate network connectivity (nc or timeout not available)"
     fi
-  else
-    cp -p -- "${src}" "${tmp}"
-    [[ -n "${mode}" ]] && chmod "${mode}" "${tmp}" || true
-  fi
-
-  mv -f -- "${tmp}" "${dest}"
+    
+    log_message DEBUG "Network connectivity verified"
 }
 
-# atomic_write <dest> [mode]  (reads content from stdin to a temp file first)
-atomic_write() {
-  local dest="${1:?dest required}"
-  local mode="${2:-}"
-  local dest_dir base tmp
-  dest_dir="$(dirname -- "${dest}")"
-  base="$(basename -- "${dest}")"
-  mkdir -p -- "${dest_dir}"
-
-  tmp="$(mktemp "${dest_dir}/.${base}.tmp.XXXXXX")" || die "${E_GENERAL}" "atomic_write: mktemp failed"
-  register_cleanup "rm -f '${tmp}'"
-
-  cat > "${tmp}"
-  [[ -n "${mode}" ]] && chmod "${mode}" "${tmp}" || true
-
-  mv -f -- "${tmp}" "${dest}"
+# Retry function with exponential backoff
+retry_with_backoff() {
+    local max_attempts="${MAX_ATTEMPTS:-3}"
+    local initial_delay="${INITIAL_DELAY:-1}"
+    local max_delay="${MAX_DELAY:-60}"
+    local multiplier="${BACKOFF_MULTIPLIER:-2}"
+    
+    local attempt=1
+    local delay=$initial_delay
+    local cmd=("$@")
+    
+    log_message INFO "Executing with retry: ${cmd[*]}"
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        log_message DEBUG "Attempt $attempt of $max_attempts"
+        
+        # Try to execute the command
+        if "${cmd[@]}"; then
+            log_message SUCCESS "Command succeeded on attempt $attempt"
+            return 0
+        fi
+        
+        # Check if we've exhausted attempts
+        if [[ $attempt -eq $max_attempts ]]; then
+            log_message ERROR "Command failed after $max_attempts attempts"
+            return 1
+        fi
+        
+        # Wait before retry
+        log_message WARNING "Command failed, retrying in ${delay}s..."
+        sleep "$delay"
+        
+        # Calculate next delay with exponential backoff
+        delay=$((delay * multiplier))
+        [[ $delay -gt $max_delay ]] && delay=$max_delay
+        
+        ((attempt++))
+    done
+    
+    error_exit "Command failed after $max_attempts attempts: ${cmd[*]}"
 }
 
-# ==============================================================================
-# Progress Tracking (Resumable Steps)
-# ==============================================================================
-
-# begin_step <name>  — creates a marker file; registers auto-complete on exit
-# NOTE: This marks completion on *any* script exit. If you only want completion
-# on success, call `complete_step` explicitly at the end of your workflow.
-begin_step() {
-  local name="${1:?step name required}"
-  local f="${STATE_DIR}/${name}.state"
-  log_debug "begin_step: ${name} -> ${f}"
-  : > "${f}"
-  # auto-complete when the script exits (any status)
-  register_cleanup "complete_step '${name}'"
+# Retry function for network operations
+retry_network_operation() {
+    local operation="$1"
+    shift
+    
+    MAX_ATTEMPTS=5 \
+    INITIAL_DELAY=2 \
+    MAX_DELAY=30 \
+    BACKOFF_MULTIPLIER=2 \
+    retry_with_backoff "$@" || \
+        error_exit "Network operation failed: $operation"
 }
 
-# complete_step <name>  — removes marker file
-complete_step() {
-  local name="${1:?step name required}"
-  local f="${STATE_DIR}/${name}.state"
-  [[ -f "${f}" ]] && rm -f -- "${f}" || true
+# Safe command execution with timeout
+safe_execute() {
+    local timeout="${1:-30}"
+    shift
+    local cmd=("$@")
+    
+    log_message DEBUG "Executing with ${timeout}s timeout: ${cmd[*]}"
+    
+    if command -v timeout &>/dev/null; then
+        if timeout "$timeout" "${cmd[@]}"; then
+            return 0
+        else
+            local exit_code=$?
+            if [[ $exit_code -eq 124 ]]; then
+                error_exit "Command timed out after ${timeout}s: ${cmd[*]}"
+            else
+                error_exit "Command failed with exit code $exit_code: ${cmd[*]}"
+            fi
+        fi
+    else
+        # Fallback without timeout
+        log_message WARNING "timeout command not available, executing without timeout"
+        "${cmd[@]}" || error_exit "Command failed: ${cmd[*]}"
+    fi
 }
 
-# step_incomplete <name>  — returns 0 if marker exists (i.e., started but not completed)
-step_incomplete() {
-  local name="${1:?step name required}"
-  [[ -f "${STATE_DIR}/${name}.state" ]]
+# Check disk space
+check_disk_space() {
+    local path="${1:-/}"
+    local required_mb="${2:-1024}"
+    
+    log_message DEBUG "Checking disk space at $path (required: ${required_mb}MB)"
+    
+    local available_kb=$(df -k "$path" 2>/dev/null | awk 'NR==2 {print $4}')
+    local available_mb=$((available_kb / 1024))
+    
+    if [[ $available_mb -lt $required_mb ]]; then
+        error_exit "Insufficient disk space at $path: ${available_mb}MB available, ${required_mb}MB required"
+    fi
+    
+    log_message DEBUG "Disk space check passed: ${available_mb}MB available"
 }
 
-# list_incomplete_steps — prints any step markers present
-list_incomplete_steps() {
-  ls -1 "${STATE_DIR}"/*.state 2>/dev/null | sed 's#.*/##; s#\.state$##' || true
+# Lock file management for preventing concurrent executions
+acquire_lock() {
+    local lock_file="${1:-/tmp/easy_splunk.lock}"
+    local timeout="${2:-30}"
+    local elapsed=0
+    
+    while [[ $elapsed -lt $timeout ]]; do
+        if mkdir "$lock_file" 2>/dev/null; then
+            log_message DEBUG "Lock acquired: $lock_file"
+            echo $$ > "$lock_file/pid"
+            
+            # Register cleanup to remove lock
+            register_cleanup "release_lock '$lock_file'"
+            return 0
+        fi
+        
+        # Check if the process holding the lock is still running
+        if [[ -f "$lock_file/pid" ]]; then
+            local lock_pid=$(cat "$lock_file/pid" 2>/dev/null)
+            if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+                log_message WARNING "Removing stale lock from PID $lock_pid"
+                release_lock "$lock_file"
+                continue
+            fi
+        fi
+        
+        sleep 1
+        ((elapsed++))
+    done
+    
+    error_exit "Could not acquire lock after ${timeout}s: $lock_file"
 }
 
-# ==============================================================================
-# End of lib/error-handling.sh
-# ==============================================================================
+release_lock() {
+    local lock_file="${1:-/tmp/easy_splunk.lock}"
+    
+    if [[ -d "$lock_file" ]]; then
+        rm -rf "$lock_file"
+        log_message DEBUG "Lock released: $lock_file"
+    fi
+}
+
+# Progress indicator for long-running operations
+show_progress() {
+    local pid=$1
+    local message="${2:-Processing}"
+    local spin='-\|/'
+    local i=0
+    
+    while kill -0 "$pid" 2>/dev/null; do
+        i=$(( (i+1) % 4 ))
+        printf "\r%s... %c" "$message" "${spin:$i:1}"
+        sleep 0.1
+    done
+    
+    printf "\r%s... Done\n" "$message"
+}
+
+# Validate container runtime
+validate_container_runtime() {
+    local runtime="${CONTAINER_RUNTIME:-}"
+    
+    if [[ -z "$runtime" ]]; then
+        if command -v docker &>/dev/null; then
+            runtime="docker"
+        elif command -v podman &>/dev/null; then
+            runtime="podman"
+        else
+            error_exit "No container runtime found. Please install Docker or Podman"
+        fi
+    fi
+    
+    # Verify runtime is functional
+    if ! $runtime info &>/dev/null; then
+        error_exit "Container runtime '$runtime' is not running or accessible"
+    fi
+    
+    export CONTAINER_RUNTIME="$runtime"
+    log_message INFO "Using container runtime: $runtime"
+}
+
+# Initialize error handling (call this at the start of scripts)
+init_error_handling() {
+    init_logging
+    setup_error_trapping
+    log_message INFO "Error handling initialized for $SCRIPT_NAME"
+}
+
+# Export functions for use in other scripts
+export -f error_exit
+export -f log_message
+export -f validate_input
+export -f retry_with_backoff
+export -f safe_execute
