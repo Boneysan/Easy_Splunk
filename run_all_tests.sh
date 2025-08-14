@@ -2,7 +2,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # run_all_tests.sh
-# Master script to run all unit tests for the Splunk cluster orchestrator project.
+# Master script to run all unit and integration tests for the Splunk cluster orchestrator project.
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
 #               lib/validation.sh, lib/runtime-detection.sh, lib/compose-generator.sh,
@@ -12,8 +12,9 @@
 #               airgapped-quickstart.sh, generate-selinux-helpers.sh, podman-docker-setup.sh,
 #               start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh,
 #               restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh,
-#               verify-bundle.sh, resolve-digests.sh, integration-guide.sh, tests/unit/test_*.sh
-# Version: 1.0.16
+#               verify-bundle.sh, resolve-digests.sh, integration-guide.sh, tests/unit/test_*.sh,
+#               tests/integration/test_*.sh
+# Version: 1.0.17
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
@@ -27,6 +28,8 @@ source "${SCRIPT_DIR}/lib/error-handling.sh"
 # --- Defaults / Flags -----------------------------------------------------------
 VERBOSE=false
 TEST_FILTER=""
+RUN_UNIT=true
+RUN_INTEGRATION=true
 # --- CLI Parsing ----------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,18 +41,29 @@ while [[ $# -gt 0 ]]; do
       TEST_FILTER="${2:?filter required}"
       shift 2
       ;;
+    --unit-only)
+      RUN_INTEGRATION=false
+      shift
+      ;;
+    --integration-only)
+      RUN_UNIT=false
+      shift
+      ;;
     -h|--help)
       cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
-Runs all unit tests for the Splunk cluster orchestrator project.
+Runs all unit and integration tests for the Splunk cluster orchestrator project.
 Options:
-  -v, --verbose  Enable verbose output (sets DEBUG=true)
-  --filter REGEX Only run test scripts matching REGEX
-  -h, --help     Show this help and exit
+  -v, --verbose         Enable verbose output (sets DEBUG=true)
+  --filter REGEX        Only run test scripts matching REGEX
+  --unit-only           Run only unit tests
+  --integration-only    Run only integration tests
+  -h, --help            Show this help and exit
 Examples:
-  $(basename "$0")                 # Run all tests
-  $(basename "$0") --verbose       # Run all tests with verbose output
-  $(basename "$0") --filter parse  # Run only tests matching 'parse'
+  $(basename "$0")                     # Run all tests
+  $(basename "$0") --verbose           # Run all tests with verbose output
+  $(basename "$0") --filter validation # Run tests matching 'validation'
+  $(basename "$0") --unit-only         # Run only unit tests
 EOF
       exit 0
       ;;
@@ -65,19 +79,34 @@ if is_true "${VERBOSE}"; then
   export DEBUG=true
 fi
 # Discover test scripts
-TEST_SCRIPTS=()
-while IFS= read -r script; do
-  TEST_SCRIPTS+=("$script")
-done < <(find "${SCRIPT_DIR}/tests/unit" -type f -name "test_*.sh" | sort)
+UNIT_TEST_SCRIPTS=()
+INTEGRATION_TEST_SCRIPTS=()
+if is_true "${RUN_UNIT}"; then
+  while IFS= read -r script; do
+    UNIT_TEST_SCRIPTS+=("$script")
+  done < <(find "${SCRIPT_DIR}/tests/unit" -type f -name "test_*.sh" | sort)
+fi
+if is_true "${RUN_INTEGRATION}"; then
+  while IFS= read -r script; do
+    INTEGRATION_TEST_SCRIPTS+=("$script")
+  done < <(find "${SCRIPT_DIR}/tests/integration" -type f -name "test_*.sh" | sort)
+fi
 # Filter test scripts if specified
 if [[ -n "${TEST_FILTER}" ]]; then
-  filtered_scripts=()
-  for script in "${TEST_SCRIPTS[@]}"; do
+  filtered_unit_scripts=()
+  for script in "${UNIT_TEST_SCRIPTS[@]}"; do
     if [[ "$(basename "${script}")" =~ ${TEST_FILTER} ]]; then
-      filtered_scripts+=("${script}")
+      filtered_unit_scripts+=("${script}")
     fi
   done
-  TEST_SCRIPTS=("${filtered_scripts[@]}")
+  UNIT_TEST_SCRIPTS=("${filtered_unit_scripts[@]}")
+  filtered_integration_scripts=()
+  for script in "${INTEGRATION_TEST_SCRIPTS[@]}"; do
+    if [[ "$(basename "${script}")" =~ ${TEST_FILTER} ]]; then
+      filtered_integration_scripts+=("${script}")
+    fi
+  done
+  INTEGRATION_TEST_SCRIPTS=("${filtered_integration_scripts[@]}")
 fi
 # Global test counters
 TOTAL_TESTS=0
@@ -85,7 +114,7 @@ TOTAL_PASSED=0
 TOTAL_FAILED=0
 # --- Helpers --------------------------------------------------------------------
 run_test_script() {
-  local script="$1"
+  local script="$1" is_integration="${2:-false}"
   local script_name
   script_name=$(basename "${script}")
   log_info "Running test script: ${script_name} ($(date)) at ${script}"
@@ -104,46 +133,47 @@ run_test_script() {
       log_error "versions.env not found"
       exit 1
     fi
-    # Mock container runtime to avoid actual system changes
-    CONTAINER_RUNTIME="docker"
-    COMPOSE_IMPL="docker-compose"
-    COMPOSE_SUPPORTS_SECRETS=1
-    COMPOSE_SUPPORTS_HEALTHCHECK=1
-    COMPOSE_SUPPORTS_PROFILES=1
-    COMPOSE_PS_JSON_SUPPORTED=1
-    export CONTAINER_RUNTIME COMPOSE_IMPL COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK COMPOSE_SUPPORTS_PROFILES COMPOSE_PS_JSON_SUPPORTED
-    compose() { echo "Mock compose: $@" >&2; return 0; }
-    docker() { echo "Mock docker: $@" >&2; return 0; }
-    podman() { echo "Mock podman: $@" >&2; return 0; }
-    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh, start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh, restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh, verify-bundle.sh, resolve-digests.sh, integration-guide.sh
-    get_total_memory() { echo "8192"; }
-    get_cpu_cores() { echo "4"; }
-    df() { echo "100GB"; return 0; }
-    ss() { return 1; } # Port free
-    openssl() { echo "Mock openssl: $@" >&2; return 0; }
-    date() { echo "2025-08-13 12:00:00 UTC"; return 0; }
-    stat() { echo "600"; return 0; }
-    read() { echo "y"; } # Auto-confirm for scripts
-    curl() { echo "Mock curl: $@"; touch "$4" 2>/dev/null; return 0; }
-    sha256sum() { echo "abc123"; return 0; }
-    uname() { echo "x86_64"; }
-    get_os() { echo "linux"; }
-    firewall-cmd() { echo "Mock firewall-cmd: $@"; return 0; }
-    systemctl() { echo "Mock systemctl: $@"; return 0; }
-    dnf() { echo "Mock dnf: $@"; return 0; }
-    yum() { echo "Mock yum: $@"; return 0; }
-    getenforce() { echo "enforcing"; return 0; }
-    sestatus() { echo "SELinux status: enforcing"; return 0; }
-    setsebool() { echo "Mock setsebool: $@"; return 0; }
-    semanage() { echo "Mock semanage: $@"; return 0; }
-    restorecon() { echo "Mock restorecon: $@"; return 0; }
-    sudo() { "$@"; } # Bypass sudo for mocks
-    cat() { echo "ID=rhel" > /etc/os-release; } # Mock RHEL-like system
-    jq() { echo "Mock jq: $@"; return 0; }
-    gpg() { echo "Mock gpg: $@"; touch "$6"; return 0; }
-    tar() { echo "Mock tar: $@"; touch "$4"; return 0; }
-    shellcheck() { echo "Mock shellcheck: $@"; return 0; }
-    tree() { echo "Mock tree: $@"; return 0; }
+    # Mock system commands for unit tests only
+    if [[ "$is_integration" == "false" ]]; then
+      CONTAINER_RUNTIME="docker"
+      COMPOSE_IMPL="docker-compose"
+      COMPOSE_SUPPORTS_SECRETS=1
+      COMPOSE_SUPPORTS_HEALTHCHECK=1
+      COMPOSE_SUPPORTS_PROFILES=1
+      COMPOSE_PS_JSON_SUPPORTED=1
+      export CONTAINER_RUNTIME COMPOSE_IMPL COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK COMPOSE_SUPPORTS_PROFILES COMPOSE_PS_JSON_SUPPORTED
+      compose() { echo "Mock compose: $@" >&2; return 0; }
+      docker() { echo "Mock docker: $@" >&2; return 0; }
+      podman() { echo "Mock podman: $@" >&2; return 0; }
+      get_total_memory() { echo "8192"; }
+      get_cpu_cores() { echo "4"; }
+      df() { echo "100GB"; return 0; }
+      ss() { return 1; } # Port free
+      openssl() { echo "Mock openssl: $@" >&2; return 0; }
+      date() { echo "2025-08-13 12:00:00 UTC"; return 0; }
+      stat() { echo "600"; return 0; }
+      read() { echo "y"; } # Auto-confirm for scripts
+      curl() { echo "Mock curl: $@"; touch "$4" 2>/dev/null; return 0; }
+      sha256sum() { echo "abc123"; return 0; }
+      uname() { echo "x86_64"; }
+      get_os() { echo "linux"; }
+      firewall-cmd() { echo "Mock firewall-cmd: $@"; return 0; }
+      systemctl() { echo "Mock systemctl: $@"; return 0; }
+      dnf() { echo "Mock dnf: $@"; return 0; }
+      yum() { echo "Mock yum: $@"; return 0; }
+      getenforce() { echo "enforcing"; return 0; }
+      sestatus() { echo "SELinux status: enforcing"; return 0; }
+      setsebool() { echo "Mock setsebool: $@"; return 0; }
+      semanage() { echo "Mock semanage: $@"; return 0; }
+      restorecon() { echo "Mock restorecon: $@"; return 0; }
+      sudo() { "$@"; } # Bypass sudo for mocks
+      cat() { echo "ID=rhel" > /etc/os-release; } # Mock RHEL-like system
+      jq() { echo "Mock jq: $@"; return 0; }
+      gpg() { echo "Mock gpg: $@"; touch "$6"; return 0; }
+      tar() { echo "Mock tar: $@"; touch "$4"; return 0; }
+      shellcheck() { echo "Mock shellcheck: $@"; return 0; }
+      tree() { echo "Mock tree: $@"; return 0; }
+    fi
     # Run the test script
     if bash "${script}"; then
       complete_step "test_${script_name}"
@@ -169,28 +199,48 @@ main() {
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║ SPLUNK CLUSTER ORCHESTRATOR TEST SUITE                                       ║
 ║                                                                              ║
-║ Runs all unit tests for the Splunk cluster orchestrator project               ║
+║ Runs all unit and integration tests for the Splunk cluster orchestrator project║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 EOF
   }
   _show_banner
   log_info "🚀 Starting test suite ($(date))..."
   # Validate test scripts exist
-  if [[ ${#TEST_SCRIPTS[@]} -eq 0 ]]; then
-    log_error "No test scripts found in ${SCRIPT_DIR}/tests/unit"
+  if [[ ${#UNIT_TEST_SCRIPTS[@]} -eq 0 && ${#INTEGRATION_TEST_SCRIPTS[@]} -eq 0 ]]; then
+    log_error "No test scripts found in ${SCRIPT_DIR}/tests/unit or ${SCRIPT_DIR}/tests/integration"
     exit 1
   fi
-  log_info "Running ${#TEST_SCRIPTS[@]} test scripts:"
-  for script in "${TEST_SCRIPTS[@]}"; do
-    log_info " • $(basename "${script}")"
-  done
-  # Run each test script
+  # List unit tests
+  if is_true "${RUN_UNIT}"; then
+    log_info "Running ${#UNIT_TEST_SCRIPTS[@]} unit test scripts:"
+    for script in "${UNIT_TEST_SCRIPTS[@]}"; do
+      log_info " • $(basename "${script}")"
+    done
+  fi
+  # List integration tests
+  if is_true "${RUN_INTEGRATION}"; then
+    log_info "Running ${#INTEGRATION_TEST_SCRIPTS[@]} integration test scripts:"
+    for script in "${INTEGRATION_TEST_SCRIPTS[@]}"; do
+      log_info " • $(basename "${script}")"
+    done
+  fi
+  # Run unit test scripts (with mocks)
   local failed_scripts=()
-  for script in "${TEST_SCRIPTS[@]}"; do
-    if ! run_test_script "${script}"; then
-      failed_scripts+=("$(basename "${script}")")
-    fi
-  done
+  if is_true "${RUN_UNIT}"; then
+    for script in "${UNIT_TEST_SCRIPTS[@]}"; do
+      if ! run_test_script "${script}" false; then
+        failed_scripts+=("$(basename "${script}")")
+      fi
+    done
+  fi
+  # Run integration test scripts (without mocks)
+  if is_true "${RUN_INTEGRATION}"; then
+    for script in "${INTEGRATION_TEST_SCRIPTS[@]}"; do
+      if ! run_test_script "${script}" true; then
+        failed_scripts+=("$(basename "${script}")")
+      fi
+    done
+  fi
   # Summarize results
   log_info "=== Test Suite Summary ==="
   log_info "Total test scripts: ${TOTAL_TESTS}"
