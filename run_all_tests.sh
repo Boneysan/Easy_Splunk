@@ -25,9 +25,161 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+
+# --- Main Functions ----------------------------------------------------------
+main() {
+    log_info "Starting test suite execution"
+    
+    # Run unit tests
+    if ! run_unit_tests; then
+        log_error "Unit tests failed"
+        exit 1
+    fi
+    
+    # Run integration tests
+    if ! run_integration_tests; then
+        log_error "Integration tests failed"
+        exit 1
+    fi
+    
+    # Run performance tests if enabled
+    if ! run_performance_tests; then
+        log_error "Performance tests failed"
+        exit 1
+    fi
+    
+    log_success "All tests completed successfully"
+    return 0
+}
+
+print_usage() {
+    cat << EOF
+Usage: $0 [options]
+
+Options:
+    -v, --verbose           Enable verbose output
+    -f, --filter PATTERN    Only run tests matching PATTERN
+    -p, --performance      Run performance tests (takes longer)
+    -s, --skip-long        Skip long-running tests
+    -h, --help             Show this help message
+EOF
+}
+
+# --- Parse Arguments -----------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -v|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        -f|--filter)
+            TEST_FILTER="$2"
+            shift 2
+            ;;
+        -p|--performance)
+            RUN_PERFORMANCE_TESTS=true
+            shift
+            ;;
+        -s|--skip-long)
+            SKIP_LONG_TESTS=true
+            shift
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            print_usage
+            exit 1
+            ;;
+    esac
+done
 # --- Defaults / Flags -----------------------------------------------------------
 VERBOSE=false
 TEST_FILTER=""
+RUN_PERFORMANCE_TESTS=false
+SKIP_LONG_TESTS=false
+
+# --- Test Suite Functions -----------------------------------------------------
+run_unit_tests() {
+    log_section "Running Unit Tests"
+    
+    local unit_tests_dir="${SCRIPT_DIR}/tests/unit"
+    local test_files=()
+    
+    while IFS= read -r -d '' file; do
+        test_files+=("$file")
+    done < <(find "${unit_tests_dir}" -name "test_*.sh" -type f -print0)
+    
+    for test_file in "${test_files[@]}"; do
+        if [[ -n "${TEST_FILTER}" ]] && ! [[ "$(basename "${test_file}")" =~ ${TEST_FILTER} ]]; then
+            continue
+        fi
+        
+        log_info "Running test: $(basename "${test_file}")"
+        if ! "${test_file}"; then
+            log_error "Unit test failed: ${test_file}"
+            return 1
+        fi
+    done
+    
+    log_success "All unit tests passed"
+    return 0
+}
+
+run_integration_tests() {
+    log_section "Running Integration Tests"
+    
+    # Run cluster size tests
+    if ! [[ "${SKIP_LONG_TESTS}" == "true" ]]; then
+        log_info "Running cluster size tests..."
+        if ! "${SCRIPT_DIR}/tests/integration/test_cluster_sizes.sh"; then
+            log_error "Cluster size tests failed"
+            return 1
+        fi
+    else
+        log_info "Skipping cluster size tests (--skip-long specified)"
+    fi
+    
+    # Run monitoring stack tests
+    log_info "Running monitoring stack tests..."
+    if ! "${SCRIPT_DIR}/tests/integration/test_monitoring_stack.sh"; then
+        log_error "Monitoring stack tests failed"
+        return 1
+    fi
+    
+    # Run failure scenario tests
+    if ! [[ "${SKIP_LONG_TESTS}" == "true" ]]; then
+        log_info "Running failure scenario tests..."
+        if ! "${SCRIPT_DIR}/tests/integration/test_failure_scenarios.sh"; then
+            log_error "Failure scenario tests failed"
+            return 1
+        fi
+    else
+        log_info "Skipping failure scenario tests (--skip-long specified)"
+    fi
+    
+    log_success "All integration tests passed"
+    return 0
+}
+
+run_performance_tests() {
+    if ! [[ "${RUN_PERFORMANCE_TESTS}" == "true" ]]; then
+        log_info "Skipping performance tests (use --performance to run them)"
+        return 0
+    fi
+    
+    log_section "Running Performance Tests"
+    
+    if ! "${SCRIPT_DIR}/tests/performance/test_regression.sh"; then
+        log_error "Performance regression tests failed"
+        return 1
+    fi
+    
+    log_success "All performance tests passed"
+    return 0
+}
 RUN_UNIT=true
 RUN_INTEGRATION=true
 # --- CLI Parsing ----------------------------------------------------------------
@@ -100,13 +252,9 @@ if [[ -n "${TEST_FILTER}" ]]; then
     fi
   done
   UNIT_TEST_SCRIPTS=("${filtered_unit_scripts[@]}")
-  filtered_integration_scripts=()
-  for script in "${INTEGRATION_TEST_SCRIPTS[@]}"; do
-    if [[ "$(basename "${script}")" =~ ${TEST_FILTER} ]]; then
-      filtered_integration_scripts+=("${script}")
-    fi
-  done
-  INTEGRATION_TEST_SCRIPTS=("${filtered_integration_scripts[@]}")
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
 fi
 # Global test counters
 TOTAL_TESTS=0
