@@ -11,8 +11,8 @@
 #               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped.sh,
 #               airgapped-quickstart.sh, generate-selinux-helpers.sh, podman-docker-setup.sh,
 #               start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh,
-#               restore_cluster.sh, tests/unit/test_*.sh
-# Version: 1.0.10
+#               restore_cluster.sh, generate-management-scripts.sh, tests/unit/test_*.sh
+# Version: 1.0.11
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
@@ -92,7 +92,7 @@ run_test_script() {
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies
-    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh; do
+    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh; do
       # shellcheck source=/dev/null
       source "${SCRIPT_DIR}/lib/${dep}"
     done
@@ -114,7 +114,7 @@ run_test_script() {
     compose() { echo "Mock compose: $@" >&2; return 0; }
     docker() { echo "Mock docker: $@" >&2; return 0; }
     podman() { echo "Mock podman: $@" >&2; return 0; }
-    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh, start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh, restore_cluster.sh
+    # Mock system commands for validation.sh, security.sh, monitoring.sh, air-gapped.sh, universal-forwarder.sh, platform-helpers.sh, start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh, restore_cluster.sh, generate-management-scripts.sh
     get_total_memory() { echo "8192"; }
     get_cpu_cores() { echo "4"; }
     df() { echo "100GB"; return 0; }
@@ -123,7 +123,7 @@ run_test_script() {
     date() { echo "2025-08-13 12:00:00 UTC"; return 0; }
     stat() { echo "600"; return 0; }
     read() { echo "y"; } # Auto-confirm for scripts
-    curl() { echo "Mock curl: $@"; touch "$4"; return 0; }
+    curl() { echo "Mock curl: $@"; touch "$4" 2>/dev/null; return 0; }
     sha256sum() { echo "abc123"; return 0; }
     uname() { echo "x86_64"; }
     get_os() { echo "linux"; }
