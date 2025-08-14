@@ -27,11 +27,33 @@ if [[ "${ERROR_HANDLING_VERSION:-0.0.0}" < "1.0.2" ]]; then
 fi
 [[ -f versions.env ]] && source versions.env || die "${E_INVALID_INPUT}" "versions.env required"
 
+# Source the secret helper if available
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SECRET_HELPER="${SCRIPT_DIR}/secret-helper.sh"
+if [[ ! -x "$SECRET_HELPER" ]]; then
+    log_warning "secret-helper.sh not found or not executable, secrets may use defaults"
+fi
+
 # Configuration defaults with environment override support
 : "${ENABLE_MONITORING:=false}"
 : "${ENABLE_HEALTHCHECKS:=true}"
 : "${ENABLE_SPLUNK:=false}"
 : "${ENABLE_SECRETS:=false}"
+
+# Load credentials from secrets manager with fallbacks
+if [[ -x "$SECRET_HELPER" ]]; then
+    SPLUNK_PASSWORD=$("$SECRET_HELPER" get_secret splunk "splunk_admin_password" \
+        "${SECRETS_DIR}/splunk_admin_password" "changeme123" "Splunk admin password") || SPLUNK_PASSWORD="changeme123"
+    SPLUNK_SECRET=$("$SECRET_HELPER" get_secret splunk "splunk_secret" \
+        "${SECRETS_DIR}/splunk_secret" "changeme-secret-key" "Splunk secret key") || SPLUNK_SECRET="changeme-secret-key"
+    GRAFANA_ADMIN_PASSWORD=$("$SECRET_HELPER" get_secret grafana "admin_password" \
+        "${SECRETS_DIR}/grafana_admin_password" "admin123" "Grafana admin password") || GRAFANA_ADMIN_PASSWORD="admin123"
+else
+    : "${SPLUNK_PASSWORD:=changeme123}"  # WARNING: These are not secure defaults!
+    : "${SPLUNK_SECRET:=changeme-secret-key}"
+    : "${GRAFANA_ADMIN_PASSWORD:=admin123}"
+fi
+
 : "${SPLUNK_CLUSTER_MODE:=single}"  # single|cluster
 : "${SPLUNK_REPLICATION_FACTOR:=1}"
 : "${SPLUNK_SEARCH_FACTOR:=1}"
@@ -674,8 +696,8 @@ REDIS_CPU_RESERVE=0.1
 REDIS_MEM_RESERVE=128M
 
 # Splunk Configuration (if ENABLE_SPLUNK=true)
-SPLUNK_PASSWORD=changeme123
-SPLUNK_SECRET=changeme-secret-key
+SPLUNK_PASSWORD="\${SPLUNK_PASSWORD}"  # Set via secrets manager or environment
+SPLUNK_SECRET="\${SPLUNK_SECRET}"      # Set via secrets manager or environment
 SPLUNK_REPLICATION_FACTOR=1
 SPLUNK_SEARCH_FACTOR=1
 SPLUNK_INDEXER_CPU_LIMIT=2.0
@@ -692,7 +714,7 @@ SPLUNK_CM_CPU_RESERVE=0.5
 SPLUNK_CM_MEM_RESERVE=512M
 
 # Monitoring Configuration (if ENABLE_MONITORING=true)
-GRAFANA_ADMIN_PASSWORD=admin123
+GRAFANA_ADMIN_PASSWORD="\${GRAFANA_ADMIN_PASSWORD}"  # Set via secrets manager or environment
 PROMETHEUS_CPU_LIMIT=1
 PROMETHEUS_MEM_LIMIT=1G
 PROMETHEUS_CPU_RESERVE=0.5
