@@ -8,7 +8,6 @@ Supports air-gapped environments, automated credential/TLS generation, integrate
 
 ## 📐 Architecture Overview
 
-```
 
 ┌─────────────────┐
 │   Users/Apps    │
