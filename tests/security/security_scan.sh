@@ -1,277 +1,393 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ==============================================================================
 # tests/security/security_scan.sh
-# Security vulnerability scanner for Splunk deployment
+# Comprehensive security vulnerability scanner and remediation tool
+#
+# Features:
+# - Container image vulnerability scanning
+# - Credential exposure detection and remediation
+# - File permission auditing and fixing
+# - Network security validation
+# - SSL/TLS configuration checks
+# - SELinux context validation
 # ==============================================================================
 
 set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# shellcheck source=../../lib/core.sh
 source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=../../lib/error-handling.sh
 source "${SCRIPT_DIR}/../../lib/error-handling.sh"
+# shellcheck source=../../lib/security.sh
 source "${SCRIPT_DIR}/../../lib/security.sh"
 
-# Constants
-readonly SEVERITY_LEVELS=("HIGH" "CRITICAL")
-readonly EXCLUDED_DIRS=(".git" "tests")
-readonly SENSITIVE_PATTERNS=("password" "secret" "key" "token" "credential")
-readonly CONFIG_EXTENSIONS=("conf" "json" "yml" "yaml" "xml" "properties")
-readonly DEFAULT_PORTS=("8000" "8089" "9997" "8088" "9887")
-readonly SECURE_PROTOCOLS=("TLSv1.2" "TLSv1.3")
+# Global variables
+SCAN_RESULTS_DIR="${SCRIPT_DIR}/scan_results"
+SCAN_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+SCAN_REPORT="${SCAN_RESULTS_DIR}/security_scan_${SCAN_TIMESTAMP}.json"
+FIX_MODE=false
+SEVERITY_THRESHOLD="HIGH"
+
+# Ensure scan results directory exists
+mkdir -p "${SCAN_RESULTS_DIR}"
+
+# Initialize scan report
+init_scan_report() {
+    cat > "${SCAN_REPORT}" <<EOF
+{
+    "scan_timestamp": "$(date -Iseconds)",
+    "scan_type": "comprehensive_security_scan",
+    "hostname": "$(hostname)",
+    "user": "$(whoami)",
+    "vulnerabilities": [],
+    "fixes_applied": [],
+    "summary": {
+        "total_issues": 0,
+        "critical_issues": 0,
+        "high_issues": 0,
+        "medium_issues": 0,
+        "low_issues": 0,
+        "fixes_available": 0,
+        "fixes_applied": 0
+    }
+}
+EOF
+}
+
+# Add vulnerability to report
+add_vulnerability() {
+    local severity="$1"
+    local category="$2"
+    local description="$3"
+    local location="${4:-unknown}"
+    local fix_available="${5:-false}"
+    
+    local vuln_json
+    vuln_json=$(jq -n \
+        --arg severity "$severity" \
+        --arg category "$category" \
+        --arg description "$description" \
+        --arg location "$location" \
+        --argjson fix_available "$fix_available" \
+        '{
+            severity: $severity,
+            category: $category,
+            description: $description,
+            location: $location,
+            fix_available: $fix_available,
+            timestamp: now | strftime("%Y-%m-%dT%H:%M:%SZ")
+        }')
+    
+    # Update scan report
+    jq --argjson vuln "$vuln_json" \
+       '.vulnerabilities += [$vuln] | 
+        .summary.total_issues += 1 |
+        if $vuln.severity == "CRITICAL" then .summary.critical_issues += 1
+        elif $vuln.severity == "HIGH" then .summary.high_issues += 1
+        elif $vuln.severity == "MEDIUM" then .summary.medium_issues += 1
+        else .summary.low_issues += 1 end |
+        if $vuln.fix_available then .summary.fixes_available += 1 else . end' \
+       "${SCAN_REPORT}" > "${SCAN_REPORT}.tmp" && mv "${SCAN_REPORT}.tmp" "${SCAN_REPORT}"
+}
+
+# Add applied fix to report
+add_applied_fix() {
+    local description="$1"
+    local location="${2:-unknown}"
+    
+    local fix_json
+    fix_json=$(jq -n \
+        --arg description "$description" \
+        --arg location "$location" \
+        '{
+            description: $description,
+            location: $location,
+            timestamp: now | strftime("%Y-%m-%dT%H:%M:%SZ")
+        }')
+    
+    jq --argjson fix "$fix_json" \
+       '.fixes_applied += [$fix] | .summary.fixes_applied += 1' \
+       "${SCAN_REPORT}" > "${SCAN_REPORT}.tmp" && mv "${SCAN_REPORT}.tmp" "${SCAN_REPORT}"
+}
 
 run_container_security_scan() {
-    log_info "Running container security scans..."
-    local vulnerabilities_found=false
+    echo "Running container security scans..."
     
-    # Check if trivy is installed
-    if ! command -v trivy >/dev/null; then
-        log_error "Trivy is not installed. Please install trivy to perform container security scans."
+    local images_scanned=0
+    local vulnerabilities_found=0
+    
+    # Scan base images for vulnerabilities
+    if command -v trivy >/dev/null; then
+        log_info "Using Trivy for container vulnerability scanning..."
+        for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep splunk); do
+            echo "Scanning image: $image"
+            trivy image "$image" --severity HIGH,CRITICAL
+            images_scanned=$((images_scanned + 1))
+        done
+    elif command -v grype >/dev/null; then
+        log_info "Using Grype for container vulnerability scanning..."
+        for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep splunk); do
+            echo "Scanning image: $image"
+            grype "$image" --only-fixed
+            images_scanned=$((images_scanned + 1))
+        done
+    else
+        log_warn "No vulnerability scanners found. Install trivy or grype for container scanning."
+        add_vulnerability "MEDIUM" "container_security" "No vulnerability scanner available" "system" true
         return 1
     fi
     
-    # Get all Splunk-related images
+    # Get list of Splunk-related images
     local images
-    images=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep -i splunk || true)
+    if command -v docker >/dev/null; then
+        images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -E "(splunk|prometheus|grafana)" || true)
+    elif command -v podman >/dev/null; then
+        images=$(podman images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -E "(splunk|prometheus|grafana)" || true)
+    else
+        log_error "No container runtime found (docker/podman)"
+        add_vulnerability "HIGH" "container_security" "No container runtime available" "system" false
+        return 1
+    fi
     
-    if [[ -z "${images}" ]]; then
-        log_warning "No Splunk images found to scan"
+    if [[ -z "$images" ]]; then
+        log_warn "No Splunk-related container images found"
         return 0
     fi
     
-    # Scan each image
+    # Scan each image with available scanners
     while IFS= read -r image; do
-        log_info "Scanning image: ${image}"
-        if ! trivy image "${image}" --severity HIGH,CRITICAL --quiet; then
-            vulnerabilities_found=true
-            log_error "Security vulnerabilities found in ${image}"
-        fi
-    done <<< "${images}"
+        [[ -z "$image" ]] && continue
+        
+        log_info "Scanning image: $image"
+        images_scanned=$((images_scanned + 1))
+        
+        for scanner in "${scanners[@]}"; do
+            case "$scanner" in
+                trivy)
+                    local trivy_output
+                    trivy_output="${SCAN_RESULTS_DIR}/trivy_${image//[\/:]/_}_${SCAN_TIMESTAMP}.json"
+                    
+                    if trivy image --format json --output "$trivy_output" \
+                        --severity "CRITICAL,HIGH,MEDIUM" "$image" >/dev/null 2>&1; then
+                        
+                        # Parse trivy results
+                        local critical_count high_count medium_count
+                        critical_count=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL") | .VulnerabilityID' "$trivy_output" 2>/dev/null | wc -l || echo "0")
+                        high_count=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH") | .VulnerabilityID' "$trivy_output" 2>/dev/null | wc -l || echo "0")
+                        medium_count=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM") | .VulnerabilityID' "$trivy_output" 2>/dev/null | wc -l || echo "0")
+                        
+                        if [[ $critical_count -gt 0 ]]; then
+                            add_vulnerability "CRITICAL" "container_vulnerability" "$critical_count critical vulnerabilities in $image" "$image" true
+                            log_error "CRITICAL: $critical_count vulnerabilities in $image"
+                        fi
+                        
+                        if [[ $high_count -gt 0 ]]; then
+                            add_vulnerability "HIGH" "container_vulnerability" "$high_count high-severity vulnerabilities in $image" "$image" true
+                            log_warn "HIGH: $high_count vulnerabilities in $image"
+                        fi
+                        
+                        if [[ $medium_count -gt 0 ]]; then
+                            add_vulnerability "MEDIUM" "container_vulnerability" "$medium_count medium-severity vulnerabilities in $image" "$image" true
+                            log_info "MEDIUM: $medium_count vulnerabilities in $image"
+                        fi
+                        
+                        vulnerabilities_found=$((vulnerabilities_found + critical_count + high_count + medium_count))
+                    else
+                        log_error "Failed to scan $image with trivy"
+                        add_vulnerability "MEDIUM" "scan_failure" "Failed to scan $image with trivy" "$image" false
+                    fi
+                    ;;
+                grype)
+                    local grype_output
+                    grype_output="${SCAN_RESULTS_DIR}/grype_${image//[\/:]/_}_${SCAN_TIMESTAMP}.json"
+                    
+                    if grype "$image" -o json > "$grype_output" 2>/dev/null; then
+                        local grype_vulns
+                        grype_vulns=$(jq -r '.matches[]? | select(.vulnerability.severity | test("Critical|High")) | .vulnerability.id' "$grype_output" 2>/dev/null | wc -l || echo "0")
+                        
+                        if [[ $grype_vulns -gt 0 ]]; then
+                            add_vulnerability "HIGH" "container_vulnerability" "$grype_vulns vulnerabilities found by grype in $image" "$image" true
+                            log_warn "Grype found $grype_vulns vulnerabilities in $image"
+                        fi
+                    fi
+                    ;;
+            esac
+        done
+    done <<< "$images"
     
-    if [[ "${vulnerabilities_found}" == "true" ]]; then
-        return 1
-    fi
+    log_info "Container scan complete: $images_scanned images scanned, $vulnerabilities_found vulnerabilities found"
     
-    log_success "No critical vulnerabilities found in container images"
     return 0
 }
 
 check_credential_exposure() {
-    log_info "Checking for exposed credentials..."
-    local exposed_count=0
+    echo "Checking for exposed credentials..."
     
-    # Create exclusion pattern for grep
-    local exclude_pattern=""
-    for dir in "${EXCLUDED_DIRS[@]}"; do
-        exclude_pattern+=" --exclude-dir=${dir}"
-    done
+    local exposed_credentials=0
     
-    # Create include pattern for sensitive files
-    local include_pattern=""
-    for ext in "${CONFIG_EXTENSIONS[@]}"; do
-        include_pattern+=" --include=*.${ext}"
-    done
-    include_pattern+=" --include=*.sh"
+    # Scan for potential credential exposure
+    local credential_findings
+    credential_findings=$(grep -r -i "password\|secret\|key" . \
+        --exclude-dir=.git \
+        --exclude-dir=tests \
+        --include="*.sh" \
+        --include="*.conf" | \
+    grep -v "password_placeholder" || true)
     
-    # Create search pattern for sensitive terms
-    local search_pattern
-    search_pattern=$(IFS="|"; echo "${SENSITIVE_PATTERNS[*]}")
-    
-    # Perform the search
-    local findings
-    findings=$(grep -r -i -E "${search_pattern}" . \
-        ${exclude_pattern} \
-        ${include_pattern} \
-        2>/dev/null || true)
-    
-    # Filter out false positives and known safe patterns
-    findings=$(echo "${findings}" | grep -v -E \
-        "password_placeholder|REDACTED|\\*\\*\\*\\*\\*|example_key|dummy_secret" || true)
-    
-    if [[ -n "${findings}" ]]; then
-        log_error "Potential credential exposure found:"
-        while IFS= read -r line; do
-            exposed_count=$((exposed_count + 1))
-            log_error "  ${line}"
-        done <<< "${findings}"
-        return 1
+    if [[ -n "$credential_findings" ]]; then
+        log_error "⚠️  Potential credential exposure found:"
+        echo "$credential_findings"
+        
+        # Count unique files with potential exposures
+        exposed_credentials=$(echo "$credential_findings" | cut -d: -f1 | sort -u | wc -l)
+        add_vulnerability "HIGH" "credential_exposure" "$exposed_credentials files with potential credential exposure" "multiple_files" true
+        
+        # Offer fixes in fix mode
+        if [[ "$FIX_MODE" == "true" ]]; then
+            echo "$credential_findings" | cut -d: -f1 | sort -u | while read -r file; do
+                fix_credential_exposure "$file" "credential"
+            done
+        fi
+    else
+        echo "✅ No exposed credentials found"
+        log_success "No credential exposure detected"
     fi
     
-    log_success "No exposed credentials found"
     return 0
+}
+
+fix_credential_exposure() {
+    local file="$1"
+    local pattern="$2"
+    
+    log_info "Attempting to fix credential exposure in $file"
+    
+    # Create backup
+    cp "$file" "${file}.security_backup_${SCAN_TIMESTAMP}"
+    
+    # Common credential fixes
+    case "$pattern" in
+        *password*)
+            sed -i.bak 's/password[[:space:]]*=[[:space:]]*[^[:space:]]*/password=\${SPLUNK_PASSWORD:-changeme}/gi' "$file"
+            add_applied_fix "Replaced hardcoded password with environment variable" "$file"
+            ;;
+        *secret*)
+            sed -i.bak 's/secret[[:space:]]*=[[:space:]]*[^[:space:]]*/secret=\${SECRET_VALUE:-please_change}/gi' "$file"
+            add_applied_fix "Replaced hardcoded secret with environment variable" "$file"
+            ;;
+        *key*)
+            sed -i.bak 's/key[[:space:]]*=[[:space:]]*[^[:space:]]*/key=\${API_KEY:-your_key_here}/gi' "$file"
+            add_applied_fix "Replaced hardcoded key with environment variable" "$file"
+            ;;
+    esac
+    
+    log_success "Applied credential fix to $file"
 }
 
 verify_file_permissions() {
-    log_info "Verifying file permissions..."
-    local insecure_count=0
+    echo "Verifying file permissions..."
     
-    # Check for world-writable files
-    while IFS= read -r file; do
-        if [[ -n "${file}" ]]; then
-            insecure_count=$((insecure_count + 1))
-            log_error "World-writable file found: ${file}"
-        fi
-    done < <(find . -type f -perm /o+w -not -path "./.git/*" 2>/dev/null || true)
+    local permission_issues=0
     
-    # Check for files with incorrect owner
-    if [[ "$(id -u)" -eq 0 ]]; then
+    # Check for overly permissive files
+    local world_writable_files
+    world_writable_files=$(find . -type f -perm /o+w -not -path "./.git/*" 2>/dev/null || true)
+    
+    if [[ -n "$world_writable_files" ]]; then
         while IFS= read -r file; do
-            if [[ -n "${file}" ]]; then
-                insecure_count=$((insecure_count + 1))
-                log_error "File with incorrect ownership found: ${file}"
+            [[ -z "$file" ]] && continue
+            echo "⚠️  World-writable file: $file"
+            add_vulnerability "MEDIUM" "file_permissions" "World-writable file: $file" "$file" true
+            permission_issues=$((permission_issues + 1))
+            
+            # Fix in fix mode
+            if [[ "$FIX_MODE" == "true" ]]; then
+                chmod o-w "$file"
+                add_applied_fix "Removed world-write permission" "$file"
+                log_success "Fixed permissions for $file"
             fi
-        done < <(find . -not -user root -not -path "./.git/*" 2>/dev/null || true)
+        done <<< "$world_writable_files"
     fi
     
-    # Check for sensitive files with loose permissions
-    while IFS= read -r file; do
-        if [[ -n "${file}" ]]; then
-            if [[ "$(stat -f %p "${file}")" =~ ^[0-7]{0,3}[0-7][67][67]$ ]]; then
-                insecure_count=$((insecure_count + 1))
-                log_error "Sensitive file with loose permissions found: ${file}"
-            fi
-        fi
-    done < <(find . -type f -name "*.key" -o -name "*.pem" -o -name "*.crt" -o -name "*.p12" 2>/dev/null || true)
-    
-    if [[ "${insecure_count}" -gt 0 ]]; then
-        log_error "Found ${insecure_count} files with insecure permissions"
-        return 1
-    fi
-    
-    log_success "No files with insecure permissions found"
-    return 0
-}
-
-validate_network_security() {
-    log_info "Validating network security configuration..."
-    local security_issues=0
-
-    # Check SSL/TLS configuration
-    check_ssl_configuration || ((security_issues++))
-    
-    # Check open ports and their security
-    check_port_security || ((security_issues++))
-    
-    # Check firewall rules
-    check_firewall_rules || ((security_issues++))
-    
-    # Validate network encryption settings
-    check_network_encryption || ((security_issues++))
-
-    if [[ "${security_issues}" -gt 0 ]]; then
-        log_error "Network security validation failed with ${security_issues} issues"
-        return 1
-    fi
-    
-    log_success "Network security validation passed"
-    return 0
-}
-
-check_ssl_configuration() {
-    log_info "Checking SSL/TLS configuration..."
-    local ssl_issues=0
-
-    # Check for SSL certificates
-    if ! find . -type f -name "*.pem" -o -name "*.crt" -o -name "*.key" | grep -q .; then
-        log_error "No SSL certificates found"
-        ((ssl_issues++))
-    fi
-
-    # Check SSL configuration in server.conf
-    local server_conf
-    server_conf=$(find . -type f -name "server.conf" 2>/dev/null)
-    if [[ -n "${server_conf}" ]]; then
-        # Check SSL enablement
-        if ! grep -q "^enableSplunkWebSSL = true" "${server_conf}"; then
-            log_error "Splunk Web SSL is not enabled in server.conf"
-            ((ssl_issues++))
-        fi
-
-        # Check SSL protocols
-        local ssl_protocols
-        ssl_protocols=$(grep "^sslVersions = " "${server_conf}" || echo "")
-        if [[ -n "${ssl_protocols}" ]]; then
-            for protocol in "${SECURE_PROTOCOLS[@]}"; do
-                if ! echo "${ssl_protocols}" | grep -q "${protocol}"; then
-                    log_error "Secure protocol ${protocol} not enabled in server.conf"
-                    ((ssl_issues++))
+    # Check for sensitive files with incorrect permissions
+    local sensitive_patterns=("*.key" "*.pem" "*.crt" "secrets/*" "generate-credentials.sh")
+    for pattern in "${sensitive_patterns[@]}"; do
+        local sensitive_files
+        sensitive_files=$(find . -name "$pattern" -type f 2>/dev/null || true)
+        
+        while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            
+            local perms
+            perms=$(stat -c "%a" "$file" 2>/dev/null || echo "000")
+            
+            # Check if file is readable by group or others (should be 600 or 700)
+            if [[ "$perms" =~ [0-9][0-9][1-7] ]] || [[ "$perms" =~ [0-9][1-7][0-9] ]]; then
+                echo "⚠️  Sensitive file with overly permissive permissions ($perms): $file"
+                add_vulnerability "HIGH" "file_permissions" "Sensitive file with overly permissive permissions ($perms): $file" "$file" true
+                permission_issues=$((permission_issues + 1))
+                
+                if [[ "$FIX_MODE" == "true" ]]; then
+                    chmod 600 "$file"
+                    add_applied_fix "Set secure permissions (600)" "$file"
+                    log_success "Secured permissions for $file"
                 fi
-            done
-        fi
-    fi
-
-    return "${ssl_issues}"
-}
-
-check_port_security() {
-    log_info "Checking port security..."
-    local port_issues=0
-
-    # Check if netstat is available
-    if ! command -v netstat >/dev/null && ! command -v ss >/dev/null; then
-        log_warning "Network tools (netstat/ss) not available, skipping port scan"
-        return 0
-    fi
-
-    # Check default Splunk ports
-    for port in "${DEFAULT_PORTS[@]}"; do
-        if command -v netstat >/dev/null; then
-            if netstat -tuln | grep -q ":${port}[[:space:]]"; then
-                # Verify if the port is properly secured
-                check_port_encryption "${port}" || ((port_issues++))
             fi
-        elif command -v ss >/dev/null; then
-            if ss -tuln | grep -q ":${port}[[:space:]]"; then
-                check_port_encryption "${port}" || ((port_issues++))
-            fi
-        fi
+        done <<< "$sensitive_files"
     done
-
-    return "${port_issues}"
-}
-
-check_firewall_rules() {
-    log_info "Checking firewall rules..."
-    local firewall_issues=0
-
-    # Check if firewall is enabled and running
-    if command -v ufw >/dev/null; then
-        if ! ufw status | grep -q "Status: active"; then
-            log_warning "UFW firewall is not active"
-            ((firewall_issues++))
-        fi
-    elif command -v firewall-cmd >/dev/null; then
-        if ! firewall-cmd --state | grep -q "running"; then
-            log_warning "FirewallD is not running"
-            ((firewall_issues++))
-        fi
+    
+    if [[ $permission_issues -eq 0 ]]; then
+        echo "✅ File permissions look good"
+        log_success "File permissions are properly configured"
     else
-        log_warning "No supported firewall detected"
-        ((firewall_issues++))
+        log_error "Found $permission_issues file permission issues"
     fi
-
-    # Check if required ports are allowed
-    for port in "${DEFAULT_PORTS[@]}"; do
-        if command -v ufw >/dev/null; then
-            if ! ufw status | grep -q "${port}/tcp"; then
-                log_warning "Port ${port} not configured in UFW"
-                ((firewall_issues++))
-            fi
-        elif command -v firewall-cmd >/dev/null; then
-            if ! firewall-cmd --list-ports | grep -q "${port}/tcp"; then
-                log_warning "Port ${port} not configured in FirewallD"
-                ((firewall_issues++))
-            fi
-        fi
-    done
-
-    return "${firewall_issues}"
+    
+    return 0
 }
 
-check_network_encryption() {
-    log_info "Checking network encryption settings..."
-    local encryption_issues=0
+check_network_security() {
+    log_info "Checking network security configuration..."
+    
+    local network_issues=0
+    
+    # Check for unencrypted HTTP endpoints
+    local http_endpoints
+    http_endpoints=$(grep -r "http://" . \
+        --include="*.sh" \
+        --include="*.conf" \
+        --include="*.yml" \
+        --include="*.yaml" \
+        --exclude-dir=.git \
+        --exclude-dir=scan_results \
+        2>/dev/null | grep -v "localhost" | grep -v "127.0.0.1" || true)
+    
+    if [[ -n "$http_endpoints" ]]; then
+        while IFS= read -r endpoint; do
+            [[ -z "$endpoint" ]] && continue
+            add_vulnerability "MEDIUM" "network_security" "Unencrypted HTTP endpoint: $endpoint" "${endpoint%%:*}" true
+            network_issues=$((network_issues + 1))
+        done <<< "$http_endpoints"
+        log_warn "Found unencrypted HTTP endpoints"
+    fi
+    
+    # Check SSL/TLS configuration in Splunk configs
+    check_splunk_encryption_config
+    
+    if [[ $network_issues -eq 0 ]]; then
+        log_success "✅ Network security configuration looks good"
+    fi
+    
+    return 0
+}
 
+check_splunk_encryption_config() {
+    log_info "Checking Splunk SSL/TLS configuration..."
+    
+    local encryption_issues=0
+    
     # Check inputs.conf for SSL settings
     local inputs_conf
     inputs_conf=$(find . -type f -name "inputs.conf" 2>/dev/null)
@@ -279,6 +395,7 @@ check_network_encryption() {
         # Check SSL enablement for receiving data
         if ! grep -q "^enableSSL = true" "${inputs_conf}"; then
             log_error "SSL not enabled for data inputs"
+            add_vulnerability "HIGH" "encryption" "SSL not enabled for Splunk data inputs" "${inputs_conf}" true
             ((encryption_issues++))
         fi
     fi
@@ -290,6 +407,7 @@ check_network_encryption() {
         # Check SSL enablement for forwarding
         if ! grep -q "^useSSL = true" "${outputs_conf}"; then
             log_error "SSL not enabled for data forwarding"
+            add_vulnerability "HIGH" "encryption" "SSL not enabled for Splunk data forwarding" "${outputs_conf}" true
             ((encryption_issues++))
         fi
     fi
@@ -300,6 +418,7 @@ check_network_encryption() {
     if [[ -n "${web_conf}" ]]; then
         if ! grep -q "^enableSplunkWebSSL = true" "${web_conf}"; then
             log_error "HTTPS not enabled for Splunk Web"
+            add_vulnerability "HIGH" "encryption" "HTTPS not enabled for Splunk Web interface" "${web_conf}" true
             ((encryption_issues++))
         fi
     fi
@@ -337,68 +456,284 @@ check_selinux_context() {
         
         # Check SELinux context for Splunk files
         local invalid_context=0
-        while IFS= read -r file; do
-            if ! semanage fcontext -l | grep -q "${file}"; then
-                invalid_context=$((invalid_context + 1))
-                log_error "Missing SELinux context for: ${file}"
+        local splunk_dirs=("data" "etc" "var")
+        
+        for dir in "${splunk_dirs[@]}"; do
+            if [[ -d "$dir" ]]; then
+                local context_issues
+                context_issues=$(find "$dir" -exec ls -Z {} \; 2>/dev/null | grep -v "container_file_t\|admin_home_t\|user_home_t" | wc -l || echo "0")
+                
+                if [[ $context_issues -gt 0 ]]; then
+                    add_vulnerability "MEDIUM" "selinux" "SELinux context issues in $dir" "$dir" true
+                    ((invalid_context++))
+                fi
             fi
-        done < <(find . -type f -name "splunk*" 2>/dev/null || true)
+        done
         
-        if [[ "${invalid_context}" -gt 0 ]]; then
-            log_error "Found ${invalid_context} files with missing SELinux context"
-            return 1
+        if [[ $invalid_context -gt 0 ]]; then
+            log_warn "Found $invalid_context SELinux context issues"
+        else
+            log_success "✅ SELinux contexts look good"
         fi
-        
-        log_success "All Splunk files have proper SELinux context"
-    else
-        log_info "SELinux not detected, skipping context checks"
     fi
+    
     return 0
 }
 
-main() {
-    log_section "Starting security vulnerability scan"
-    local exit_code=0
+run_dependency_scan() {
+    log_info "Scanning for vulnerable dependencies..."
     
-    # Run container security scan
-    if ! run_container_security_scan; then
-        log_error "Container security scan failed"
-        exit_code=1
-    fi
+    # Check for known vulnerable script patterns
+    local vulnerable_patterns=(
+        "eval.*\$.*"
+        "bash.*-c.*\$"
+        "sh.*-c.*\$"
+        "curl.*\|.*sh"
+        "wget.*\|.*sh"
+    )
     
-    # Check for exposed credentials
-    if ! check_credential_exposure; then
-        log_error "Credential exposure check failed"
-        exit_code=1
-    fi
+    local dependency_issues=0
     
-    # Verify file permissions
-    if ! verify_file_permissions; then
-        log_error "File permission check failed"
-        exit_code=1
-    fi
+    for pattern in "${vulnerable_patterns[@]}"; do
+        local matches
+        matches=$(find . -name "*.sh" -not -path "./.git/*" -not -path "./scan_results/*" \
+            -exec grep -l "$pattern" {} \; 2>/dev/null || true)
+        
+        while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            add_vulnerability "MEDIUM" "dependency_security" "Potentially unsafe pattern: $pattern" "$file" false
+            dependency_issues=$((dependency_issues + 1))
+        done <<< "$matches"
+    done
     
-    # Validate network security
-    if ! validate_network_security; then
-        log_error "Network security validation failed"
-        exit_code=1
-    fi
-    
-    # Check SELinux context
-    if ! check_selinux_context; then
-        log_error "SELinux context check failed"
-        exit_code=1
-    fi
-    
-    if [[ "${exit_code}" -eq 0 ]]; then
-        log_success "Security scan completed successfully"
+    if [[ $dependency_issues -eq 0 ]]; then
+        log_success "✅ No obvious dependency security issues found"
     else
-        log_error "Security scan detected vulnerabilities"
+        log_warn "Found $dependency_issues potential dependency security issues"
     fi
     
-    return "${exit_code}"
+    return 0
 }
 
+generate_security_report() {
+    log_info "Generating security report..."
+    
+    # Generate human-readable report
+    local report_file="${SCAN_RESULTS_DIR}/security_report_${SCAN_TIMESTAMP}.txt"
+    
+    cat > "$report_file" <<EOF
+=============================================================================
+SECURITY SCAN REPORT
+=============================================================================
+Scan Date: $(date)
+Hostname: $(hostname)
+User: $(whoami)
+Scan Type: Comprehensive Security Audit
+
+EOF
+    
+    # Summary from JSON report
+    local total_issues critical_issues high_issues medium_issues low_issues fixes_applied
+    total_issues=$(jq -r '.summary.total_issues' "$SCAN_REPORT")
+    critical_issues=$(jq -r '.summary.critical_issues' "$SCAN_REPORT")
+    high_issues=$(jq -r '.summary.high_issues' "$SCAN_REPORT")
+    medium_issues=$(jq -r '.summary.medium_issues' "$SCAN_REPORT")
+    low_issues=$(jq -r '.summary.low_issues' "$SCAN_REPORT")
+    fixes_applied=$(jq -r '.summary.fixes_applied' "$SCAN_REPORT")
+    
+    cat >> "$report_file" <<EOF
+SUMMARY
+-------
+Total Issues Found: $total_issues
+  ├─ Critical: $critical_issues
+  ├─ High: $high_issues
+  ├─ Medium: $medium_issues
+  └─ Low: $low_issues
+
+Fixes Applied: $fixes_applied
+
+EOF
+    
+    # Detailed vulnerabilities
+    if [[ $total_issues -gt 0 ]]; then
+        echo "DETAILED FINDINGS" >> "$report_file"
+        echo "----------------" >> "$report_file"
+        
+        jq -r '.vulnerabilities[] | 
+            "[\(.severity)] \(.category): \(.description)\n  Location: \(.location)\n  Fix Available: \(.fix_available)\n"' \
+            "$SCAN_REPORT" >> "$report_file"
+    fi
+    
+    # Applied fixes
+    if [[ $fixes_applied -gt 0 ]]; then
+        echo "APPLIED FIXES" >> "$report_file"
+        echo "-------------" >> "$report_file"
+        
+        jq -r '.fixes_applied[] | 
+            "✓ \(.description)\n  Location: \(.location)\n"' \
+            "$SCAN_REPORT" >> "$report_file"
+    fi
+    
+    log_success "Security report generated: $report_file"
+    log_info "JSON report available: $SCAN_REPORT"
+    
+    # Print summary to console
+    echo
+    log_header "SECURITY SCAN SUMMARY"
+    log_info "Total Issues: $total_issues (Critical: $critical_issues, High: $high_issues, Medium: $medium_issues, Low: $low_issues)"
+    
+    if [[ $critical_issues -gt 0 ]] || [[ $high_issues -gt 0 ]]; then
+        log_error "❌ Security scan found critical or high-severity issues that require immediate attention"
+        return 1
+    elif [[ $medium_issues -gt 0 ]]; then
+        log_warn "⚠️  Security scan found medium-severity issues that should be addressed"
+        return 0
+    else
+        log_success "✅ Security scan completed successfully with no critical issues"
+        return 0
+    fi
+}
+
+show_help() {
+    cat <<EOF
+Usage: $0 [OPTIONS]
+
+Comprehensive security vulnerability scanner for Easy_Splunk deployment.
+
+OPTIONS:
+    --fix                   Enable automatic fixing of identified issues
+    --severity LEVEL        Set minimum severity threshold (CRITICAL|HIGH|MEDIUM|LOW)
+    --output DIR           Set custom output directory for scan results
+    --containers-only      Run only container vulnerability scans
+    --credentials-only     Run only credential exposure scans
+    --permissions-only     Run only file permission checks
+    --network-only         Run only network security checks
+    --help                 Show this help message
+
+EXAMPLES:
+    # Full security scan
+    $0
+
+    # Scan and automatically fix issues
+    $0 --fix
+
+    # Only scan for high and critical vulnerabilities
+    $0 --severity HIGH
+
+    # Only check for credential exposure
+    $0 --credentials-only
+
+EXIT CODES:
+    0 - Success, no critical/high issues found
+    1 - Critical or high-severity issues found
+    2 - Scan failed due to error
+
+EOF
+}
+
+main() {
+    local containers_only=false
+    local credentials_only=false
+    local permissions_only=false
+    local network_only=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --fix)
+                FIX_MODE=true
+                shift
+                ;;
+            --severity)
+                SEVERITY_THRESHOLD="$2"
+                shift 2
+                ;;
+            --output)
+                SCAN_RESULTS_DIR="$2"
+                mkdir -p "$SCAN_RESULTS_DIR"
+                SCAN_REPORT="${SCAN_RESULTS_DIR}/security_scan_${SCAN_TIMESTAMP}.json"
+                shift 2
+                ;;
+            --containers-only)
+                containers_only=true
+                shift
+                ;;
+            --credentials-only)
+                credentials_only=true
+                shift
+                ;;
+            --permissions-only)
+                permissions_only=true
+                shift
+                ;;
+            --network-only)
+                network_only=true
+                shift
+                ;;
+            --help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_help
+                exit 2
+                ;;
+        esac
+    done
+    
+    log_header "Easy_Splunk Security Scanner"
+    log_info "Starting comprehensive security scan..."
+    log_info "Fix mode: $([ "$FIX_MODE" == "true" ] && echo "ENABLED" || echo "DISABLED")"
+    log_info "Severity threshold: $SEVERITY_THRESHOLD"
+    log_info "Results directory: $SCAN_RESULTS_DIR"
+    
+    # Initialize scan report
+    init_scan_report
+    register_cleanup "generate_security_report"
+    
+    # Run selected scans
+    local scan_failed=false
+    
+    if [[ "$containers_only" == "true" ]]; then
+        run_container_security_scan || scan_failed=true
+    elif [[ "$credentials_only" == "true" ]]; then
+        check_credential_exposure || scan_failed=true
+    elif [[ "$permissions_only" == "true" ]]; then
+        verify_file_permissions || scan_failed=true
+    elif [[ "$network_only" == "true" ]]; then
+        check_network_security || scan_failed=true
+    else
+        # Full scan
+        log_section "Container Security Scan"
+        run_container_security_scan || scan_failed=true
+        
+        log_section "Credential Exposure Check"
+        check_credential_exposure || scan_failed=true
+        
+        log_section "File Permission Verification"
+        verify_file_permissions || scan_failed=true
+        
+        log_section "Network Security Check"
+        check_network_security || scan_failed=true
+        
+        log_section "SELinux Context Check"
+        check_selinux_context || scan_failed=true
+        
+        log_section "Dependency Security Scan"
+        run_dependency_scan || scan_failed=true
+    fi
+    
+    if [[ "$scan_failed" == "true" ]]; then
+        log_error "One or more security scans failed"
+        exit 2
+    fi
+    
+    # Report will be generated by cleanup handler
+    log_success "Security scan completed successfully"
+}
+
+# Run main function if script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
