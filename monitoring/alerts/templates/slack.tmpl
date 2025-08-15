@@ -1,0 +1,228 @@
+# ==============================================================================
+# monitoring/alerts/templates/slack.tmpl
+# Slack notification templates for AlertManager
+# ==============================================================================
+
+{{ define "slack.title" }}
+{{ if eq .Status "firing" }}🚨 Splunk Alert{{ else }}✅ Resolved{{ end }}: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+{{ end }}
+
+{{ define "slack.text" }}
+{{ if eq .Status "firing" }}
+⚠️ *Alert Status:* FIRING
+🔥 *Active Alerts:* {{ len .Alerts }}
+{{ else }}
+✅ *Alert Status:* RESOLVED
+🎉 *Resolved Alerts:* {{ len .Alerts }}
+{{ end }}
+
+{{ range .Alerts }}
+*{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+
+*Labels:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: `{{ .Value }}`
+{{ end }}
+{{ if .Annotations.runbook_url }}
+📖 *Runbook:* {{ .Annotations.runbook_url }}
+{{ end }}
+⏰ *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+{{ if ne .EndsAt .StartsAt }}⏰ *Ended:* {{ .EndsAt.Format "2006-01-02 15:04:05 UTC" }}{{ end }}
+---
+{{ end }}
+{{ end }}
+
+{{ define "slack.critical.title" }}
+🚨 CRITICAL SPLUNK ALERT
+{{ end }}
+
+{{ define "slack.critical.text" }}
+🚨 *CRITICAL ALERT - IMMEDIATE ACTION REQUIRED*
+
+{{ if eq .Status "firing" }}
+🔥 *Critical Alerts Firing:* {{ len .Alerts }}
+{{ else }}
+✅ *Critical Alerts Resolved:* {{ len .Alerts }}
+{{ end }}
+
+{{ range .Alerts }}
+🚨 *{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+
+{{ if .Annotations.impact }}⚠️ *Impact:* {{ .Annotations.impact }}{{ end }}
+{{ if .Annotations.action }}⚡ *Action Required:* {{ .Annotations.action }}{{ end }}
+
+*Alert Details:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: `{{ .Value }}`
+{{ end }}
+{{ if .Annotations.runbook_url }}
+📖 *Runbook:* {{ .Annotations.runbook_url }}
+{{ end }}
+⏰ *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+{{ if ne .EndsAt .StartsAt }}⏰ *Ended:* {{ .EndsAt.Format "2006-01-02 15:04:05 UTC" }}{{ end }}
+---
+{{ end }}
+
+*Next Steps:*
+1. 🔍 Acknowledge alert in monitoring system
+2. 🛠️ Check Splunk cluster status immediately
+3. 📚 Follow runbook procedures
+4. 📞 Escalate if needed
+{{ end }}
+
+{{ define "slack.security.text" }}
+🛡️ *SECURITY ALERT DETECTED*
+
+{{ if eq .Status "firing" }}
+⚠️ *Security Alerts:* {{ len .Alerts }} active
+{{ else }}
+✅ *Security Alerts:* {{ len .Alerts }} resolved
+{{ end }}
+
+{{ range .Alerts }}
+🔒 *{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+
+{{ if .Labels.threat_level }}🚨 *Threat Level:* {{ .Labels.threat_level | toUpper }}{{ end }}
+{{ if .Labels.source_ip }}🌐 *Source IP:* {{ .Labels.source_ip }}{{ end }}
+{{ if .Labels.user }}👤 *User:* {{ .Labels.user }}{{ end }}
+
+*Security Context:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: `{{ .Value }}`
+{{ end }}
+⏰ *Detection Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+---
+{{ end }}
+
+🔐 *Security Response Required:*
+• Check authentication logs
+• Verify user access patterns
+• Review configuration changes
+• Escalate to security team
+{{ end }}
+
+{{ define "slack.license.text" }}
+📄 *LICENSE ALERT*
+
+{{ if eq .Status "firing" }}
+⚠️ *License Issues:* {{ len .Alerts }} active
+{{ else }}
+✅ *License Issues:* {{ len .Alerts }} resolved
+{{ end }}
+
+{{ range .Alerts }}
+📋 *{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+
+{{ if .Labels.license_pool }}📊 *License Pool:* {{ .Labels.license_pool }}{{ end }}
+{{ if .Labels.usage_percent }}📈 *Usage:* {{ .Labels.usage_percent }}%{{ end }}
+
+*License Details:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: `{{ .Value }}`
+{{ end }}
+⏰ *Alert Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+---
+{{ end }}
+
+💡 *License Actions:*
+• Check current license usage
+• Review data ingestion patterns
+• Consider license optimization
+• Contact license administrator
+{{ end }}
+
+{{ define "slack.resource.text" }}
+📊 *RESOURCE ALERT*
+
+{{ if eq .Status "firing" }}
+⚠️ *Resource Issues:* {{ len .Alerts }} active
+{{ else }}
+✅ *Resource Issues:* {{ len .Alerts }} resolved
+{{ end }}
+
+{{ range .Alerts }}
+📈 *{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+
+{{ if .Labels.resource_type }}🔧 *Resource:* {{ .Labels.resource_type }}{{ end }}
+{{ if .Labels.usage_percent }}📊 *Usage:* {{ .Labels.usage_percent }}%{{ end }}
+{{ if .Labels.threshold }}⚠️ *Threshold:* {{ .Labels.threshold }}{{ end }}
+
+*Resource Details:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: `{{ .Value }}`
+{{ end }}
+⏰ *Alert Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+---
+{{ end }}
+
+🛠️ *Resource Actions:*
+• Check system utilization
+• Review resource allocation
+• Consider scaling options
+• Monitor trends
+{{ end }}
+
+{{ define "slack.performance.text" }}
+⚡ *PERFORMANCE ALERT*
+
+{{ if eq .Status "firing" }}
+⚠️ *Performance Issues:* {{ len .Alerts }} active
+{{ else }}
+✅ *Performance Issues:* {{ len .Alerts }} resolved
+{{ end }}
+
+{{ range .Alerts }}
+🔍 *{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+
+{{ if .Labels.search_type }}🔎 *Search Type:* {{ .Labels.search_type }}{{ end }}
+{{ if .Labels.response_time }}⏱️ *Response Time:* {{ .Labels.response_time }}s{{ end }}
+{{ if .Labels.queue_depth }}📊 *Queue Depth:* {{ .Labels.queue_depth }}{{ end }}
+
+*Performance Details:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: `{{ .Value }}`
+{{ end }}
+⏰ *Alert Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+---
+{{ end }}
+
+🚀 *Performance Actions:*
+• Check search queue status
+• Review search head load
+• Optimize search queries
+• Monitor system resources
+{{ end }}
+
+{{ define "slack.info.text" }}
+ℹ️ *INFORMATION ALERT*
+
+{{ if eq .Status "firing" }}
+📢 *Info Notifications:* {{ len .Alerts }} active
+{{ else }}
+✅ *Info Notifications:* {{ len .Alerts }} cleared
+{{ end }}
+
+{{ range .Alerts }}
+📝 *{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+
+*Information Details:*
+{{ range .Labels.SortedPairs }}• {{ .Name }}: `{{ .Value }}`
+{{ end }}
+⏰ *Notification Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+---
+{{ end }}
+{{ end }}
+
+{{ define "slack.alert_details.text" }}
+*Alert Details:*
+{{ range .Alerts }}
+• *Alert:* {{ .Annotations.summary }}
+• *Status:* {{ .Status }}
+• *Severity:* {{ .Labels.severity }}
+{{ if .Labels.instance }}• *Instance:* {{ .Labels.instance }}{{ end }}
+{{ if .Labels.service }}• *Service:* {{ .Labels.service }}{{ end }}
+{{ if .Labels.cluster }}• *Cluster:* {{ .Labels.cluster }}{{ end }}
+• *Started:* {{ .StartsAt.Format "15:04:05 UTC" }}
+{{ end }}
+{{ end }}

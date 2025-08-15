@@ -2,34 +2,126 @@
   "dashboard": {
     "id": null,
     "title": "Splunk Cluster Overview",
-    "tags": ["splunk", "cluster", "monitoring"],
+    "tags": ["splunk", "cluster", "overview", "monitoring"],
     "style": "dark",
     "timezone": "browser",
+    "editable": true,
+    "hideControls": false,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"],
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"]
+    },
+    "refresh": "30s",
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "templating": {
+      "list": [
+        {
+          "allValue": null,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          },
+          "datasource": "Prometheus",
+          "definition": "label_values(splunk_info, cluster)",
+          "hide": 0,
+          "includeAll": true,
+          "label": "Cluster",
+          "multi": true,
+          "name": "cluster",
+          "options": [],
+          "query": "label_values(splunk_info, cluster)",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 1,
+          "type": "query"
+        },
+        {
+          "allValue": null,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          },
+          "datasource": "Prometheus",
+          "definition": "label_values(splunk_info{cluster=~\"$cluster\"}, instance)",
+          "hide": 0,
+          "includeAll": true,
+          "label": "Instance",
+          "multi": true,
+          "name": "instance",
+          "options": [],
+          "query": "label_values(splunk_info{cluster=~\"$cluster\"}, instance)",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 1,
+          "type": "query"
+        }
+      ]
+    },
     "panels": [
       {
         "id": 1,
-        "title": "Cluster Health Status",
+        "title": "Cluster Health Overview",
         "type": "stat",
         "targets": [
           {
-            "expr": "up{job=~\"splunk.*\"}",
-            "legendFormat": "{{instance}}"
+            "expr": "count(up{job=~\"splunk.*\", cluster=~\"$cluster\"} == 1)",
+            "legendFormat": "Healthy Instances",
+            "refId": "A"
+          },
+          {
+            "expr": "count(up{job=~\"splunk.*\", cluster=~\"$cluster\"} == 0)",
+            "legendFormat": "Down Instances",
+            "refId": "B"
           }
         ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "textMode": "auto"
+        },
         "fieldConfig": {
           "defaults": {
             "color": {
               "mode": "thresholds"
             },
+            "mappings": [],
             "thresholds": {
+              "mode": "absolute",
               "steps": [
-                {"color": "red", "value": 0},
-                {"color": "green", "value": 1}
+                {"color": "green", "value": null},
+                {"color": "red", "value": 1}
               ]
-            }
+            },
+            "unit": "short"
           }
-        },
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+        }
       },
       {
         "id": 2,
@@ -37,107 +129,325 @@
         "type": "gauge",
         "targets": [
           {
-            "expr": "splunk_license_usage_percent",
-            "legendFormat": "License Usage %"
+            "expr": "splunk_license_usage_mb{cluster=~\"$cluster\"} / splunk_license_quota_mb{cluster=~\"$cluster\"} * 100",
+            "legendFormat": "{{pool}} Usage %",
+            "refId": "A"
           }
         ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "center"
+        },
         "fieldConfig": {
           "defaults": {
-            "min": 0,
-            "max": 100,
-            "unit": "percent",
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [],
             "thresholds": {
+              "mode": "absolute",
               "steps": [
-                {"color": "green", "value": 0},
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "orange", "value": 85},
+                {"color": "red", "value": 95}
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Data Ingestion Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(splunk_data_ingested_mb_total{cluster=~\"$cluster\", instance=~\"$instance\"}[5m])",
+            "legendFormat": "{{instance}} - {{index}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 8},
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "vis": false
+              },
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "never",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null}
+              ]
+            },
+            "unit": "MBs"
+          }
+        },
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "single"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Search Activity",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "splunk_search_active_count{cluster=~\"$cluster\", instance=~\"$instance\"}",
+            "legendFormat": "{{instance}} - Active Searches",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(splunk_search_completed_total{cluster=~\"$cluster\", instance=~\"$instance\"}[5m])",
+            "legendFormat": "{{instance}} - Completed/s",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 17},
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Count",
+              "axisPlacement": "auto",
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "lineWidth": 1,
+              "pointSize": 5,
+              "showPoints": "never",
+              "spanNulls": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null}
+              ]
+            },
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "System Resources",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\", instance=~\"$instance\"}[5m])) * 100)",
+            "legendFormat": "CPU Usage %",
+            "refId": "A"
+          },
+          {
+            "expr": "(1 - (node_memory_MemAvailable_bytes{instance=~\"$instance\"} / node_memory_MemTotal_bytes{instance=~\"$instance\"})) * 100",
+            "legendFormat": "Memory Usage %",
+            "refId": "B"
+          },
+          {
+            "expr": "100 - ((node_filesystem_avail_bytes{instance=~\"$instance\",mountpoint=\"/\"} * 100) / node_filesystem_size_bytes{instance=~\"$instance\",mountpoint=\"/\"})",
+            "legendFormat": "Disk Usage %",
+            "refId": "C"
+          }
+        ],
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 17},
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Percentage",
+              "axisMax": 100,
+              "axisMin": 0,
+              "axisPlacement": "auto",
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "lineWidth": 1,
+              "pointSize": 5,
+              "showPoints": "never",
+              "spanNulls": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
                 {"color": "yellow", "value": 70},
                 {"color": "red", "value": 90}
+              ]
+            },
+            "unit": "percent"
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Indexer Status",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "splunk_indexer_status{cluster=~\"$cluster\", instance=~\"$instance\"}",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto"
+            },
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "Down",
+                    "color": "red"
+                  },
+                  "1": {
+                    "text": "Up",
+                    "color": "green"
+                  }
+                },
+                "type": "value"
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "red", "value": 80}
               ]
             }
           }
         },
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+        "options": {
+          "showHeader": true
+        },
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "Time": true
+              },
+              "indexByName": {},
+              "renameByName": {
+                "instance": "Instance",
+                "cluster": "Cluster",
+                "role": "Role",
+                "Value": "Status"
+              }
+            }
+          }
+        ]
       },
       {
-        "id": 3,
-        "title": "Search Performance",
-        "type": "graph",
+        "id": 7,
+        "title": "Recent Alerts",
+        "type": "table",
         "targets": [
           {
-            "expr": "rate(splunk_search_duration_seconds[5m])",
-            "legendFormat": "Avg Search Time - {{instance}}"
+            "expr": "ALERTS{cluster=~\"$cluster\", instance=~\"$instance\"}",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
           }
         ],
-        "yAxes": [
-          {
-            "label": "Seconds",
-            "min": 0
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto"
+            },
+            "mappings": [
+              {
+                "options": {
+                  "firing": {
+                    "text": "FIRING",
+                    "color": "red"
+                  },
+                  "pending": {
+                    "text": "PENDING",
+                    "color": "yellow"
+                  }
+                },
+                "type": "value"
+              }
+            ]
           }
-        ],
-        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 8}
-      },
-      {
-        "id": 4,
-        "title": "Indexing Throughput",
-        "type": "graph",
-        "targets": [
+        },
+        "transformations": [
           {
-            "expr": "rate(splunk_indexed_events_total[5m])",
-            "legendFormat": "Events/sec - {{instance}}"
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "Time": true
+              },
+              "renameByName": {
+                "alertname": "Alert",
+                "alertstate": "State",
+                "severity": "Severity",
+                "instance": "Instance"
+              }
+            }
           }
-        ],
-        "yAxes": [
-          {
-            "label": "Events per Second",
-            "min": 0
-          }
-        ],
-        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 17}
-      },
-      {
-        "id": 5,
-        "title": "Resource Utilization",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "splunk_cpu_usage_percent",
-            "legendFormat": "CPU % - {{instance}}"
-          },
-          {
-            "expr": "splunk_memory_usage_bytes / 1024 / 1024 / 1024",
-            "legendFormat": "Memory GB - {{instance}}"
-          },
-          {
-            "expr": "splunk_disk_used_percent",
-            "legendFormat": "Disk % - {{instance}}"
-          }
-        ],
-        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 26}
-      },
-      {
-        "id": 6,
-        "title": "Performance Trends",
-        "type": "graph",
-        "targets": [
-          {
-            "expr": "splunk_search_duration_trend_slope",
-            "legendFormat": "Search Duration Trend"
-          },
-          {
-            "expr": "splunk_indexing_throughput_trend_slope",
-            "legendFormat": "Indexing Throughput Trend"
-          },
-          {
-            "expr": "splunk_capacity_utilization_score",
-            "legendFormat": "Capacity Score"
-          }
-        ],
-        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 35}
+        ]
       }
-    ],
-    "time": {
-      "from": "now-6h",
-      "to": "now"
-    },
-    "refresh": "30s"
+    ]
   }
 }

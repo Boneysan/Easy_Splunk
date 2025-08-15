@@ -1,33 +1,78 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ==============================================================================
 # monitoring/collectors/splunk_metrics.sh
-# Splunk metrics collector for Prometheus
+# Comprehensive Splunk metrics collector for Prometheus
 # ==============================================================================
 
 set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# shellcheck source=../../lib/core.sh
 source "${SCRIPT_DIR}/../../lib/core.sh"
+# shellcheck source=../../lib/error-handling.sh
 source "${SCRIPT_DIR}/../../lib/error-handling.sh"
 
-# Default values
-METRICS_PORT=9090
-METRICS_PATH="/metrics"
-COLLECTION_INTERVAL=60
+# Configuration
+: "${SPLUNK_HOST:=localhost}"
+: "${SPLUNK_PORT:=8089}"
+: "${SPLUNK_USER:=monitor}"
+: "${SPLUNK_PASSWORD:=changeme}"
+: "${METRICS_PORT:=9090}"
+: "${METRICS_PATH:=/metrics}"
+: "${COLLECTION_INTERVAL:=30}"
+: "${CURL_AUTH_FILE:=/run/secrets/curl_auth}"
+
+# Metrics output file
+METRICS_FILE="${SCRIPT_DIR}/splunk_metrics.prom"
+
+# Get authentication method
+get_auth_method() {
+    if [[ -f "${CURL_AUTH_FILE}" ]]; then
+        echo "-K ${CURL_AUTH_FILE}"
+    else
+        echo "-u ${SPLUNK_USER}:${SPLUNK_PASSWORD}"
+    fi
+}
+
+# Execute Splunk REST API call
+splunk_api_call() {
+    local endpoint="$1"
+    local auth_method
+    auth_method=$(get_auth_method)
+    
+    curl -sk ${auth_method} \
+        "https://${SPLUNK_HOST}:${SPLUNK_PORT}${endpoint}" \
+        -H "Content-Type: application/json" \
+        --connect-timeout 10 \
+        --max-time 30 2>/dev/null || {
+        log_error "Failed to call Splunk API endpoint: ${endpoint}"
+        return 1
+    }
+}
 
 collect_splunk_metrics() {
     local splunk_host="$1"
     local credentials="$2"
-    local output_file="$3"
     local timestamp
     timestamp=$(date +%s)
     
-    # Collect server info and status
-    log_info "Collecting server metrics from ${splunk_host}..."
-    collect_server_info "${splunk_host}" "${credentials}" "${timestamp}" >> "${output_file}"
+    # Collect indexer metrics
+    log_info "Collecting indexer metrics from ${splunk_host}..."
+    
+    curl -k -u "$credentials" \
+        "https://$splunk_host:8089/services/server/info" \
+        -H "Content-Type: application/json" | \
+    jq -r --arg timestamp "$timestamp" --arg host "$splunk_host" '.entry[0].content | 
+        "splunk_indexer_status{host=\"'$splunk_host'\"} \(if .serverName then 1 else 0 end) \($timestamp)",
+        "splunk_version_info{host=\"'$splunk_host'\",version=\"\(.version)\"} 1 \($timestamp)"'
     
     # Collect license usage
+    curl -k -u "$credentials" \
+        "https://$splunk_host:8089/services/licenser/pools" \
+        -H "Content-Type: application/json" | \
+    parse_license_metrics "$timestamp" "$splunk_host"
+}
     log_info "Collecting license metrics..."
     collect_license_metrics "${splunk_host}" "${credentials}" "${timestamp}" >> "${output_file}"
     

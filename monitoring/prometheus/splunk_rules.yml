@@ -1,53 +1,256 @@
+# ==============================================================================
+# monitoring/prometheus/splunk_rules.yml
+# Comprehensive Prometheus alerting rules for Splunk cluster monitoring
+# ==============================================================================
+
 groups:
-  - name: splunk_cluster
+  - name: splunk_cluster_health
     rules:
       - alert: SplunkIndexerDown
         expr: up{job="splunk-indexer"} == 0
         for: 5m
         labels:
           severity: critical
-          category: availability
+          component: indexer
+          team: platform
         annotations:
           summary: "Splunk indexer {{ $labels.instance }} is down"
-          description: "Splunk indexer instance {{ $labels.instance }} has been down for more than 5 minutes"
+          description: "Splunk indexer {{ $labels.instance }} has been down for more than 5 minutes. This may impact data ingestion and search capabilities."
+          runbook_url: "https://docs.splunk.com/Documentation/Splunk/latest/Troubleshooting/Troubleshootindexers"
           
+      - alert: SplunkSearchHeadDown
+        expr: up{job="splunk-search-head"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          component: search_head
+          team: platform
+        annotations:
+          summary: "Splunk search head {{ $labels.instance }} is down"
+          description: "Splunk search head {{ $labels.instance }} has been down for more than 3 minutes. Users cannot perform searches."
+          
+      - alert: SplunkClusterMasterDown
+        expr: up{job="splunk-cluster-master"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: cluster_master
+          team: platform
+        annotations:
+          summary: "Splunk cluster master {{ $labels.instance }} is down"
+          description: "Splunk cluster master is down. This affects cluster coordination and replication."
+
+  - name: splunk_resource_usage
+    rules:
       - alert: SplunkDiskSpaceHigh
         expr: (splunk_disk_used_percent > 80)
         for: 10m
         labels:
           severity: warning
-          category: capacity
+          component: storage
+          team: platform
         annotations:
           summary: "Splunk disk usage high on {{ $labels.instance }}"
-          description: "Disk usage on {{ $labels.instance }} is {{ $value }}%, which is above 80% threshold"
-
+          description: "Disk usage on {{ $labels.instance }} is {{ $value }}%, exceeding 80% threshold."
+          
       - alert: SplunkDiskSpaceCritical
         expr: (splunk_disk_used_percent > 90)
         for: 5m
         labels:
           severity: critical
-          category: capacity
+          component: storage
+          team: platform
         annotations:
           summary: "Splunk disk usage critical on {{ $labels.instance }}"
-          description: "Disk usage on {{ $labels.instance }} is {{ $value }}%, which is above 90% threshold"
+          description: "Disk usage on {{ $labels.instance }} is {{ $value }}%, exceeding 90% threshold. Immediate action required."
+          
+      - alert: SplunkMemoryUsageHigh
+        expr: (splunk_memory_used_percent > 85)
+        for: 15m
+        labels:
+          severity: warning
+          component: memory
+          team: platform
+        annotations:
+          summary: "Splunk memory usage high on {{ $labels.instance }}"
+          description: "Memory usage on {{ $labels.instance }} is {{ $value }}%, exceeding 85% threshold."
+          
+      - alert: SplunkCPUUsageHigh
+        expr: (splunk_cpu_usage_percent > 80)
+        for: 20m
+        labels:
+          severity: warning
+          component: cpu
+          team: platform
+        annotations:
+          summary: "Splunk CPU usage high on {{ $labels.instance }}"
+          description: "CPU usage on {{ $labels.instance }} is {{ $value }}%, exceeding 80% threshold for 20 minutes."
 
+  - name: splunk_licensing
+    rules:
       - alert: SplunkLicenseUsageHigh
         expr: (splunk_license_usage_percent > 90)
         for: 5m
         labels:
           severity: critical
-          category: license
+          component: licensing
+          team: platform
         annotations:
           summary: "Splunk license usage critical: {{ $value }}%"
-          description: "License usage has exceeded 90% of the allocated quota"
+          description: "Splunk license usage is at {{ $value }}%, exceeding 90% threshold. Risk of license violation."
+          
+      - alert: SplunkLicenseUsageWarning
+        expr: (splunk_license_usage_percent > 75)
+        for: 10m
+        labels:
+          severity: warning
+          component: licensing
+          team: platform
+        annotations:
+          summary: "Splunk license usage warning: {{ $value }}%"
+          description: "Splunk license usage is at {{ $value }}%, exceeding 75% threshold."
+          
+      - alert: SplunkLicenseExpiring
+        expr: (splunk_license_days_remaining < 30)
+        for: 1h
+        labels:
+          severity: warning
+          component: licensing
+          team: platform
+        annotations:
+          summary: "Splunk license expiring in {{ $value }} days"
+          description: "Splunk license will expire in {{ $value }} days. Please renew the license."
 
-      - alert: SplunkSearchHeadDown
-        expr: up{job="splunk-search-head"} == 0
-        for: 5m
+  - name: splunk_data_ingestion
+    rules:
+      - alert: SplunkIngestionRateHigh
+        expr: rate(splunk_events_ingested_total[5m]) > 10000
+        for: 15m
+        labels:
+          severity: warning
+          component: ingestion
+          team: platform
+        annotations:
+          summary: "High data ingestion rate on {{ $labels.instance }}"
+          description: "Data ingestion rate on {{ $labels.instance }} is {{ $value }} events/sec, which may impact performance."
+          
+      - alert: SplunkIngestionStopped
+        expr: rate(splunk_events_ingested_total[10m]) == 0
+        for: 10m
         labels:
           severity: critical
-          category: availability
+          component: ingestion
+          team: platform
         annotations:
+          summary: "Data ingestion stopped on {{ $labels.instance }}"
+          description: "No data has been ingested on {{ $labels.instance }} for the past 10 minutes."
+          
+      - alert: SplunkIndexingErrors
+        expr: rate(splunk_indexing_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: indexing
+          team: platform
+        annotations:
+          summary: "High indexing error rate on {{ $labels.instance }}"
+          description: "Indexing error rate on {{ $labels.instance }} is {{ $value }} errors/sec."
+
+  - name: splunk_search_performance
+    rules:
+      - alert: SplunkSearchQueueFull
+        expr: splunk_search_queue_length > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: search
+          team: platform
+        annotations:
+          summary: "Search queue full on {{ $labels.instance }}"
+          description: "Search queue on {{ $labels.instance }} has {{ $value }} pending searches."
+          
+      - alert: SplunkSlowSearches
+        expr: splunk_search_duration_seconds{quantile="0.95"} > 300
+        for: 10m
+        labels:
+          severity: warning
+          component: search
+          team: platform
+        annotations:
+          summary: "Slow searches detected on {{ $labels.instance }}"
+          description: "95th percentile search duration on {{ $labels.instance }} is {{ $value }} seconds."
+
+  - name: splunk_replication
+    rules:
+      - alert: SplunkReplicationLag
+        expr: splunk_replication_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: replication
+          team: platform
+        annotations:
+          summary: "Replication lag detected on {{ $labels.instance }}"
+          description: "Replication lag on {{ $labels.instance }} is {{ $value }} seconds, exceeding 5-minute threshold."
+          
+      - alert: SplunkReplicationFailed
+        expr: splunk_replication_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: replication
+          team: platform
+        annotations:
+          summary: "Replication failed on {{ $labels.instance }}"
+          description: "Data replication has failed on {{ $labels.instance }}. Data integrity may be at risk."
+
+  - name: splunk_connectivity
+    rules:
+      - alert: SplunkForwarderDisconnected
+        expr: splunk_forwarder_connected == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: forwarder
+          team: platform
+        annotations:
+          summary: "Splunk forwarder {{ $labels.instance }} disconnected"
+          description: "Universal forwarder {{ $labels.instance }} has been disconnected for more than 5 minutes."
+          
+      - alert: SplunkWebInterfaceDown
+        expr: splunk_web_status == 0
+        for: 3m
+        labels:
+          severity: warning
+          component: web
+          team: platform
+        annotations:
+          summary: "Splunk web interface down on {{ $labels.instance }}"
+          description: "Splunk web interface is not accessible on {{ $labels.instance }}."
+
+  - name: splunk_security
+    rules:
+      - alert: SplunkFailedLogins
+        expr: rate(splunk_failed_logins_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+          team: security
+        annotations:
+          summary: "High failed login rate on {{ $labels.instance }}"
+          description: "Failed login rate on {{ $labels.instance }} is {{ $value }} attempts/sec, indicating potential security threat."
+          
+      - alert: SplunkUnauthorizedAccess
+        expr: rate(splunk_unauthorized_access_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+          team: security
+        annotations:
+          summary: "Unauthorized access attempt on {{ $labels.instance }}"
+          description: "Unauthorized access attempts detected on {{ $labels.instance }}."
           summary: "Splunk search head {{ $labels.instance }} is down"
           description: "Search head instance {{ $labels.instance }} has been down for more than 5 minutes"
 

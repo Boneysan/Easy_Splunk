@@ -1,23 +1,98 @@
+# ==============================================================================
+# monitoring/prometheus/prometheus.yml
+# Comprehensive Prometheus configuration for Splunk cluster monitoring
+# ==============================================================================
+
 global:
-  scrape_interval: 30s
-  evaluation_interval: 30s
-  scrape_timeout: 10s
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'splunk-cluster'
+    environment: '${ENVIRONMENT:-production}'
 
 rule_files:
   - "splunk_rules.yml"
+  - "/etc/prometheus/rules/*.yml"
 
 alerting:
   alertmanagers:
     - static_configs:
         - targets:
-          - "alertmanager:9093"
+          - alertmanager:9093
 
 scrape_configs:
-  - job_name: 'splunk-indexers'
+  # Splunk Indexers
+  - job_name: 'splunk-indexer'
     static_configs:
       - targets:
-        - 'localhost:9100'  # Node exporter
-    relabel_configs:
+          - '${SPLUNK_INDEXER_1:-splunk-idx1}:8089'
+          - '${SPLUNK_INDEXER_2:-splunk-idx2}:8089'
+          - '${SPLUNK_INDEXER_3:-splunk-idx3}:8089'
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true
+    basic_auth:
+      username: '${SPLUNK_MONITOR_USER:-monitor}'
+      password: '${SPLUNK_MONITOR_PASSWORD:-changeme}'
+    metrics_path: '/services/server/info'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Splunk Search Heads
+  - job_name: 'splunk-search-head'
+    static_configs:
+      - targets:
+          - '${SPLUNK_SEARCH_HEAD_1:-splunk-sh1}:8089'
+          - '${SPLUNK_SEARCH_HEAD_2:-splunk-sh2}:8089'
+          - '${SPLUNK_SEARCH_HEAD_3:-splunk-sh3}:8089'
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true
+    basic_auth:
+      username: '${SPLUNK_MONITOR_USER:-monitor}'
+      password: '${SPLUNK_MONITOR_PASSWORD:-changeme}'
+    metrics_path: '/services/server/info'
+    scrape_interval: 30s
+
+  # Splunk Cluster Master
+  - job_name: 'splunk-cluster-master'
+    static_configs:
+      - targets:
+          - '${SPLUNK_CLUSTER_MASTER:-splunk-cm}:8089'
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true
+    basic_auth:
+      username: '${SPLUNK_MONITOR_USER:-monitor}'
+      password: '${SPLUNK_MONITOR_PASSWORD:-changeme}'
+    metrics_path: '/services/server/info'
+    scrape_interval: 30s
+
+  # Custom Splunk Metrics Collector
+  - job_name: 'splunk-custom-metrics'
+    static_configs:
+      - targets:
+          - 'splunk-metrics-exporter:9090'
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+
+  # System Metrics (Node Exporter)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets:
+          - '${SPLUNK_INDEXER_1:-splunk-idx1}:9100'
+          - '${SPLUNK_INDEXER_2:-splunk-idx2}:9100'
+          - '${SPLUNK_INDEXER_3:-splunk-idx3}:9100'
+          - '${SPLUNK_SEARCH_HEAD_1:-splunk-sh1}:9100'
+          - '${SPLUNK_SEARCH_HEAD_2:-splunk-sh2}:9100'
+          - '${SPLUNK_SEARCH_HEAD_3:-splunk-sh3}:9100'
+    scrape_interval: 15s
+
+  # Prometheus Self-Monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 15s
       - source_labels: [__address__]
         target_label: instance
         replacement: '${1}'

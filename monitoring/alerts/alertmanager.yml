@@ -1,60 +1,243 @@
 global:
   resolve_timeout: 5m
   slack_api_url: '${SLACK_API_URL}'
-  smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
-  smtp_from: '${SMTP_FROM}'
+  smtp_smarthost: '${SMTP_HOST:-localhost:587}:${SMTP_PORT:-587}'
+  smtp_from: '${SMTP_FROM:-alerts@company.com}'
   smtp_auth_username: '${SMTP_USER}'
   smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+  
+  # PagerDuty integration URLs
+  pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
 
 templates:
   - '/etc/alertmanager/templates/*.tmpl'
 
 route:
-  group_by: ['alertname', 'category']
+  group_by: ['alertname', 'cluster', 'service', 'component']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
   receiver: 'team-splunk'
   routes:
+    # Critical alerts - immediate notification
     - match:
         severity: critical
       receiver: 'team-splunk-critical'
+      group_wait: 10s
+      group_interval: 2m
       repeat_interval: 1h
+      routes:
+        # Cluster master down - highest priority
+        - match:
+            component: cluster_master
+          receiver: 'cluster-master-critical'
+          group_wait: 0s
+          repeat_interval: 30m
+        
+        # Security alerts - immediate escalation
+        - match:
+            team: security
+          receiver: 'security-critical'
+          group_wait: 0s
+          repeat_interval: 15m
+        
+        # License issues - business critical
+        - match:
+            component: licensing
+          receiver: 'license-critical'
+          repeat_interval: 2h
+
+    # Warning alerts - standard notification
     - match:
         severity: warning
       receiver: 'team-splunk'
+      group_wait: 30s
+      group_interval: 10m
+      repeat_interval: 8h
+      routes:
+        # Resource usage warnings
+        - match_re:
+            component: storage|memory|cpu
+          receiver: 'resource-warnings'
+        
+        # Performance warnings
+        - match:
+            component: search
+          receiver: 'performance-warnings'
+
+    # Info alerts - low priority notifications
+    - match:
+        severity: info
+      receiver: 'info-alerts'
+      group_interval: 1h
+      repeat_interval: 24h
 
 receivers:
+  # Default team notifications
   - name: 'team-splunk'
     slack_configs:
       - channel: '#splunk-alerts'
         title: '{{ template "slack.title" . }}'
         text: '{{ template "slack.text" . }}'
+        color: 'warning'
         send_resolved: true
     email_configs:
-      - to: '${TEAM_EMAIL}'
+      - to: '${TEAM_EMAIL:-ops@company.com}'
         send_resolved: true
         html: '{{ template "email.html" . }}'
         headers:
           subject: '{{ template "email.subject" . }}'
 
+  # Critical alerts for general Splunk issues
   - name: 'team-splunk-critical'
     slack_configs:
       - channel: '#splunk-critical'
-        title: '{{ template "slack.critical.title" . }}'
+        title: '🚨 {{ template "slack.critical.title" . }}'
         text: '{{ template "slack.critical.text" . }}'
+        color: 'danger'
         send_resolved: true
     email_configs:
-      - to: '${ONCALL_EMAIL}'
+      - to: '${ONCALL_EMAIL:-oncall@company.com}'
         send_resolved: true
         html: '{{ template "email.critical.html" . }}'
         headers:
-          subject: '{{ template "email.critical.subject" . }}'
+          subject: '🚨 CRITICAL: {{ template "email.critical.subject" . }}'
     pagerduty_configs:
-      - service_key: '${PAGERDUTY_KEY}'
+      - routing_key: '${PAGERDUTY_KEY:-}'
         description: '{{ template "pagerduty.description" . }}'
+        severity: 'critical'
+
+  # Cluster master specific critical alerts
+  - name: 'cluster-master-critical'
+    slack_configs:
+      - channel: '#splunk-critical'
+        title: '🚨 URGENT: Cluster Master Down'
+        text: |
+          The Splunk Cluster Master is down! This affects:
+          • Cluster coordination and management
+          • Data replication and bucket management
+          • Indexer coordination
+          
+          {{ template "slack.critical.text" . }}
+        color: 'danger'
+        send_resolved: true
+    email_configs:
+      - to: '${CLUSTER_ADMIN_EMAIL:-cluster-admin@company.com}'
+        send_resolved: true
+        html: '{{ template "email.cluster_master.html" . }}'
+        headers:
+          subject: '🚨 URGENT: Splunk Cluster Master Down - Immediate Action Required'
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_CRITICAL_KEY:-}'
+        description: 'Splunk Cluster Master Down - Immediate Action Required'
+        severity: 'critical'
+
+  # Security specific alerts
+  - name: 'security-critical'
+    slack_configs:
+      - channel: '#security-alerts'
+        title: '🛡️ SECURITY ALERT'
+        text: '{{ template "slack.security.text" . }}'
+        color: 'danger'
+        send_resolved: true
+    email_configs:
+      - to: '${SECURITY_TEAM_EMAIL:-security@company.com}'
+        send_resolved: true
+        html: '{{ template "email.security.html" . }}'
+        headers:
+          subject: '🛡️ SECURITY: Splunk Security Alert - {{ .CommonLabels.alertname }}'
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_SECURITY_KEY:-}'
+        description: 'Splunk Security Alert - {{ .CommonLabels.alertname }}'
+        severity: 'critical'
+
+  # License specific alerts
+  - name: 'license-critical'
+    slack_configs:
+      - channel: '#splunk-licensing'
+        title: '📄 License Alert'
+        text: '{{ template "slack.license.text" . }}'
+        color: 'warning'
+        send_resolved: true
+    email_configs:
+      - to: '${LICENSE_ADMIN_EMAIL:-license-admin@company.com}'
+        send_resolved: true
+        html: '{{ template "email.license.html" . }}'
+        headers:
+          subject: '📄 Splunk License Alert - {{ .CommonLabels.alertname }}'
+
+  # Resource usage warnings
+  - name: 'resource-warnings'
+    slack_configs:
+      - channel: '#splunk-resources'
+        title: '📊 Resource Alert'
+        text: '{{ template "slack.resource.text" . }}'
+        color: 'warning'
+        send_resolved: true
+    email_configs:
+      - to: '${RESOURCE_ADMIN_EMAIL:-resource-admin@company.com}'
+        send_resolved: true
+        html: '{{ template "email.resource.html" . }}'
+        headers:
+          subject: '📊 Splunk Resource Alert - {{ .CommonLabels.alertname }}'
+
+  # Performance warnings
+  - name: 'performance-warnings'
+    slack_configs:
+      - channel: '#splunk-performance'
+        title: '⚡ Performance Alert'
+        text: '{{ template "slack.performance.text" . }}'
+        color: 'warning'
+        send_resolved: true
+    email_configs:
+      - to: '${PERFORMANCE_ADMIN_EMAIL:-performance-admin@company.com}'
+        send_resolved: true
+        html: '{{ template "email.performance.html" . }}'
+        headers:
+          subject: '⚡ Splunk Performance Alert - {{ .CommonLabels.alertname }}'
+
+  # Info level alerts
+  - name: 'info-alerts'
+    slack_configs:
+      - channel: '#splunk-info'
+        title: 'ℹ️ Splunk Info'
+        text: '{{ template "slack.info.text" . }}'
+        color: 'good'
+        send_resolved: true
+    email_configs:
+      - to: '${INFO_EMAIL:-ops-info@company.com}'
+        send_resolved: true
+        html: '{{ template "email.info.html" . }}'
+        headers:
+          subject: 'ℹ️ Splunk Info - {{ .CommonLabels.alertname }}'
 
 inhibit_rules:
+  # If cluster master is down, suppress indexer alerts
+  - source_match:
+      component: cluster_master
+      severity: critical
+    target_match:
+      component: indexer
+    equal: ['cluster']
+
+  # If indexer is down, suppress search performance alerts
+  - source_match:
+      component: indexer
+      severity: critical
+    target_match:
+      component: search
+    equal: ['cluster']
+
+  # If system resources are critical, suppress performance warnings
+  - source_match_re:
+      component: storage|memory|cpu
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ['instance']
+
+  # General critical suppresses warning for same alert
   - source_match:
       severity: 'critical'
     target_match:
