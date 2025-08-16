@@ -166,9 +166,11 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:${PROMETHEUS_PORT}
+    url: https://prometheus:${PROMETHEUS_PORT}
     isDefault: true
     editable: false
+    basicAuth: false
+    tlsSkipVerify: true
 EOF
 }
 
