@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 #
 # tests/integration/test_full_deployment.sh
@@ -173,4 +172,3 @@ main() {
 
 TEST_FULL_DEPLOYMENT_VERSION="1.0.0"
 main
-```

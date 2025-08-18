@@ -14,7 +14,6 @@ init_error_handling
 
 # Configuration
 readonly COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
-readonly COMPOSE_MONITORING="${SCRIPT_DIR}/docker-compose.monitoring.yml"
 readonly CONFIG_FILE="${SCRIPT_DIR}/config/active.conf"
 readonly MAX_STARTUP_WAIT=300  # 5 minutes
 readonly HEALTH_CHECK_INTERVAL=5
@@ -139,14 +138,9 @@ init_compose_command() {
     
     # Build compose file list
     COMPOSE_FILES=("-f" "$COMPOSE_FILE")
-    
+    # Monitoring services should be embedded in the generated compose when enabled.
     if [[ "$WITH_MONITORING" == "true" ]]; then
-        if [[ -f "$COMPOSE_MONITORING" ]]; then
-            COMPOSE_FILES+=("-f" "$COMPOSE_MONITORING")
-            log_message INFO "Including monitoring stack"
-        else
-            log_message WARNING "Monitoring compose file not found: $COMPOSE_MONITORING"
-        fi
+        log_message INFO "Monitoring requested; expecting services in docker-compose.yml"
     fi
 }
 

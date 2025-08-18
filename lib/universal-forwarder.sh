@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/universal-forwarder.sh
@@ -242,4 +241,3 @@ generate_uf_outputs_config() {
 
 export -f download_uf_package generate_uf_outputs_config
 UF_VERSION_LIB="1.0.0"
-```

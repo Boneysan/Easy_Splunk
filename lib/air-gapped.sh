@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/air-gapped.sh
@@ -493,4 +492,3 @@ export -f generate_checksum_file verify_checksum_file \
 
 # Define version
 AIR_GAPPED_VERSION="1.0.0"
-```

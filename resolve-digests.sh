@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # resolve-digests.sh — pin tags in versions.env to immutable digests
 #
@@ -193,4 +192,3 @@ readonly ${img_var}=\"${new_image}\"
 
 RESOLVE_DIGESTS_VERSION="1.0.0"
 main "$@"
-```

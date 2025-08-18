@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/integration/test_deploy.sh
@@ -167,4 +166,3 @@ main() {
 
 TEST_DEPLOY_VERSION="1.0.1"
 main
-```

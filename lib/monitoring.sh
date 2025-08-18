@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/monitoring.sh
@@ -257,4 +256,3 @@ generate_monitoring_config() {
 
 # Define version
 MONITORING_VERSION="1.0.0"
-```

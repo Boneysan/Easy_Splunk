@@ -2,12 +2,21 @@
 # deploy.sh - Complete deployment wrapper with comprehensive error handling
 # Main entry point for Easy_Splunk cluster deployment
 
-# Source error handling module
+# Source error handling module and compose generator
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/error-handling.sh" || {
     echo "ERROR: Cannot load error handling module from lib/error-handling.sh" >&2
     exit 1
 }
+if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
+    # shellcheck source=lib/compose-generator.sh
+    source "${SCRIPT_DIR}/lib/compose-generator.sh" || {
+        echo "ERROR: Cannot load compose generator from lib/compose-generator.sh" >&2
+        exit 1
+    }
+else
+    log_message WARNING "compose-generator.sh not found; will skip compose generation"
+fi
 
 # Initialize error handling
 init_error_handling
@@ -59,6 +68,8 @@ usage() {
     cat << EOF
 Usage: $0 <size|config> [options]
 
+You can also pass a config via --config <file>.
+
 Deploy a containerized Splunk cluster with optional monitoring.
 
 Arguments:
@@ -66,6 +77,7 @@ Arguments:
     config          Path to custom configuration file
 
 Options:
+    --config FILE          Use the specified configuration file (alternative to positional)
     --index-name NAME       Create and configure the specified index
     --splunk-user USER      Splunk admin username (default: admin)
     --splunk-password PASS  Splunk admin password (will prompt if not provided)
@@ -73,6 +85,7 @@ Options:
     --skip-creds           Skip credential generation
     --skip-health          Skip post-deployment health check
     --force                Force deployment even if cluster exists
+    --mode MODE            Optional test mode flag (ignored; accepted for CI compatibility)
     --debug                Enable debug output
     --help                 Display this help message
 
@@ -118,31 +131,39 @@ parse_arguments() {
         usage
     fi
     
-    # Get cluster size or config file
-    case "$1" in
+    # Allow --config as first arg, or a positional size/config
+    case "${1:-}" in
+        --config)
+            CONFIG_FILE="${2:?Missing path after --config}"
+            CLUSTER_SIZE="custom"
+            validate_safe_path "$CONFIG_FILE" "$SCRIPT_DIR"
+            shift 2
+            ;;
         small|medium|large)
             CLUSTER_SIZE="$1"
             CONFIG_FILE="${TEMPLATES_DIR}/${1}-production.conf"
+            shift
             ;;
         --help|-h)
             usage
             ;;
         *)
-            if [[ -f "$1" ]]; then
+            if [[ -n "${1:-}" && -f "$1" ]]; then
                 CONFIG_FILE="$1"
                 CLUSTER_SIZE="custom"
-                # Validate config file path
                 validate_safe_path "$CONFIG_FILE" "$SCRIPT_DIR"
+                shift
             else
-                error_exit "Invalid cluster size or config file: $1"
+                error_exit "Invalid cluster size or config file: ${1:-<none>}"
             fi
             ;;
     esac
-    shift
     
     # Parse options
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --config)
+                CONFIG_FILE="$2"; validate_safe_path "$CONFIG_FILE" "$SCRIPT_DIR"; shift 2 ;;
             --index-name)
                 INDEX_NAME="$2"
                 validate_index_name "$INDEX_NAME"
@@ -173,6 +194,10 @@ parse_arguments() {
             --force)
                 FORCE_DEPLOY=true
                 shift
+                ;;
+            --mode)
+                # accepted for CI compatibility; no-op here
+                shift 2
                 ;;
             --debug)
                 DEBUG_MODE=true
@@ -285,6 +310,38 @@ load_configuration() {
         log_message WARNING "Could not set permissions on active.conf"
     
     log_message SUCCESS "Configuration loaded and validated"
+}
+
+# Generate docker-compose.yml from current environment/config
+generate_compose() {
+    if declare -F generate_compose_file >/dev/null 2>&1; then
+        log_message INFO "Generating docker-compose.yml from configuration"
+        # Ensure ENABLE_SPLUNK and ENABLE_MONITORING are exported if set
+        : "${ENABLE_SPLUNK:=true}"
+        : "${ENABLE_MONITORING:=${NO_MONITORING:+false}}"
+        export ENABLE_SPLUNK ENABLE_MONITORING
+        # Compose generator relies on versions.env and various envs loaded via config
+        generate_compose_file "${SCRIPT_DIR}/docker-compose.yml" || \
+            error_exit "Failed to generate docker-compose.yml"
+        chmod 600 "${SCRIPT_DIR}/docker-compose.yml" || true
+        log_message SUCCESS "Compose file generated"
+    else
+        log_message WARNING "Compose generator not available; assuming docker-compose.yml exists"
+    fi
+}
+
+# Optionally generate monitoring configs if monitoring is enabled
+prepare_monitoring_configs() {
+    if [[ "${ENABLE_MONITORING:-true}" == "true" ]] && [[ "${NO_MONITORING}" != "true" ]]; then
+        local gen_mc="${SCRIPT_DIR}/generate-monitoring-config.sh"
+        if [[ -x "$gen_mc" ]]; then
+            log_message INFO "Generating monitoring configs"
+            "$gen_mc" --yes --splunk-indexers "${INDEXER_COUNT}" --splunk-search-heads "${SEARCH_HEAD_COUNT}" || \
+                log_message WARNING "Monitoring config generation reported issues"
+        else
+            log_message WARNING "generate-monitoring-config.sh not found or not executable"
+        fi
+    fi
 }
 
 # Generate or validate credentials
@@ -514,6 +571,12 @@ main() {
     # Handle credentials
     handle_credentials
     
+    # Generate compose file
+    generate_compose
+
+    # Prepare monitoring configs (if enabled)
+    prepare_monitoring_configs
+
     # Deploy cluster
     deploy_cluster
     

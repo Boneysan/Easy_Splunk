@@ -19,8 +19,13 @@ readonly MAX_CHECK_ATTEMPTS=3
 readonly CHECK_TIMEOUT=30
 readonly RECOVERY_WAIT=10
 readonly SPLUNK_MGMT_PORT=8089
-readonly SPLUNK_WEB_PORT=8000
-readonly SPLUNK_SEARCH_PORT=8001
+# Allow override from config/active.conf or environment
+if [[ -f "${CONFIG_FILE}" ]]; then
+    # shellcheck source=/dev/null
+    source "${CONFIG_FILE}" || true
+fi
+: "${SPLUNK_WEB_PORT:=8000}"
+: "${SPLUNK_SEARCH_PORT:=8001}"
 readonly PROMETHEUS_PORT=9090
 readonly GRAFANA_PORT=3000
 

@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/platform-helpers.sh
@@ -301,4 +300,3 @@ export -f platform_security_summary
 
 # Define version
 PLATFORM_HELPERS_VERSION="1.0.0"
-```

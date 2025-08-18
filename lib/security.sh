@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # lib/security.sh
@@ -775,4 +774,3 @@ export -f generate_random_password validate_password_strength write_secret_file 
 
 # Define version
 SECURITY_VERSION="1.0.0"
-```
