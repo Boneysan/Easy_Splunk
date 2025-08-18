@@ -164,6 +164,9 @@ parse_arguments() {
         case "$1" in
             --config)
                 CONFIG_FILE="$2"; validate_safe_path "$CONFIG_FILE" "$SCRIPT_DIR"; shift 2 ;;
+            --config-file)
+                # legacy alias used in older tests
+                CONFIG_FILE="$2"; validate_safe_path "$CONFIG_FILE" "$SCRIPT_DIR"; shift 2 ;;
             --index-name)
                 INDEX_NAME="$2"
                 validate_index_name "$INDEX_NAME"
@@ -198,6 +201,10 @@ parse_arguments() {
             --mode)
                 # accepted for CI compatibility; no-op here
                 shift 2
+                ;;
+            --skip-digests)
+                # legacy flag; digests are resolved elsewhere; ignore safely
+                shift
                 ;;
             --debug)
                 DEBUG_MODE=true

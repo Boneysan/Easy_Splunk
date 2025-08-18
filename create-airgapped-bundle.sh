@@ -1,7 +1,7 @@
 ```bash
 #!/usr/bin/env bash
 # ==============================================================================
-# create-airgapped.sh
+# create-airgapped-bundle.sh
 # Build a comprehensive air-gapped bundle (images + scripts + configs).
 #
 # Produces:
@@ -49,10 +49,10 @@ source "${SCRIPT_DIR}/lib/air-gapped.sh"
 
 # --- Version Checks ------------------------------------------------------------
 if [[ "${AIR_GAPPED_VERSION:-0.0.0}" < "1.0.0" ]]; then
-  die "${E_GENERAL}" "create-airgapped.sh requires air-gapped.sh version >= 1.0.0"
+  die "${E_GENERAL}" "create-airgapped-bundle.sh requires air-gapped.sh version >= 1.0.0"
 fi
 if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
-  die "${E_GENERAL}" "create-airgapped.sh requires security.sh version >= 1.0.0"
+  die "${E_GENERAL}" "create-airgapped-bundle.sh requires security.sh version >= 1.0.0"
 fi
 verify_versions_env || die "${E_INVALID_INPUT}" "versions.env contains invalid values"
 

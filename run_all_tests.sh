@@ -7,8 +7,8 @@
 #               lib/validation.sh, lib/runtime-detection.sh, lib/compose-generator.sh,
 #               lib/security.sh, lib/monitoring.sh, lib/parse-args.sh, lib/air-gapped.sh,
 #               lib/universal-forwarder.sh, lib/platform-helpers.sh, orchestrator.sh,
-#               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped.sh,
-#               airgapped-quickstart.sh, generate-selinx-helpers.sh, podman-docker-setup.sh,
+#               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped-bundle.sh,
+#               airgapped-quickstart.sh, generate-selinux-helpers.sh, podman-docker-setup.sh,
 #               start_cluster.sh, stop_cluster.sh, health_check.sh, backup_cluster.sh,
 #               restore_cluster.sh, generate-management-scripts.sh, generate-splunk-configs.sh,
 #               verify-bundle.sh, resolve-digests.sh, integration-guide.sh, install-prerequisites.sh,
@@ -298,7 +298,7 @@ run_test_script() {
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies
-    for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped.sh airgapped-quickstart.sh generate-selinx-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh verify-bundle.sh resolve-digests.sh integration-guide.sh install-prerequisites.sh deploy.sh; do
+  for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped-bundle.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh verify-bundle.sh resolve-digests.sh integration-guide.sh install-prerequisites.sh deploy.sh; do
       # shellcheck source=/dev/null
       source "${SCRIPT_DIR}/lib/${dep}"
     done
