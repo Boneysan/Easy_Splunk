@@ -10,6 +10,9 @@ set -euo pipefail
 IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
+# Set test mode to prevent core.sh from overriding our settings
+export CORE_TEST_MODE=1
+
 # Source dependencies
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/../../lib/core.sh"
@@ -22,14 +25,14 @@ TEST_FAILED=0
 # Helper to run a test
 run_test() {
   local test_name="$1"; shift
-  ((TEST_COUNT++))
+  TEST_COUNT=$((TEST_COUNT + 1))
   log_info "Running test: ${test_name}"
   if "$@"; then
     log_success "Test passed: ${test_name}"
-    ((TEST_PASSED++))
+    TEST_PASSED=$((TEST_PASSED + 1))
   else
     log_error "Test failed: ${test_name}"
-    ((TEST_FAILED++))
+    TEST_FAILED=$((TEST_FAILED + 1))
   fi
 }
 
@@ -37,20 +40,24 @@ run_test() {
 test_logging() {
   local output
   output=$(log_info "Test info" 2>&1)
-  [[ "$output" =~ "\[INFO\]" ]] || return 1
+  [[ "$output" =~ "INFO" ]] || return 1
   output=$(log_error "Test error" 2>&1)
-  [[ "$output" =~ "\[ERROR\]" ]] || return 1
+  [[ "$output" =~ "ERROR" ]] || return 1
   output=$(DEBUG=true log_debug "Test debug" 2>&1)
-  [[ "$output" =~ "\[DEBUG\]" ]] || return 1
+  [[ "$output" =~ "DEBUG" ]] || return 1
   return 0
 }
 
 # Test 2: Die function
 test_die() {
-  local output rc
-  output=$(die 42 "Test die" 2>&1 || true)
-  rc=$?
-  [[ "$output" =~ "Test die" ]] && [[ $rc -eq 42 ]]
+  local output
+  # Test die function in a subshell to prevent terminating this script
+  if output=$(bash -c 'source lib/core.sh; die 42 "Test die"' 2>&1); then
+    return 1  # Should not succeed
+  else
+    local rc=$?
+    [[ "$output" =~ "Test die" ]] && [[ $rc -eq 42 ]]
+  fi
 }
 
 # Test 3: System info
@@ -97,3 +104,4 @@ run_test "Cleanup management" test_cleanup
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
+[[ ${TEST_FAILED} -eq 0 ]]
