@@ -4,9 +4,18 @@
 # Input validation and sanitization helpers to prevent injection and misconfigs.
 #
 # Dependencies: lib/error-handling.sh
-# Required by: Any script Validators:
-  cluster_size <size>        - Validat    cmd="$1"
+# ==============================================================================
+
+# Main validator function
+main() {
+    if [[ $# -lt 1 ]]; then
+        show_help
+        exit 1
+    fi
+    
+    local cmd="$1"
     shift
+    
     case "$cmd" in
         cluster_size) validate_cluster_size "$1" ;;
         index_name) validate_index_name "$1" ;;
@@ -19,8 +28,17 @@
         input) validate_input "$1" "$2" "${3:-}" ;;
         sql) validate_sql_input "$1" ;;
         url) validate_url "$1" ;;
+        --help|-h) show_help; exit 0 ;;
         *) error_exit "Unknown validator. Use --help for usage information." ;;
-    esace (small, medium, large)
+    esac
+}
+
+show_help() {
+    cat << 'EOF'
+Usage: input_validator.sh <command> [arguments]
+
+Validators:
+  cluster_size <size>        - Validate cluster size (small, medium, large)
   index_name <n>            - Validate Splunk index name
   hostname <host>           - Validate hostname (RFC 1123)
   sanitize <value>          - Sanitize configuration value
@@ -48,6 +66,8 @@ Examples:
   $0 port 8089
   $0 input 123 uint
   $0 sql "user_name"
+EOF
+}
   $0 url "https://example.com"
   $0 safe_path "/path/to/file" "/base/dir" validation
 # Version: 1.0.0

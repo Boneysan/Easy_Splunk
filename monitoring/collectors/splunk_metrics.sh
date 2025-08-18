@@ -73,6 +73,14 @@ collect_splunk_metrics() {
         -H "Content-Type: application/json" | \
     parse_license_metrics "$timestamp" "$splunk_host"
 }
+
+# Main collection function
+collect_all_metrics() {
+    local splunk_host="$1"
+    local credentials="$2"
+    local timestamp="$3"
+    local output_file="$4"
+    
     log_info "Collecting license metrics..."
     collect_license_metrics "${splunk_host}" "${credentials}" "${timestamp}" >> "${output_file}"
     

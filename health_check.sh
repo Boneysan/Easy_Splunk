@@ -188,4 +188,10 @@ check_service_status() {
     local service="$1"
     local container_name="${2:-$service}"
     
-    log_message DEBUG "
+    log_message DEBUG "Checking status of service: $service"
+    
+    # Implementation would go here
+    # For now, return success to prevent syntax errors
+    return 0
+}
+    

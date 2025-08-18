@@ -231,10 +231,10 @@ test_config_sanitization() {
   local -A test_cases=(
     ["normal_value"]="normal_value"
     ["has space"]="has space"
-    ['has"quote']='has\"quote'
-    ['has;semicolon']='hassemicolon'
-    ['has`backtick']='hasbacktick'
-    ['has$dollar']='hasdollar'
+    ["has\"quote"]="has\\\"quote"
+    ["has;semicolon"]="hassemicolon"
+    ["has\`backtick"]="hasbacktick"
+    ["has\$dollar"]="hasdollar"
   )
 
   for input in "${!test_cases[@]}"; do
