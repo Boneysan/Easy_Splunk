@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# =============================================================================__check_podman_socket() {
-  # Prefer Podman's connection list; fall back to well-known sockets
-  if command -v podman >/dev/null 2>&1; then
-    if timeout 10s podman system connection ls --format '{{.Default}} {{.URI}}' 2>/dev/null | grep -qE '^true .*podman\.sock'; then
-      PODMAN_HAS_SOCKET=1
-      return
-    fi/runtime-detection.sh
+# ==============================================================================
+# lib/runtime-detection.sh
 # Detect container runtime and compose implementation; expose a unified runner.
 #
 # Preference order:
@@ -328,9 +323,9 @@ detect_container_runtime() {
   if command -v detect_container_runtime >/dev/null 2>&1; then
     CONTAINER_RUNTIME="$(detect_container_runtime)" || die "${E_MISSING_DEP}" "No container runtime detected"
   else
-    if command -v podman >/dev/null 2>&1 && timeout 10s podman info >/dev/null 2>&1; then
+    if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
       CONTAINER_RUNTIME="podman"
-    elif command -v docker >/dev/null 2>&1 && timeout 10s docker info >/dev/null 2>&1; then
+    elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
       CONTAINER_RUNTIME="docker"
     else
       die "${E_MISSING_DEP}" "No container runtime found. Install Podman (preferred) or Docker."
