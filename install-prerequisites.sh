@@ -433,7 +433,7 @@ install_on_macos() {
       brew update
       brew install --cask docker
       log_warn "Start Docker Desktop from /Applications before continuing."
-      if ! docker info >/dev/null 2>&1; then
+      if ! timeout 10s docker info >/dev/null 2>&1; then
         log_error "Docker Desktop not running. Start it from /Applications and retry."
         return 1
       fi
@@ -476,7 +476,7 @@ verify_installation_detailed() {
 
   case "${CONTAINER_RUNTIME}" in
     podman)
-      podman info >/dev/null 2>&1 || { log_error "Podman info command failed"; return 1; }
+      timeout 10s podman info >/dev/null 2>&1 || { log_error "Podman info command failed"; return 1; }
       if has_capability "secrets"; then
         log_success "Podman Compose supports secrets"
       else
@@ -487,7 +487,7 @@ verify_installation_detailed() {
       fi
       ;;
     docker)
-      docker info >/dev/null 2>&1 || { log_error "Docker info command failed - daemon may not be running"; return 1; }
+      timeout 10s docker info >/dev/null 2>&1 || { log_error "Docker info command failed - daemon may not be running"; return 1; }
       if groups | grep -q '\bdocker\b'; then
         log_success "User is in docker group"
       else

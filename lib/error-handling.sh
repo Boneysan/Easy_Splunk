@@ -593,8 +593,8 @@ validate_container_runtime() {
         fi
     fi
     
-    # Verify runtime is functional
-    if ! $runtime info &>/dev/null; then
+    # Verify runtime is functional with timeout
+    if ! timeout 10s $runtime info &>/dev/null; then
         error_exit "Container runtime '$runtime' is not running or accessible"
     fi
     
