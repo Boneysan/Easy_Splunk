@@ -27,7 +27,12 @@ fi
 if [[ "${ERROR_HANDLING_VERSION:-0.0.0}" < "1.0.3" ]]; then
   die "${E_GENERAL}" "parse-args.sh requires error-handling.sh version >= 1.0.3"
 fi
-[[ -f versions.env ]] && source versions.env || die "${E_INVALID_INPUT}" "versions.env required"
+if [[ -f versions.env ]]; then
+  # Normalize potential CRLF line endings when sourcing
+  source <(sed 's/\r$//' versions.env)
+else
+  die "${E_INVALID_INPUT}" "versions.env required"
+fi
 
 # ---- Defaults (honor pre-set env; otherwise set) --------------------------------
 : "${APP_PORT:=8080}"

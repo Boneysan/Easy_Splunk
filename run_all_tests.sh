@@ -18,12 +18,12 @@
 # --- Strict Mode & Setup --------------------------------------------------------
 set -eEuo pipefail
 IFS=$'\n\t'
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # --- Source Core Dependencies ---------------------------------------------------
 # shellcheck source=lib/core.sh
-source "${SCRIPT_DIR}/lib/core.sh"
+source "${REPO_ROOT}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
-source "${SCRIPT_DIR}/lib/error-handling.sh"
+source "${REPO_ROOT}/lib/error-handling.sh"
 
 # --- Main Functions ----------------------------------------------------------
 main() {
@@ -71,40 +71,6 @@ Options:
 EOF
 }
 
-# --- Parse Arguments -----------------------------------------------------------
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -v|--verbose)
-            VERBOSE=true
-            shift
-            ;;
-        -f|--filter)
-            TEST_FILTER="$2"
-            shift 2
-            ;;
-        -p|--performance)
-            RUN_PERFORMANCE_TESTS=true
-            shift
-            ;;
-        -s|--skip-long)
-            SKIP_LONG_TESTS=true
-            shift
-            ;;
-        --skip-security)
-            SKIP_SECURITY_SCAN=true
-            shift
-            ;;
-        -h|--help)
-            print_usage
-            exit 0
-            ;;
-        *)
-            log_error "Unknown option: $1"
-            print_usage
-            exit 1
-            ;;
-    esac
-done
 # --- Defaults / Flags -----------------------------------------------------------
 VERBOSE=false
 TEST_FILTER=""
@@ -116,7 +82,7 @@ SKIP_SECURITY_SCAN=false
 run_unit_tests() {
     log_section "Running Unit Tests"
     
-    local unit_tests_dir="${SCRIPT_DIR}/tests/unit"
+  local unit_tests_dir="${REPO_ROOT}/tests/unit"
     local test_files=()
     
     while IFS= read -r -d '' file; do
@@ -145,7 +111,7 @@ run_integration_tests() {
     # Run cluster size tests
     if ! [[ "${SKIP_LONG_TESTS}" == "true" ]]; then
         log_info "Running cluster size tests..."
-        if ! "${SCRIPT_DIR}/tests/integration/test_cluster_sizes.sh"; then
+      if ! "${REPO_ROOT}/tests/integration/test_cluster_sizes.sh"; then
             log_error "Cluster size tests failed"
             return 1
         fi
@@ -155,7 +121,7 @@ run_integration_tests() {
     
     # Run monitoring stack tests
     log_info "Running monitoring stack tests..."
-    if ! "${SCRIPT_DIR}/tests/integration/test_monitoring_stack.sh"; then
+  if ! "${REPO_ROOT}/tests/integration/test_monitoring_stack.sh"; then
         log_error "Monitoring stack tests failed"
         return 1
     fi
@@ -163,7 +129,7 @@ run_integration_tests() {
     # Run failure scenario tests
     if ! [[ "${SKIP_LONG_TESTS}" == "true" ]]; then
         log_info "Running failure scenario tests..."
-        if ! "${SCRIPT_DIR}/tests/integration/test_failure_scenarios.sh"; then
+  if ! "${REPO_ROOT}/tests/integration/test_failure_scenarios.sh"; then
             log_error "Failure scenario tests failed"
             return 1
         fi
@@ -183,7 +149,7 @@ run_performance_tests() {
     
     log_section "Running Performance Tests"
     
-    if ! "${SCRIPT_DIR}/tests/performance/test_regression.sh"; then
+  if ! "${REPO_ROOT}/tests/performance/test_regression.sh"; then
         log_error "Performance regression tests failed"
         return 1
     fi
@@ -200,7 +166,7 @@ run_security_scan() {
     
     log_section "Running Security Vulnerability Scan"
     
-    if ! "${SCRIPT_DIR}/tests/security/security_scan.sh"; then
+  if ! "${REPO_ROOT}/tests/security/security_scan.sh"; then
         log_error "Security vulnerability scan failed"
         return 1
     fi
@@ -217,9 +183,21 @@ while [[ $# -gt 0 ]]; do
       VERBOSE=true
       shift
       ;;
-    --filter)
+    -f|--filter)
       TEST_FILTER="${2:?filter required}"
       shift 2
+      ;;
+    -p|--performance)
+      RUN_PERFORMANCE_TESTS=true
+      shift
+      ;;
+    -s|--skip-long)
+      SKIP_LONG_TESTS=true
+      shift
+      ;;
+    --skip-security)
+      SKIP_SECURITY_SCAN=true
+      shift
       ;;
     --unit-only)
       RUN_INTEGRATION=false
@@ -264,12 +242,12 @@ INTEGRATION_TEST_SCRIPTS=()
 if is_true "${RUN_UNIT}"; then
   while IFS= read -r script; do
     UNIT_TEST_SCRIPTS+=("$script")
-  done < <(find "${SCRIPT_DIR}/tests/unit" -type f -name "test_*.sh" | sort)
+  done < <(find "${REPO_ROOT}/tests/unit" -type f -name "test_*.sh" | sort)
 fi
 if is_true "${RUN_INTEGRATION}"; then
   while IFS= read -r script; do
     INTEGRATION_TEST_SCRIPTS+=("$script")
-  done < <(find "${SCRIPT_DIR}/tests/integration" -type f -name "test_*.sh" | sort)
+  done < <(find "${REPO_ROOT}/tests/integration" -type f -name "test_*.sh" | sort)
 fi
 # Filter test scripts if specified
 if [[ -n "${TEST_FILTER}" ]]; then
@@ -280,9 +258,6 @@ if [[ -n "${TEST_FILTER}" ]]; then
     fi
   done
   UNIT_TEST_SCRIPTS=("${filtered_unit_scripts[@]}")
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
 fi
 # Global test counters
 TOTAL_TESTS=0
@@ -294,17 +269,26 @@ run_test_script() {
   local script_name
   script_name=$(basename "${script}")
   log_info "Running test script: ${script_name} ($(date)) at ${script}"
+  # Define step stubs if not present
+  type begin_step >/dev/null 2>&1 || begin_step() { :; }
+  type complete_step >/dev/null 2>&1 || complete_step() { :; }
   begin_step "test_${script_name}"
   # Run in a subshell to avoid state pollution
   (
-    # Source dependencies
-  for dep in core.sh error-handling.sh versions.sh validation.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh parse-args.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped-bundle.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh verify-bundle.sh resolve-digests.sh integration-guide.sh install-prerequisites.sh deploy.sh; do
+    # Source dependencies (ordered to satisfy guards); exclude non-existent lib/parse-args.sh
+    for dep in core.sh error-handling.sh validation.sh versions.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh; do
       # shellcheck source=/dev/null
-      source "${SCRIPT_DIR}/lib/${dep}"
+      source "${REPO_ROOT}/lib/${dep}"
     done
-    if [[ -f "${SCRIPT_DIR}/versions.env" ]]; then
+    # Source top-level scripts that are not under lib
+  for top in orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped-bundle.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh verify-bundle.sh resolve-digests.sh integration-guide.sh install-prerequisites.sh deploy.sh parse-args.sh; do
       # shellcheck source=/dev/null
-      source "${SCRIPT_DIR}/versions.env"
+      source "${REPO_ROOT}/${top}"
+    done
+    if [[ -f "${REPO_ROOT}/versions.env" ]]; then
+      # shellcheck source=/dev/null
+      # Normalize CRLF if any by filtering through sed in a subshell
+      source <(sed 's/\r$//' "${REPO_ROOT}/versions.env")
     else
       log_error "versions.env not found"
       exit 1
@@ -385,7 +369,7 @@ EOF
   log_info "🚀 Starting test suite ($(date))..."
   # Validate test scripts exist
   if [[ ${#UNIT_TEST_SCRIPTS[@]} -eq 0 && ${#INTEGRATION_TEST_SCRIPTS[@]} -eq 0 ]]; then
-    log_error "No test scripts found in ${SCRIPT_DIR}/tests/unit or ${SCRIPT_DIR}/tests/integration"
+  log_error "No test scripts found in ${REPO_ROOT}/tests/unit or ${REPO_ROOT}/tests/integration"
     exit 1
   fi
   # List unit tests

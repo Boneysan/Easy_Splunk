@@ -45,14 +45,19 @@ fi
 if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
   die "${E_GENERAL}" "lib/runtime-detection.sh requires core.sh version >= 1.0.0"
 fi
-if command -v with_retry >/dev/null 2>&1; then
-  source error-handling.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/error-handling.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/error-handling.sh"
 fi
-if command -v detect_container_runtime >/dev/null 2>&1; then
-  source validation.sh
+if [[ -f "${SCRIPT_DIR}/validation.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/validation.sh"
 fi
-if [[ -f versions.env ]]; then
-  source versions.env
+if [[ -f "${SCRIPT_DIR}/../versions.env" ]]; then
+  # shellcheck source=/dev/null
+  # Normalize potential CRLF line endings when sourcing
+  source <(sed 's/\r$//' "${SCRIPT_DIR}/../versions.env")
 fi
 
 # ---- Globals -------------------------------------------------------------------

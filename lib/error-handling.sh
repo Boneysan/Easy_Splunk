@@ -1,24 +1,32 @@
 #!/bin/bash
 # lib/error-handling.sh
+# Idempotent load guard and version
+if [[ -n "${ERROR_HANDLING_VERSION:-}" ]]; then
+    # Already loaded
+    return 0 2>/dev/null || true
+fi
+readonly ERROR_HANDLING_VERSION="1.0.2"
 # Complete error handling module with all validation functions for Easy_Splunk toolkit
 # Provides robust error handling, retry logic, and comprehensive validation functions
 
-# Strict error handling
-set -euo pipefail
-IFS=$'\n\t'
+"${__EH_STRICT_SET_ONCE:-false}" || {
+    set -euo pipefail
+    IFS=$'\n\t'
+    __EH_STRICT_SET_ONCE=true
+}
 
-# Color codes for output
-readonly RED='\033[0;31m'
-readonly YELLOW='\033[1;33m'
-readonly GREEN='\033[0;32m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m' # No Color
+# Color codes for output (define once)
+: "${RED:=\033[0;31m}"
+: "${YELLOW:=\033[1;33m}"
+: "${GREEN:=\033[0;32m}"
+: "${BLUE:=\033[0;34m}"
+: "${NC:=\033[0m}"
 
 # Global variables for error context
-SCRIPT_NAME="${0##*/}"
+SCRIPT_NAME="${SCRIPT_NAME:-${0##*/}}"
 LOG_FILE="${LOG_FILE:-/tmp/easy_splunk_$(date +%Y%m%d_%H%M%S).log}"
-CLEANUP_FUNCTIONS=()
-DEBUG_MODE="${DEBUG:-false}"
+: "${DEBUG_MODE:=${DEBUG:-false}}"
+declare -a CLEANUP_FUNCTIONS
 
 # Initialize logging
 init_logging() {
@@ -41,6 +49,64 @@ init_logging() {
         echo "User: $(whoami)"
         echo "==============================================="
     } >> "$LOG_FILE"
+}
+
+# Retry helper with exponential backoff
+# Usage: with_retry --retries N --base-delay S --max-delay S -- <cmd> [args...]
+with_retry() {
+    local retries=3 base_delay=1 max_delay=30
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --retries) retries="$2"; shift 2;;
+            --base-delay) base_delay="$2"; shift 2;;
+            --max-delay) max_delay="$2"; shift 2;;
+            --) shift; break;;
+            *) break;;
+        esac
+    done
+    local attempt=1 delay="$base_delay"
+    local cmd=("$@")
+    [[ ${#cmd[@]} -gt 0 ]] || { echo "with_retry: no command provided" >&2; return 2; }
+    while true; do
+        "${cmd[@]}" && return 0
+        local rc=$?
+        if (( attempt >= retries )); then
+            log_message ERROR "with_retry: command failed after ${attempt} attempts (rc=${rc}): ${cmd[*]}"
+            return "$rc"
+        fi
+        log_message WARNING "Attempt ${attempt} failed (rc=${rc}); retrying in ${delay}s..."
+        sleep "$delay"
+        attempt=$((attempt+1))
+        # Exponential backoff with cap
+        delay=$(( delay * 2 ))
+        (( delay > max_delay )) && delay="$max_delay"
+    done
+}
+
+# Atomically write stdin to a destination file with given mode (default 600)
+# Usage: echo "content" | atomic_write "/path/file" 600
+atomic_write() {
+    local dest="$1" mode="${2:-600}"
+    local dir tmp
+    [[ -n "$dest" ]] || { echo "atomic_write: missing destination" >&2; return 1; }
+    dir="$(dirname -- "$dest")"
+    tmp="${dir}/.$(basename -- "$dest").tmp.$$"
+    umask 077
+    # shellcheck disable=SC2094
+    cat >"$tmp" || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+    chmod "$mode" "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$dest"
+}
+
+# Atomically move an existing temp file into place with mode (default 600)
+# Usage: atomic_write_file "/tmp/tmpfile" "/path/file" 644
+atomic_write_file() {
+    local src="$1" dest="$2" mode="${3:-600}"
+    [[ -f "$src" && -n "$dest" ]] || { echo "atomic_write_file: invalid args" >&2; return 1; }
+    umask 077
+    install -m "$mode" "$src" "$dest" 2>/dev/null || {
+        cp -f "$src" "$dest" && chmod "$mode" "$dest" 2>/dev/null || true
+    }
 }
 
 # Logging function
@@ -68,7 +134,9 @@ log_message() {
             echo -e "${GREEN}[SUCCESS]${NC} $message"
             ;;
         DEBUG)
-            [[ "$DEBUG_MODE" == "true" ]] && echo -e "[DEBUG] $message" >&2
+            if [[ "${DEBUG_MODE:-false}" == "true" ]]; then
+                echo -e "[DEBUG] $message" >&2
+            fi
             ;;
         *)
             echo "$message"
@@ -122,7 +190,7 @@ error_exit() {
     local frame=0
     log_message ERROR "Stack trace:"
     while caller $frame >> "$LOG_FILE" 2>/dev/null; do
-        ((frame++))
+        frame=$((frame + 1))
     done
     
     # Log error details

@@ -39,7 +39,8 @@ source "${SCRIPT_DIR}/lib/error-handling.sh"
 # shellcheck source=lib/security.sh
 source "${SCRIPT_DIR}/lib/security.sh"
 # shellcheck source=versions.env
-source "${SCRIPT_DIR}/versions.env"
+# Normalize potential CRLF line endings when sourcing
+source <(sed 's/\r$//' "${SCRIPT_DIR}/versions.env")
 # shellcheck source=lib/versions.sh
 source "${SCRIPT_DIR}/lib/versions.sh"
 # shellcheck source=lib/runtime-detection.sh

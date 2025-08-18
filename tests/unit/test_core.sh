@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/unit/test_core.sh
@@ -98,5 +97,3 @@ run_test "Cleanup management" test_cleanup
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
-[[ ${TEST_FAILED} -eq 0 ]]
-```

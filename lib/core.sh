@@ -27,6 +27,10 @@
 set -euo pipefail
 
 # --- Version Information -------------------------------------------------------
+# Idempotent load guard
+if [[ -n "${CORE_VERSION:-}" ]]; then
+    return 0 2>/dev/null || true
+fi
 readonly CORE_VERSION="1.0.0"
 
 # --- Logging & Colors ----------------------------------------------------------

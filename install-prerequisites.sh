@@ -32,7 +32,10 @@ source "${SCRIPT_DIR}/lib/validation.sh"
 # shellcheck source=lib/runtime-detection.sh
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 # shellcheck source=versions.env
-[[ -f "${SCRIPT_DIR}/versions.env" ]] && source "${SCRIPT_DIR}/versions.env"
+if [[ -f "${SCRIPT_DIR}/versions.env" ]]; then
+  # Normalize potential CRLF line endings when sourcing
+  source <(sed 's/\r$//' "${SCRIPT_DIR}/versions.env")
+fi
 
 # --- Dependency version check ---------------------------------------------------
 if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then

@@ -9,6 +9,12 @@
 # Version: 1.0.0
 # ==============================================================================
 
+# ---- Idempotent load guard -----------------------------------------------------
+if [[ -n "${MONITORING_LIB_VERSION:-}" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+MONITORING_LIB_VERSION="1.0.0"
+
 # ---- Dependency guard ----------------------------------------------------------
 if ! command -v log_info >/dev/null 2>&1 || ! command -v atomic_write >/dev/null 2>&1; then
   echo "FATAL: lib/core.sh and lib/error-handling.sh must be sourced before lib/monitoring.sh" >&2
@@ -24,9 +30,13 @@ fi
 : "${PROMETHEUS_EVAL_INTERVAL:=15s}"
 : "${PROMETHEUS_PORT:=9090}"
 
-# Source the secret helper if available
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly SECRET_HELPER="${SCRIPT_DIR}/secret-helper.sh"
+# Source the secret helper if available (avoid redefinition on repeated source)
+if [[ -z "${SCRIPT_DIR+x}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+if [[ -z "${SECRET_HELPER+x}" ]]; then
+  SECRET_HELPER="${SCRIPT_DIR}/secret-helper.sh"
+fi
 
 # Try to get Grafana password from secrets manager first
 if [[ -x "$SECRET_HELPER" ]]; then

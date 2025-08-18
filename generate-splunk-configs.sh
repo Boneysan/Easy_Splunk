@@ -246,4 +246,3 @@ main() {
 
 GENERATE_SPLUNK_CONFIGS_VERSION="1.0.0"
 main
-```

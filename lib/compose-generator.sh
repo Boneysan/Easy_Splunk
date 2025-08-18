@@ -22,19 +22,28 @@ fi
 if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
   die "${E_GENERAL}" "compose-generator.sh requires core.sh version >= 1.0.0"
 fi
-if [[ "${ERROR_HANDLING_VERSION:-0.0.0}" < "1.0.2" ]]; then
-  die "${E_GENERAL}" "compose-generator.sh requires error-handling.sh version >= 1.0.2"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/error-handling.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/error-handling.sh"
 fi
-[[ -f versions.env ]] && source versions.env || die "${E_INVALID_INPUT}" "versions.env required"
+# Load versions.env from repo root
+if [[ -f "${SCRIPT_DIR}/../versions.env" ]]; then
+  # shellcheck source=/dev/null
+  # Normalize potential CRLF line endings when sourcing
+  source <(sed 's/\r$//' "${SCRIPT_DIR}/../versions.env")
+else
+  die "${E_INVALID_INPUT}" "versions.env required"
+fi
 
 # Source the secret helper if available
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SECRET_HELPER="${SCRIPT_DIR}/secret-helper.sh"
 if [[ ! -x "$SECRET_HELPER" ]]; then
     log_warning "secret-helper.sh not found or not executable, secrets may use defaults"
 fi
 
 # Configuration defaults with environment override support
+: "${SECRETS_DIR:=./secrets}"
 : "${ENABLE_MONITORING:=false}"
 : "${ENABLE_HEALTHCHECKS:=true}"
 : "${ENABLE_SPLUNK:=false}"
