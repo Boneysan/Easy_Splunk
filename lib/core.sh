@@ -24,7 +24,10 @@
 # ==============================================================================
 
 # --- Strict Mode ---------------------------------------------------------------
-set -euo pipefail
+# Only set strict mode if not already set and not in test mode
+if [[ -z "${CORE_TEST_MODE:-}" ]]; then
+    set -euo pipefail
+fi
 
 # --- Version Information -------------------------------------------------------
 # Idempotent load guard

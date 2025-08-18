@@ -275,16 +275,13 @@ run_test_script() {
   begin_step "test_${script_name}"
   # Run in a subshell to avoid state pollution
   (
-    # Source dependencies (ordered to satisfy guards); exclude non-existent lib/parse-args.sh
+    # Source dependencies (ordered to satisfy guards)
     for dep in core.sh error-handling.sh validation.sh versions.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh; do
       # shellcheck source=/dev/null
       source "${REPO_ROOT}/lib/${dep}"
     done
-    # Source top-level scripts that are not under lib
-  for top in orchestrator.sh generate-credentials.sh generate-monitoring-config.sh create-airgapped-bundle.sh airgapped-quickstart.sh generate-selinux-helpers.sh podman-docker-setup.sh start_cluster.sh stop_cluster.sh health_check.sh backup_cluster.sh restore_cluster.sh generate-management-scripts.sh generate-splunk-configs.sh verify-bundle.sh resolve-digests.sh integration-guide.sh install-prerequisites.sh deploy.sh parse-args.sh; do
-      # shellcheck source=/dev/null
-      source "${REPO_ROOT}/${top}"
-    done
+    # Note: Not sourcing top-level scripts to avoid side effects during testing
+    # They should be tested individually, not sourced into the test environment
     if [[ -f "${REPO_ROOT}/versions.env" ]]; then
       # shellcheck source=/dev/null
       # Normalize CRLF if any by filtering through sed in a subshell
