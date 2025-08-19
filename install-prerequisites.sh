@@ -453,6 +453,42 @@ install_on_macos() {
   esac
 }
 
+# Compose wrapper function to abstract different compose implementations
+compose() {
+  local compose_cmd=""
+  
+  # Determine the correct compose command based on detected runtime
+  case "${CONTAINER_RUNTIME:-}" in
+    podman)
+      if command -v podman-compose >/dev/null 2>&1; then
+        compose_cmd="podman-compose"
+      elif podman compose version >/dev/null 2>&1; then
+        compose_cmd="podman compose"
+      else
+        log_error "No podman compose implementation found"
+        return 1
+      fi
+      ;;
+    docker)
+      if docker compose version >/dev/null 2>&1; then
+        compose_cmd="docker compose"
+      elif command -v docker-compose >/dev/null 2>&1; then
+        compose_cmd="docker-compose"
+      else
+        log_error "No docker compose implementation found"
+        return 1
+      fi
+      ;;
+    *)
+      log_error "Unknown container runtime: ${CONTAINER_RUNTIME:-unset}"
+      return 1
+      ;;
+  esac
+  
+  # Execute the compose command with provided arguments
+  $compose_cmd "$@"
+}
+
 # Verify installation with more detailed checks
 verify_installation_detailed() {
   log_info "Performing detailed installation verification..."
@@ -480,12 +516,14 @@ verify_installation_detailed() {
   case "${CONTAINER_RUNTIME}" in
     podman)
       timeout 10s podman info >/dev/null 2>&1 || { log_error "Podman info command failed"; return 1; }
-      if has_capability "secrets"; then
+      # Check secrets capability (Podman has limited secrets support)
+      if [[ "${COMPOSE_SUPPORTS_SECRETS:-}" == "true" ]]; then
         log_success "Podman Compose supports secrets"
       else
         log_warn "Podman Compose does not support secrets (using fallback implementation)"
       fi
-      if has_capability "rootless"; then
+      # Check if running in rootless mode
+      if [[ "${CONTAINER_ROOTLESS:-}" == "true" ]]; then
         log_info "Running in rootless mode - optimal for security"
       fi
       ;;
