@@ -270,14 +270,14 @@ validate_environment() {
     log_info "DEBUG: SCRIPT_DIR = '$SCRIPT_DIR'"
     validate_path "$CONFIG_FILE" "file"
     
-    # Check required directories exist
-    for dir in "$CONFIG_DIR" "$SCRIPTS_DIR"; do
-        validate_path "$dir" "directory"
-    done
-    
     # Create necessary directories if they don't exist
     mkdir -p "$CONFIG_DIR" || error_exit "Failed to create config directory"
     mkdir -p "$CREDS_DIR" || error_exit "Failed to create credentials directory"
+    
+    # Check required directories exist after creation
+    for dir in "$CONFIG_DIR" "$SCRIPTS_DIR"; do
+        validate_path "$dir" "directory"
+    done
     
     log_message SUCCESS "Environment validation completed"
 }

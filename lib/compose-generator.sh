@@ -22,22 +22,22 @@ fi
 if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
   die "${E_GENERAL}" "compose-generator.sh requires core.sh version >= 1.0.0"
 fi
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${SCRIPT_DIR}/error-handling.sh" ]]; then
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${LIB_DIR}/error-handling.sh" ]]; then
   # shellcheck source=/dev/null
-  source "${SCRIPT_DIR}/error-handling.sh"
+  source "${LIB_DIR}/error-handling.sh"
 fi
 # Load versions.env from repo root
-if [[ -f "${SCRIPT_DIR}/../versions.env" ]]; then
+if [[ -f "${LIB_DIR}/../versions.env" ]]; then
   # shellcheck source=/dev/null
   # Normalize potential CRLF line endings when sourcing
-  source <(sed 's/\r$//' "${SCRIPT_DIR}/../versions.env")
+  source <(sed 's/\r$//' "${LIB_DIR}/../versions.env")
 else
   die "${E_INVALID_INPUT}" "versions.env required"
 fi
 
 # Source the secret helper if available
-readonly SECRET_HELPER="${SCRIPT_DIR}/secret-helper.sh"
+readonly SECRET_HELPER="${LIB_DIR}/secret-helper.sh"
 if [[ ! -x "$SECRET_HELPER" ]]; then
     log_warning "secret-helper.sh not found or not executable, secrets may use defaults"
 fi
