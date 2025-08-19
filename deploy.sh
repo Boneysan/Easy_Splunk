@@ -265,9 +265,6 @@ validate_environment() {
     fi
     
     # Validate configuration file
-    log_info "DEBUG: CONFIG_FILE = '$CONFIG_FILE'"
-    log_info "DEBUG: TEMPLATES_DIR = '$TEMPLATES_DIR'"
-    log_info "DEBUG: SCRIPT_DIR = '$SCRIPT_DIR'"
     validate_path "$CONFIG_FILE" "file"
     
     # Create necessary directories if they don't exist
