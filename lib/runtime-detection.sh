@@ -1,11 +1,28 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Easy Splunk - Container Runtime Detection Library (Simplified)
+# Easy Splunk - Container Runtime Detection Library
 # ==============================================================================
+# Purpose: Detects container runtime and provides summary functions
+# Compatible with: RHEL 8, Ubuntu, Debian, CentOS, Rocky Linux
+# Dependencies: lib/core.sh must be sourced first
+# ==============================================================================
+
+# ---- Version and Guard ---------------------------------------------------------
+if [[ -n "${RUNTIME_DETECTION_VERSION:-}" ]]; then
+    # Already loaded
+    return 0 2>/dev/null || true
+fi
+readonly RUNTIME_DETECTION_VERSION="2.1.0"
 
 # ---- Global Variables ----------------------------------------------------------
 CONTAINER_RUNTIME=""
 COMPOSE_IMPL=""
+COMPOSE_SUPPORTS_SECRETS=""
+COMPOSE_SUPPORTS_HEALTHCHECK=""
+COMPOSE_SUPPORTS_PROFILES=""
+COMPOSE_SUPPORTS_BUILDKIT=""
+DOCKER_NETWORK_AVAILABLE=""
+CONTAINER_ROOTLESS=""
 
 # ---- Enhanced runtime summary function -----------------------------------------
 enhanced_runtime_summary() {
