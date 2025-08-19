@@ -521,7 +521,7 @@ compose() {
   case "${CONTAINER_RUNTIME:-}" in
     podman)
       # Prefer native podman compose over external podman-compose
-      if podman compose version >/dev/null 2>&1 && ! podman compose version 2>&1 | grep -q "external compose provider"; then
+      if podman compose version >/dev/null 2>&1 && ! podman compose version 2>&1 | grep -q "Executing external compose provider"; then
         compose_cmd="podman compose"
       elif podman compose version >/dev/null 2>&1; then
         # Falls back to external provider (podman-compose via podman compose)
