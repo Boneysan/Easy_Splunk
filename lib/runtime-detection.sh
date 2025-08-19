@@ -53,69 +53,114 @@ runtime_summary() {
   fi
 }
 
-# ---- Basic runtime detection that calls validation.sh function ----------------
+# ---- Container Runtime Detection -----------------------------------------------
 detect_container_runtime() {
   log_info "🔎 Detecting container runtime..."
   
-  # Use timeout with container runtime detection
+  # Clear previous detection results
+  CONTAINER_RUNTIME=""
+  COMPOSE_IMPL=""
+  COMPOSE_SUPPORTS_SECRETS=""
+  COMPOSE_SUPPORTS_HEALTHCHECK=""
+  COMPOSE_SUPPORTS_PROFILES=""
+  COMPOSE_SUPPORTS_BUILDKIT=""
+  DOCKER_NETWORK_AVAILABLE=""
+  CONTAINER_ROOTLESS=""
+  
+  # Check for Podman first (preferred on RHEL/CentOS)
   if command -v podman >/dev/null 2>&1 && timeout 10s podman info >/dev/null 2>&1; then
     CONTAINER_RUNTIME="podman"
-    COMPOSE_IMPL="podman-compose"
-    log_info "Detected: ${CONTAINER_RUNTIME}"
+    log_info "✓ Found Podman"
     
-    # Set some basic capability variables
+    # Determine compose implementation
+    if podman compose version >/dev/null 2>&1; then
+      COMPOSE_IMPL="podman-compose-native"
+      log_info "✓ Using native podman compose"
+    elif command -v podman-compose >/dev/null 2>&1; then
+      COMPOSE_IMPL="podman-compose"
+      log_info "✓ Using podman-compose (Python)"
+    else
+      COMPOSE_IMPL="podman-compose"
+      log_info "⚠ Podman found but no compose implementation detected"
+    fi
+    
+    # Set Podman-specific capabilities
     COMPOSE_SUPPORTS_SECRETS="limited"
     COMPOSE_SUPPORTS_HEALTHCHECK="true"
     COMPOSE_SUPPORTS_PROFILES="limited"
     COMPOSE_SUPPORTS_BUILDKIT="true"
     DOCKER_NETWORK_AVAILABLE="n/a"
     
-    # Check if rootless
+    # Check if running in rootless mode
     if podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null | grep -q "true"; then
       CONTAINER_ROOTLESS="true"
+      log_info "✓ Running in rootless mode"
     else
       CONTAINER_ROOTLESS="false"
+      log_info "✓ Running in rootful mode"
     fi
     
-    # Export variables for use by other scripts
-    export CONTAINER_RUNTIME COMPOSE_IMPL
-    export COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK
-    export COMPOSE_SUPPORTS_PROFILES COMPOSE_SUPPORTS_BUILDKIT
-    export DOCKER_NETWORK_AVAILABLE CONTAINER_ROOTLESS
-    
-    return 0
+  # Check for Docker
   elif command -v docker >/dev/null 2>&1 && timeout 10s docker info >/dev/null 2>&1; then
     CONTAINER_RUNTIME="docker"
-    COMPOSE_IMPL="docker-compose"
-    log_info "Detected: ${CONTAINER_RUNTIME}"
+    log_info "✓ Found Docker"
     
-    # Set some basic capability variables
+    # Determine compose implementation
+    if docker compose version >/dev/null 2>&1; then
+      COMPOSE_IMPL="docker-compose-v2"
+      log_info "✓ Using Docker Compose v2"
+    elif command -v docker-compose >/dev/null 2>&1; then
+      COMPOSE_IMPL="docker-compose"
+      log_info "✓ Using Docker Compose v1"
+    else
+      COMPOSE_IMPL="docker-compose"
+      log_info "⚠ Docker found but no compose implementation detected"
+    fi
+    
+    # Set Docker-specific capabilities
     COMPOSE_SUPPORTS_SECRETS="true"
     COMPOSE_SUPPORTS_HEALTHCHECK="true"
     COMPOSE_SUPPORTS_PROFILES="true"
     COMPOSE_SUPPORTS_BUILDKIT="true"
     DOCKER_NETWORK_AVAILABLE="true"
     
-    # Check if rootless
+    # Check if running in rootless mode
     if docker info 2>/dev/null | grep -q "rootless"; then
       CONTAINER_ROOTLESS="true"
+      log_info "✓ Running in rootless mode"
     else
       CONTAINER_ROOTLESS="false"
+      log_info "✓ Running with Docker daemon"
     fi
     
-    # Export variables for use by other scripts
-    export CONTAINER_RUNTIME COMPOSE_IMPL
-    export COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK
-    export COMPOSE_SUPPORTS_PROFILES COMPOSE_SUPPORTS_BUILDKIT
-    export DOCKER_NETWORK_AVAILABLE CONTAINER_ROOTLESS
-    
-    return 0
   else
     log_warn "No container runtime detected"
-    CONTAINER_RUNTIME=""
-    COMPOSE_IMPL=""
     return 1
   fi
+  
+  # Export variables for use by other scripts
+  export CONTAINER_RUNTIME COMPOSE_IMPL
+  export COMPOSE_SUPPORTS_SECRETS COMPOSE_SUPPORTS_HEALTHCHECK
+  export COMPOSE_SUPPORTS_PROFILES COMPOSE_SUPPORTS_BUILDKIT
+  export DOCKER_NETWORK_AVAILABLE CONTAINER_ROOTLESS
+  
+  log_info "✅ Detection complete: ${CONTAINER_RUNTIME}"
+  return 0
+}
+
+# ---- Validation Function -------------------------------------------------------
+validate_runtime_detection() {
+  if [[ -z "${CONTAINER_RUNTIME}" ]]; then
+    log_error "CONTAINER_RUNTIME not set - detection may have failed"
+    return 1
+  fi
+  
+  if [[ -z "${COMPOSE_IMPL}" ]]; then
+    log_warn "COMPOSE_IMPL not set - compose functionality may be limited"
+  fi
+  
+  log_info "✅ Runtime detection validation passed"
+  return 0
 }
 
 # ==============================================================================
