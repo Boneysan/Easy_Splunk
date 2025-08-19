@@ -1,8 +1,9 @@
-```markdown
 # Easy_Splunk
 
 A comprehensive shell-based orchestration toolkit for deploying, managing, and securing a containerized Splunk cluster on Docker or Podman.  
 Supports air-gapped environments, automated credential/TLS generation, integrated monitoring (Prometheus + Grafana), and hardened RHEL/Fedora deployments.
+
+**✅ Latest Update**: Fixed container runtime detection for RHEL 8, CentOS 8, Rocky Linux, and other enterprise distributions.
 
 ---
 
