@@ -71,11 +71,26 @@ detect_container_runtime() {
   if command -v podman >/dev/null 2>&1 && timeout 10s podman info >/dev/null 2>&1; then
     CONTAINER_RUNTIME="podman"
     log_info "✓ Found Podman"
+    log_info "DEBUG: About to check compose implementation"
     
-    # Determine compose implementation
-    if podman compose version >/dev/null 2>&1; then
+    # Determine compose implementation with preference for native
+    local compose_output
+    compose_output=$(podman compose version 2>&1)
+    local compose_exit_code=$?
+    
+    # Debug: check what we detected
+    if echo "$compose_output" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Executing external compose provider"; then
+      log_info "DEBUG: External provider detected in output"
+    else
+      log_info "DEBUG: No external provider detected in output"
+    fi
+    
+    if [[ $compose_exit_code -eq 0 ]] && ! echo "$compose_output" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Executing external compose provider"; then
       COMPOSE_IMPL="podman-compose-native"
       log_info "✓ Using native podman compose"
+    elif [[ $compose_exit_code -eq 0 ]]; then
+      COMPOSE_IMPL="podman-compose-delegated"
+      log_info "✓ Using podman compose (delegates to external provider)"
     elif command -v podman-compose >/dev/null 2>&1; then
       COMPOSE_IMPL="podman-compose"
       log_info "✓ Using podman-compose (Python)"
