@@ -2,24 +2,33 @@
 # deploy.sh - Complete deployment wrapper with comprehensive error handling
 # Main entry point for Easy_Splunk cluster deployment
 
-# Source error handling module and compose generator
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source core libraries first (required by other modules)
+source "${SCRIPT_DIR}/lib/core.sh" || {
+    echo "ERROR: Cannot load core library from lib/core.sh" >&2
+    exit 1
+}
+
+# Source error handling module
 source "${SCRIPT_DIR}/lib/error-handling.sh" || {
     echo "ERROR: Cannot load error handling module from lib/error-handling.sh" >&2
     exit 1
 }
-if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
-    # shellcheck source=lib/compose-generator.sh
-    source "${SCRIPT_DIR}/lib/compose-generator.sh" || {
-        echo "ERROR: Cannot load compose generator from lib/compose-generator.sh" >&2
-        exit 1
-    }
-else
-    log_message WARNING "compose-generator.sh not found; will skip compose generation"
-fi
 
 # Initialize error handling
 init_error_handling
+
+# Source compose generator after core libs are loaded
+if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
+    # shellcheck source=lib/compose-generator.sh
+    source "${SCRIPT_DIR}/lib/compose-generator.sh" || {
+        log_error "Cannot load compose generator from lib/compose-generator.sh"
+        exit 1
+    }
+else
+    log_warn "compose-generator.sh not found; will skip compose generation"
+fi
 
 # Configuration
 readonly DEFAULT_CLUSTER_SIZE="medium"
@@ -256,6 +265,9 @@ validate_environment() {
     fi
     
     # Validate configuration file
+    log_info "DEBUG: CONFIG_FILE = '$CONFIG_FILE'"
+    log_info "DEBUG: TEMPLATES_DIR = '$TEMPLATES_DIR'"
+    log_info "DEBUG: SCRIPT_DIR = '$SCRIPT_DIR'"
     validate_path "$CONFIG_FILE" "file"
     
     # Check required directories exist
