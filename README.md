@@ -40,13 +40,22 @@ A shell-based orchestration toolkit for deploying, managing, and securing a cont
 
 ## 🚀 Quick Start
 
+### **Supported Operating Systems**
+- ✅ **RHEL 8+** (Red Hat Enterprise Linux)
+- ✅ **CentOS 8+** / **Rocky Linux 8+** / **AlmaLinux 8+**
+- ✅ **Ubuntu 20.04+** / **Debian 10+**
+- ✅ **Fedora 35+**
+- ✅ **WSL2** (Windows Subsystem for Linux)
+
+### **Installation Steps**
+
 ```bash
 # 1) Clone and enter
 git clone https://github.com/Boneysan/Easy_Splunk.git
 cd Easy_Splunk
 
-# 2) Install prerequisites
-./install-prerequisites.sh
+# 2) Install prerequisites (automatically detects OS and installs container runtime)
+./install-prerequisites.sh --yes
 
 # 3) Generate credentials (admin user/secret, TLS as needed)
 ./generate-credentials.sh
