@@ -457,6 +457,9 @@ install_on_macos() {
 verify_installation_detailed() {
   log_info "Performing detailed installation verification..."
 
+  # Detect runtime first
+  detect_container_runtime || return 1
+
   # Validate installed runtime version
   case "${CONTAINER_RUNTIME}" in
     podman)
@@ -520,7 +523,11 @@ main() {
   log_info "Checking for existing container runtime..."
   if detect_container_runtime &>/dev/null; then
     log_success "✅ Prerequisites already satisfied."
-    enhanced_runtime_summary
+    if command -v enhanced_runtime_summary >/dev/null 2>&1; then
+      enhanced_runtime_summary
+    else
+      runtime_summary
+    fi
     exit 0
   fi
 
@@ -558,7 +565,11 @@ main() {
   log_info "🔁 Validating installation..."
   if verify_installation_detailed; then
     log_success "✅ Installation completed successfully!"
-    enhanced_runtime_summary
+    if command -v enhanced_runtime_summary >/dev/null 2>&1; then
+      enhanced_runtime_summary
+    else
+      runtime_summary
+    fi
 
     # Cancel rollback since installation succeeded
     if [[ "$ROLLBACK_ON_FAILURE" == "1" ]]; then
