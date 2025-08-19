@@ -154,7 +154,7 @@ detect_os_version() {
 
 detect_os_family() {
   case "$(get_os)" in
-    linux)
+    linux|wsl)
       if [[ -f /etc/debian_version ]]; then OS_FAMILY="debian"
       elif [[ -f /etc/redhat-release ]]; then OS_FAMILY="rhel"
       else OS_FAMILY="other"
