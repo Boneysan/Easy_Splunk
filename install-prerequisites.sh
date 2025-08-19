@@ -351,16 +351,42 @@ install_podman_rhel() {
   pkg_install "${pmgr}" curl git
   pkg_install "${pmgr}" podman podman-plugins || true
 
-  # Fallback: python podman-compose if native plugin missing
-  if ! podman compose -h >/dev/null 2>&1; then
-    log_warn "Native 'podman compose' not available; installing podman-compose (python) as fallback."
+  # Try to ensure native podman compose is available first
+  log_info "Checking for native podman compose support..."
+  
+  # Test for true native compose (not delegating to external tools)
+  if podman compose version 2>&1 | grep -q "external compose provider"; then
+    log_info "Podman is delegating to external compose provider, preferring native implementation..."
     
-    # Try package manager first
-    if ! pkg_install "${pmgr}" podman-compose; then
-      log_warn "podman-compose not available via ${pmgr}, trying pip3..."
+    # Try installing native compose packages for different distros
+    case "${OS_ID}" in
+      rhel|centos|fedora|rocky|almalinux)
+        # On RHEL/CentOS/Fedora, native compose is usually in podman-compose package or built-in
+        pkg_install "${pmgr}" podman-compose || true
+        ;;
+      debian|ubuntu)
+        # On Debian/Ubuntu, try podman-compose-*-dev packages or buildah
+        pkg_install "${pmgr}" buildah podman-docker || true
+        ;;
+    esac
+  fi
+  
+  # Check if we now have native compose (without external delegation)
+  if podman compose version >/dev/null 2>&1 && ! podman compose version 2>&1 | grep -q "external compose provider"; then
+    log_success "Native podman compose is available and preferred"
+  else
+    log_warn "Native podman compose not available; will use podman-compose as fallback"
+    
+    # Fallback: Install python podman-compose if not already available
+    if ! command -v podman-compose >/dev/null 2>&1; then
+      log_info "Installing podman-compose (Python) as fallback..."
       
-      # Install python3-pip if not available
-      pkg_install "${pmgr}" python3-pip || true
+      # Try package manager first
+      if ! pkg_install "${pmgr}" podman-compose; then
+        log_warn "podman-compose not available via ${pmgr}, trying pip3..."
+        
+        # Install python3-pip if not available
+        pkg_install "${pmgr}" python3-pip || true
       
       # Try installing via pip3
       if command -v pip3 >/dev/null 2>&1; then
