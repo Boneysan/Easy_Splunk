@@ -354,7 +354,22 @@ install_podman_rhel() {
   # Fallback: python podman-compose if native plugin missing
   if ! podman compose -h >/dev/null 2>&1; then
     log_warn "Native 'podman compose' not available; installing podman-compose (python) as fallback."
-    pkg_install "${pmgr}" podman-compose || true
+    
+    # Try package manager first
+    if ! pkg_install "${pmgr}" podman-compose; then
+      log_warn "podman-compose not available via ${pmgr}, trying pip3..."
+      
+      # Install python3-pip if not available
+      pkg_install "${pmgr}" python3-pip || true
+      
+      # Try installing via pip3
+      if command -v pip3 >/dev/null 2>&1; then
+        log_info "Installing podman-compose via pip3..."
+        pip3 install --user podman-compose || log_warn "Failed to install podman-compose via pip3"
+      else
+        log_warn "No pip3 available, podman-compose installation failed"
+      fi
+    fi
   fi
 
   # Enable rootless socket if available
@@ -495,6 +510,28 @@ verify_installation_detailed() {
 
   # Detect runtime first
   detect_container_runtime || return 1
+
+  # Set COMPOSE_COMMAND for compatibility with other scripts
+  case "${CONTAINER_RUNTIME}" in
+    podman)
+      if command -v podman-compose >/dev/null 2>&1; then
+        export COMPOSE_COMMAND="podman-compose"
+      elif podman compose version >/dev/null 2>&1; then
+        export COMPOSE_COMMAND="podman compose"
+      else
+        export COMPOSE_COMMAND="podman-compose"  # fallback
+      fi
+      ;;
+    docker)
+      if docker compose version >/dev/null 2>&1; then
+        export COMPOSE_COMMAND="docker compose"
+      elif command -v docker-compose >/dev/null 2>&1; then
+        export COMPOSE_COMMAND="docker-compose"
+      else
+        export COMPOSE_COMMAND="docker-compose"  # fallback
+      fi
+      ;;
+  esac
 
   # Validate installed runtime version
   case "${CONTAINER_RUNTIME}" in
