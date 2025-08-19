@@ -365,7 +365,25 @@ install_podman_rhel() {
       # Try installing via pip3
       if command -v pip3 >/dev/null 2>&1; then
         log_info "Installing podman-compose via pip3..."
-        pip3 install --user podman-compose || log_warn "Failed to install podman-compose via pip3"
+        # Install without --user when running as root for system-wide availability
+        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+          pip3 install podman-compose || log_warn "Failed to install podman-compose via pip3"
+        else
+          pip3 install --user podman-compose || log_warn "Failed to install podman-compose via pip3"
+        fi
+        
+        # Re-detect runtime capabilities after installation
+        if command -v podman-compose >/dev/null 2>&1; then
+          log_success "podman-compose successfully installed and available"
+          # Update PATH for current session if needed
+          hash -r 2>/dev/null || true
+          
+          # Re-run runtime detection to update compose capabilities
+          log_info "Re-detecting runtime capabilities after installation..."
+          detect_container_runtime || log_warn "Runtime re-detection failed"
+        else
+          log_warn "podman-compose installed but not in PATH"
+        fi
       else
         log_warn "No pip3 available, podman-compose installation failed"
       fi
