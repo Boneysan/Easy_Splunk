@@ -639,9 +639,14 @@ verify_installation_detailed() {
       ;;
   esac
 
-  # Test compose command
-  if ! compose version >/dev/null 2>&1; then
-    log_error "Compose command failed"
+  # Test compose command using the detected COMPOSE_COMMAND
+  if [[ -n "${COMPOSE_COMMAND:-}" ]]; then
+    if ! ${COMPOSE_COMMAND} version >/dev/null 2>&1; then
+      log_error "Compose command failed: ${COMPOSE_COMMAND}"
+      return 1
+    fi
+  else
+    log_error "No compose command available for testing"
     return 1
   fi
 
