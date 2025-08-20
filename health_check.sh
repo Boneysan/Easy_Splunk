@@ -183,15 +183,127 @@ check_container_runtime() {
     fi
 }
 
-# Check service status with timeout
+# Check service status with timeout and enhanced error reporting
 check_service_status() {
     local service="$1"
     local container_name="${2:-$service}"
+    local port="${3:-}"
+    local protocol="${4:-http}"
     
     log_message DEBUG "Checking status of service: $service"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     
-    # Implementation would go here
-    # For now, return success to prevent syntax errors
+    # Check if container is running
+    local container_status=""
+    if command -v docker &>/dev/null; then
+        container_status=$(docker ps --filter "name=${container_name}" --format "{{.Status}}" 2>/dev/null | head -n1)
+    elif command -v podman &>/dev/null; then
+        container_status=$(podman ps --filter "name=${container_name}" --format "{{.Status}}" 2>/dev/null | head -n1)
+    fi
+    
+    if [[ -z "$container_status" ]]; then
+        log_message ERROR "Container $container_name is not running"
+        enhanced_error "SERVICE_DOWN" \
+            "Service $service container is not running" \
+            "$LOG_FILE" \
+            "Check container status: \${CONTAINER_RUNTIME} ps -a | grep $container_name" \
+            "Check container logs: \${CONTAINER_RUNTIME} logs $container_name" \
+            "Restart service: \${COMPOSE_CMD} restart $service" \
+            "Check resource usage: free -h && df -h" \
+            "Verify image exists: \${CONTAINER_RUNTIME} images | grep splunk"
+        SERVICE_STATUS["$service"]="DOWN"
+        FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        return 1
+    fi
+    
+    # Check port connectivity if provided
+    if [[ -n "$port" ]]; then
+        local host="localhost"
+        if ! timeout 10s bash -c "cat < /dev/null > /dev/tcp/$host/$port" 2>/dev/null; then
+            log_message ERROR "Service $service port $port is not accessible"
+            enhanced_network_error "$service" "$host" "$port"
+            SERVICE_STATUS["$service"]="PORT_UNREACHABLE"
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            return 1
+        fi
+        
+        # HTTP/HTTPS specific checks
+        if [[ "$protocol" == "http" || "$protocol" == "https" ]]; then
+            local url="${protocol}://${host}:${port}"
+            if ! timeout "$CHECK_TIMEOUT" curl -f -s -k "$url" >/dev/null 2>&1; then
+                log_message ERROR "Service $service HTTP endpoint is not responding"
+                enhanced_network_error "$service" "$host" "$port"
+                SERVICE_STATUS["$service"]="HTTP_ERROR"
+                WARNING_CHECKS=$((WARNING_CHECKS + 1))
+                return 1
+            fi
+        fi
+    fi
+    
+    log_message SUCCESS "Service $service is healthy"
+    SERVICE_STATUS["$service"]="HEALTHY"
+    PASSED_CHECKS=$((PASSED_CHECKS + 1))
     return 0
+}
+
+# Enhanced service health check with comprehensive reporting
+check_all_services() {
+    log_message INFO "Performing comprehensive service health checks..."
+    
+    # Initialize service mappings
+    local -A service_ports=(
+        ["splunk-cluster-master"]="$SPLUNK_WEB_PORT"
+        ["splunk-search-head"]="$SPLUNK_SEARCH_PORT"
+        ["splunk-indexer"]="$SPLUNK_WEB_PORT"
+        ["prometheus"]="$PROMETHEUS_PORT"
+        ["grafana"]="$GRAFANA_PORT"
+    )
+    
+    local -A service_protocols=(
+        ["splunk-cluster-master"]="https"
+        ["splunk-search-head"]="https"
+        ["splunk-indexer"]="https"
+        ["prometheus"]="http"
+        ["grafana"]="http"
+    )
+    
+    # Check each service
+    for service in "${!service_ports[@]}"; do
+        if [[ -n "$SPECIFIC_SERVICE" && "$service" != "$SPECIFIC_SERVICE" ]]; then
+            continue
+        fi
+        
+        local port="${service_ports[$service]}"
+        local protocol="${service_protocols[$service]}"
+        
+        log_message INFO "Checking $service..."
+        check_service_status "$service" "$service" "$port" "$protocol"
+    done
+    
+    # Generate summary report
+    generate_health_report
+}
+
+# Generate comprehensive health report
+generate_health_report() {
+    log_message INFO ""
+    log_message INFO "=== HEALTH CHECK SUMMARY ==="
+    log_message INFO "Total Checks: $TOTAL_CHECKS"
+    log_message SUCCESS "Passed: $PASSED_CHECKS"
+    log_message WARNING "Warnings: $WARNING_CHECKS"
+    log_message ERROR "Failed: $FAILED_CHECKS"
+    log_message INFO ""
+    
+    if [[ $FAILED_CHECKS -gt 0 ]]; then
+        log_message ERROR "❌ Health check FAILED with $FAILED_CHECKS critical issues"
+        log_message INFO "Enhanced troubleshooting information provided above"
+        return 1
+    elif [[ $WARNING_CHECKS -gt 0 ]]; then
+        log_message WARNING "⚠️  Health check PASSED with $WARNING_CHECKS warnings"
+        return 0
+    else
+        log_message SUCCESS "✅ Health check PASSED - all services healthy"
+        return 0
+    fi
 }
     
