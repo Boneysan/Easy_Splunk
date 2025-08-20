@@ -520,8 +520,12 @@ compose() {
   # Determine the correct compose command based on detected runtime
   case "${CONTAINER_RUNTIME:-}" in
     podman)
+      # Capture output once to avoid inconsistent results
+      local compose_output
+      compose_output=$(podman compose version 2>&1)
+      
       # Prefer native podman compose over external podman-compose
-      if podman compose version >/dev/null 2>&1 && ! podman compose version 2>&1 | grep -q "Executing external compose provider"; then
+      if podman compose version >/dev/null 2>&1 && ! echo "$compose_output" | grep -q "Executing external compose provider"; then
         compose_cmd="podman compose"
       elif podman compose version >/dev/null 2>&1; then
         # Falls back to external provider (podman-compose via podman compose)
@@ -564,8 +568,12 @@ verify_installation_detailed() {
   # Set COMPOSE_COMMAND for compatibility with other scripts
   case "${CONTAINER_RUNTIME}" in
     podman)
+      # Capture output once to avoid inconsistent results
+      local compose_output
+      compose_output=$(podman compose version 2>&1)
+      
       # Prefer native podman compose over external podman-compose
-      if podman compose version >/dev/null 2>&1 && ! podman compose version 2>&1 | grep -q "external compose provider"; then
+      if podman compose version >/dev/null 2>&1 && ! echo "$compose_output" | grep -q "Executing external compose provider"; then
         export COMPOSE_COMMAND="podman compose"
       elif podman compose version >/dev/null 2>&1; then
         export COMPOSE_COMMAND="podman compose"
