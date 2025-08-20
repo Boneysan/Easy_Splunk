@@ -471,8 +471,18 @@ deploy_cluster() {
     # Deploy with retry logic for network-related failures
     log_message INFO "Executing orchestrator with command: ${orchestrator_cmd[*]}"
     
-    retry_network_operation "cluster deployment" "${orchestrator_cmd[@]}" || \
-        error_exit "Cluster deployment failed"
+    if ! retry_network_operation "cluster deployment" "${orchestrator_cmd[@]}"; then
+        enhanced_error "DEPLOYMENT_FAILED" \
+            "Cluster deployment failed - orchestrator execution unsuccessful" \
+            "$LOG_FILE" \
+            "Check container runtime: \${CONTAINER_RUNTIME} --version" \
+            "Verify compose command: \${COMPOSE_CMD} --version" \
+            "Check resource availability: free -h && df -h" \
+            "Review orchestrator logs: cat \${LOG_FILE}" \
+            "Try manual restart: ./stop_cluster.sh && ./deploy.sh --force" \
+            "Check network connectivity: ping -c 3 registry-1.docker.io"
+        error_exit "Cluster deployment failed - enhanced troubleshooting steps provided above"
+    fi
     
     log_message SUCCESS "Cluster deployment completed"
 }

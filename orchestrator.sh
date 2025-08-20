@@ -122,15 +122,20 @@ init_compose_command() {
         elif docker compose version &>/dev/null 2>&1; then
             COMPOSE_CMD="docker compose"
         else
-            error_exit "Docker Compose not found. Please install Docker Compose."
+            enhanced_compose_error "docker-compose / docker compose" "Docker Compose detection failed"
+            error_exit "Docker Compose not found. Enhanced troubleshooting steps provided above."
         fi
     elif [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
         if command -v podman-compose &>/dev/null; then
             COMPOSE_CMD="podman-compose"
+        elif podman compose version &>/dev/null 2>&1; then
+            COMPOSE_CMD="podman compose"
         else
-            error_exit "Podman Compose not found. Please install podman-compose."
+            enhanced_compose_error "podman-compose / podman compose" "Podman Compose detection failed"
+            error_exit "Podman Compose not found. Enhanced troubleshooting steps provided above."
         fi
     else
+        enhanced_runtime_error "$CONTAINER_RUNTIME" "unsupported container runtime"
         error_exit "Unsupported container runtime: $CONTAINER_RUNTIME"
     fi
     

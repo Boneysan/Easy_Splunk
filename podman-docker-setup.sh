@@ -110,11 +110,22 @@ install_podman_rhel() {
     else
       # Attempt pip fallback if distro package missing
       if have_cmd pipx; then
-        pipx install podman-compose || log_warn "pipx install podman-compose failed."
+        if ! pipx install podman-compose; then
+          enhanced_installation_error "podman-compose" "pip3" "pipx installation failed"
+        fi
       elif have_cmd pip3; then
-        sudo pip3 install podman-compose || log_warn "pip3 install podman-compose failed."
+        if ! sudo pip3 install podman-compose; then
+          enhanced_installation_error "podman-compose" "pip3" "pip3 installation failed"
+        fi
       else
-        log_warn "No compose solution installed (missing podman compose and podman-compose)."
+        enhanced_error "COMPOSE_MISSING" \
+          "No compose solution available - missing podman compose and podman-compose" \
+          "${LOG_FILE:-/tmp/podman-setup.log}" \
+          "Install pip3: sudo ${pm} install python3-pip" \
+          "Try manual install: curl -sSL https://raw.githubusercontent.com/containers/podman-compose/devel/podman_compose.py -o /usr/local/bin/podman-compose" \
+          "Make executable: sudo chmod +x /usr/local/bin/podman-compose" \
+          "Update Podman: sudo ${pm} update podman" \
+          "Check Podman version: podman --version"
       fi
     fi
   fi
@@ -141,11 +152,22 @@ install_podman_debian() {
       log_success "Installed podman-compose."
     else
       if have_cmd pipx; then
-        pipx install podman-compose || log_warn "pipx install podman-compose failed."
+        if ! pipx install podman-compose; then
+          enhanced_installation_error "podman-compose" "pip3" "pipx installation failed"
+        fi
       elif have_cmd pip3; then
-        sudo pip3 install podman-compose || log_warn "pip3 install podman-compose failed."
+        if ! sudo pip3 install podman-compose; then
+          enhanced_installation_error "podman-compose" "pip3" "pip3 installation failed"
+        fi
       else
-        log_warn "No compose solution installed (missing podman compose and podman-compose)."
+        enhanced_error "COMPOSE_MISSING" \
+          "No compose solution available - missing podman compose and podman-compose" \
+          "${LOG_FILE:-/tmp/podman-setup.log}" \
+          "Install pip3: sudo apt-get install python3-pip" \
+          "Try manual install: curl -sSL https://raw.githubusercontent.com/containers/podman-compose/devel/podman_compose.py -o /usr/local/bin/podman-compose" \
+          "Make executable: sudo chmod +x /usr/local/bin/podman-compose" \
+          "Update package cache: sudo apt-get update" \
+          "Check available packages: apt search podman-compose"
       fi
     fi
   fi

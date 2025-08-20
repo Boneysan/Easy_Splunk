@@ -653,11 +653,17 @@ verify_installation_detailed() {
   # Test compose command using the detected COMPOSE_COMMAND
   if [[ -n "${COMPOSE_COMMAND:-}" ]]; then
     if ! ${COMPOSE_COMMAND} version >/dev/null 2>&1; then
-      log_error "Compose command failed: ${COMPOSE_COMMAND}"
+      enhanced_compose_error "${COMPOSE_COMMAND}" "compose verification failed"
       return 1
     fi
   else
-    log_error "No compose command available for testing"
+    enhanced_error "COMPOSE_MISSING" \
+      "No compose command available for testing" \
+      "$LOG_FILE" \
+      "Check runtime detection: ./lib/runtime-detection.sh" \
+      "Install compose: pip3 install podman-compose" \
+      "Use native compose: podman compose --help" \
+      "Check installation: ./install-prerequisites.sh --yes"
     return 1
   fi
 
@@ -739,13 +745,13 @@ main() {
     log_info "• Run your deployment script to continue with cluster setup"
     exit 0
   else
-    log_error "Installation verification failed."
+    enhanced_installation_error "container-runtime" "package_manager" "installation verification failed"
     if [[ "$ROLLBACK_ON_FAILURE" == "1" ]]; then
       log_warn "Rollback will be performed due to --rollback-on-failure flag"
     else
       log_info "Run with --rollback-on-failure to automatically remove packages on verification failure"
     fi
-    die "${E_GENERAL}" "Installation verification failed. Check the logs above for details."
+    die "${E_GENERAL}" "Installation verification failed. Enhanced troubleshooting steps provided above."
   fi
 }
 
