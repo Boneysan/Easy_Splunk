@@ -569,6 +569,10 @@ verify_installation_detailed() {
   # Detect runtime first
   detect_container_runtime || return 1
   
+  # Debug output
+  log_info "DEBUG: CONTAINER_RUNTIME=${CONTAINER_RUNTIME:-unset}"
+  log_info "DEBUG: COMPOSE_IMPL=${COMPOSE_IMPL:-unset}"
+  
   # Debug: Show detected values
   log_info "DEBUG: CONTAINER_RUNTIME='${CONTAINER_RUNTIME}', COMPOSE_IMPL='${COMPOSE_IMPL}'"
 
