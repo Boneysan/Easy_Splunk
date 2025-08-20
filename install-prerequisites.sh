@@ -568,6 +568,9 @@ verify_installation_detailed() {
 
   # Detect runtime first
   detect_container_runtime || return 1
+  
+  # Debug: Show detected values
+  log_info "DEBUG: CONTAINER_RUNTIME='${CONTAINER_RUNTIME}', COMPOSE_IMPL='${COMPOSE_IMPL}'"
 
   # Set COMPOSE_COMMAND based on already-detected compose implementation
   case "${CONTAINER_RUNTIME}" in
@@ -575,15 +578,19 @@ verify_installation_detailed() {
       case "${COMPOSE_IMPL}" in
         podman-compose-native)
           export COMPOSE_COMMAND="podman compose"
+          log_info "DEBUG: Set COMPOSE_COMMAND='podman compose' (native)"
           ;;
         podman-compose-delegated)
           export COMPOSE_COMMAND="podman compose"
+          log_info "DEBUG: Set COMPOSE_COMMAND='podman compose' (delegated)"
           ;;
         podman-compose)
           export COMPOSE_COMMAND="podman-compose"
+          log_info "DEBUG: Set COMPOSE_COMMAND='podman-compose' (direct)"
           ;;
         *)
           export COMPOSE_COMMAND="podman compose"  # default
+          log_info "DEBUG: Set COMPOSE_COMMAND='podman compose' (default, COMPOSE_IMPL='${COMPOSE_IMPL}')"
           ;;
       esac
       ;;
