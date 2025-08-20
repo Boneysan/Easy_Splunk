@@ -46,7 +46,18 @@ The toolkit now features comprehensive error handling with detailed troubleshoot
 ```bash
 # Demonstration of enhanced error handling
 ./test-enhanced-errors.sh
+
+# Complete workflow demonstration
+./demonstrate-enhanced-workflow.sh
+
+# Automated fix for podman-compose issues
+./fix-podman-compose.sh
 ```
+
+### **Automated Fixes Available**
+- **./fix-podman-compose.sh** - Comprehensive fix for podman-compose issues on RHEL 8
+- **Targeted troubleshooting** - Specific commands for your exact error scenario
+- **SELinux integration** - Automatic container policy fixes for enterprise distributions
 
 ---
 

@@ -713,7 +713,8 @@ enhanced_compose_error() {
         "Check: pip3 list | grep podman-compose" \
         "Reinstall: pip3 install podman-compose==1.0.6" \
         "Alternative: Use native 'podman compose' if available" \
-        "Verify runtime: podman --version"
+        "Verify runtime: podman --version" \
+        "🔧 Run automated fix: ./fix-podman-compose.sh"
 }
 
 # Enhanced installation error with specific troubleshooting
@@ -751,7 +752,8 @@ enhanced_installation_error() {
                 "Reset user session: podman system reset --force" \
                 "Check subuid/subgid: cat /etc/subuid /etc/subgid" \
                 "Restart service: sudo systemctl restart podman.socket" \
-                "Alternative: Try rootful mode or Docker"
+                "Alternative: Try rootful mode or Docker" \
+                "🔧 Run automated fix: ./fix-podman-compose.sh"
             ;;
         "docker")
             enhanced_error "INSTALLATION_FAILED" \
