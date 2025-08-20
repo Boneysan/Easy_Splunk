@@ -668,6 +668,179 @@ show_progress() {
     printf "\r%s... Done\n" "$message"
 }
 
+# ============================================
+# ENHANCED ERROR HANDLING FUNCTIONS
+# ============================================
+
+# Enhanced error function with troubleshooting steps
+enhanced_error() {
+    local error_type="$1"
+    local main_message="$2"
+    local log_file="${3:-$LOG_FILE}"
+    shift 3
+    local troubleshooting_steps=("$@")
+    
+    # Log the main error
+    log_message ERROR "$main_message"
+    
+    # Show troubleshooting steps
+    if [[ ${#troubleshooting_steps[@]} -gt 0 ]]; then
+        log_message INFO "Troubleshooting steps:"
+        for i in "${!troubleshooting_steps[@]}"; do
+            log_message INFO "$((i+1)). ${troubleshooting_steps[$i]}"
+        done
+    fi
+    
+    # Show log location
+    if [[ -f "$log_file" ]]; then
+        log_message INFO "Logs available at: $log_file"
+    fi
+}
+
+# Enhanced compose error with specific troubleshooting
+enhanced_compose_error() {
+    local compose_cmd="$1"
+    local error_context="${2:-compose command failed}"
+    
+    enhanced_error "COMPOSE_FAILED" \
+        "Compose verification failed - $compose_cmd not working" \
+        "$LOG_FILE" \
+        "Try: $compose_cmd --version" \
+        "Check: pip3 list | grep podman-compose" \
+        "Reinstall: pip3 install podman-compose==1.0.6" \
+        "Alternative: Use native 'podman compose' if available" \
+        "Verify runtime: podman --version"
+}
+
+# Enhanced installation error with specific troubleshooting
+enhanced_installation_error() {
+    local package_name="$1"
+    local installation_method="${2:-package manager}"
+    local error_context="${3:-installation failed}"
+    
+    case "$installation_method" in
+        "pip3")
+            enhanced_error "INSTALLATION_FAILED" \
+                "Installation verification failed - $package_name via pip3" \
+                "$LOG_FILE" \
+                "Check pip3: pip3 --version" \
+                "Check permissions: pip3 install --user $package_name" \
+                "Update pip: pip3 install --upgrade pip" \
+                "Check Python path: python3 -m site" \
+                "Alternative: Use system package manager"
+            ;;
+        "package_manager")
+            enhanced_error "INSTALLATION_FAILED" \
+                "Installation verification failed - $package_name via system package manager" \
+                "$LOG_FILE" \
+                "Update package cache: sudo apt update || sudo dnf update" \
+                "Check repository: sudo apt search $package_name || sudo dnf search $package_name" \
+                "Try EPEL: sudo dnf install epel-release (RHEL/CentOS)" \
+                "Check disk space: df -h" \
+                "Alternative: Try pip3 installation"
+            ;;
+        "podman")
+            enhanced_error "INSTALLATION_FAILED" \
+                "Podman installation verification failed" \
+                "$LOG_FILE" \
+                "Check service: sudo systemctl status podman.socket" \
+                "Reset user session: podman system reset --force" \
+                "Check subuid/subgid: cat /etc/subuid /etc/subgid" \
+                "Restart service: sudo systemctl restart podman.socket" \
+                "Alternative: Try rootful mode or Docker"
+            ;;
+        "docker")
+            enhanced_error "INSTALLATION_FAILED" \
+                "Docker installation verification failed" \
+                "$LOG_FILE" \
+                "Check service: sudo systemctl status docker" \
+                "Start service: sudo systemctl start docker" \
+                "Check group: groups \$USER | grep docker" \
+                "Add to group: sudo usermod -aG docker \$USER && newgrp docker" \
+                "Restart daemon: sudo systemctl restart docker"
+            ;;
+        *)
+            enhanced_error "INSTALLATION_FAILED" \
+                "Installation verification failed - $package_name" \
+                "$LOG_FILE" \
+                "Check installation: which $package_name" \
+                "Check PATH: echo \$PATH" \
+                "Reinstall package" \
+                "Check system logs: journalctl -u $package_name"
+            ;;
+    esac
+}
+
+# Enhanced container runtime error
+enhanced_runtime_error() {
+    local runtime="$1"
+    local error_details="${2:-runtime detection failed}"
+    
+    case "$runtime" in
+        "podman")
+            enhanced_error "RUNTIME_FAILED" \
+                "Podman runtime verification failed" \
+                "$LOG_FILE" \
+                "Check installation: podman --version" \
+                "Test basic operation: podman run hello-world" \
+                "Check rootless setup: podman unshare cat /proc/self/uid_map" \
+                "Reset if needed: podman system reset --force" \
+                "Check system service: systemctl --user status podman.socket"
+            ;;
+        "docker")
+            enhanced_error "RUNTIME_FAILED" \
+                "Docker runtime verification failed" \
+                "$LOG_FILE" \
+                "Check installation: docker --version" \
+                "Check daemon: sudo systemctl status docker" \
+                "Test basic operation: docker run hello-world" \
+                "Check permissions: docker ps (should not require sudo)" \
+                "Restart daemon: sudo systemctl restart docker"
+            ;;
+        *)
+            enhanced_error "RUNTIME_FAILED" \
+                "Container runtime detection failed" \
+                "$LOG_FILE" \
+                "Check for Docker: which docker" \
+                "Check for Podman: which podman" \
+                "Install container runtime: ./install-prerequisites.sh" \
+                "Check PATH: echo \$PATH"
+            ;;
+    esac
+}
+
+# Enhanced network error
+enhanced_network_error() {
+    local service="$1"
+    local host="${2:-localhost}"
+    local port="${3:-unknown}"
+    
+    enhanced_error "NETWORK_FAILED" \
+        "Network connectivity failed - $service at $host:$port" \
+        "$LOG_FILE" \
+        "Check service status: systemctl status $service" \
+        "Test connectivity: nc -zv $host $port" \
+        "Check firewall: sudo firewall-cmd --list-ports" \
+        "Check SELinux: sudo ausearch -m AVC -ts recent" \
+        "Check container logs: \${CONTAINER_RUNTIME} logs $service"
+}
+
+# Enhanced permission error
+enhanced_permission_error() {
+    local path="$1"
+    local operation="${2:-access}"
+    local user="${3:-$(whoami)}"
+    
+    enhanced_error "PERMISSION_FAILED" \
+        "Permission denied - $operation on $path for user $user" \
+        "$LOG_FILE" \
+        "Check ownership: ls -la $(dirname "$path")" \
+        "Check permissions: stat $path" \
+        "Check SELinux context: ls -Z $path" \
+        "Fix ownership: sudo chown $user:$user $path" \
+        "Fix permissions: chmod 755 $(dirname "$path") && chmod 644 $path"
+}
+
 # Initialize error handling (call this at the start of scripts)
 init_error_handling() {
     init_logging
@@ -690,3 +863,9 @@ export -f validate_url
 export -f validate_ip
 export -f validate_timeout
 export -f sanitize_input
+export -f enhanced_error
+export -f enhanced_compose_error
+export -f enhanced_installation_error
+export -f enhanced_runtime_error
+export -f enhanced_network_error
+export -f enhanced_permission_error
