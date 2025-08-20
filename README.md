@@ -3,7 +3,7 @@
 A comprehensive shell-based orchestration toolkit for deploying, managing, and securing a containerized Splunk cluster on Docker or Podman.  
 Supports air-gapped environments, automated credential/TLS generation, integrated monitoring (Prometheus + Grafana), and hardened RHEL/Fedora deployments.
 
-**✅ Latest Update**: Fixed container runtime detection for RHEL 8, CentOS 8, Rocky Linux, and other enterprise distributions.
+**✅ Latest Update**: Enhanced error handling with detailed troubleshooting steps and comprehensive guidance for common deployment issues. Fixed container runtime detection for RHEL 8, CentOS 8, Rocky Linux, and other enterprise distributions.
 
 ---
 
@@ -13,7 +13,44 @@ A shell-based orchestration toolkit for deploying, managing, and securing a cont
 
 ---
 
-## 📐 Architecture Overview
+## � Enhanced Error Handling
+
+The toolkit now features comprehensive error handling with detailed troubleshooting guidance:
+
+### **Before (Original)**
+```bash
+[ERROR] Compose command failed: podman-compose
+[ERROR] Installation verification failed.
+```
+
+### **After (Enhanced)**
+```bash
+[ERROR] Compose verification failed - podman-compose not working
+[INFO ] Troubleshooting steps:
+[INFO ] 1. Try: podman-compose --version
+[INFO ] 2. Check: pip3 list | grep podman-compose  
+[INFO ] 3. Reinstall: pip3 install podman-compose==1.0.6
+[INFO ] 4. Alternative: Use native 'podman compose' if available
+[INFO ] 5. Verify runtime: podman --version
+[INFO ] 6. Logs available at: ./install.log
+```
+
+### **Error Categories**
+- **Compose Failures**: Docker/Podman compose issues with step-by-step fixes
+- **Installation Errors**: Package manager and pip3 installation guidance
+- **Runtime Issues**: Container runtime detection and configuration help
+- **Network Problems**: Connectivity, firewall, and service accessibility guidance
+- **Permission Errors**: File system access and SELinux troubleshooting
+
+### **Test Enhanced Errors**
+```bash
+# Demonstration of enhanced error handling
+./test-enhanced-errors.sh
+```
+
+---
+
+## �📐 Architecture Overview
 
 ┌─────────────────┐
 │   Users/Apps    │

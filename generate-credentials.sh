@@ -387,11 +387,13 @@ create_credentials_directory() {
     
     # Create directory with secure permissions
     if ! mkdir -p "$CREDS_DIR"; then
-        error_exit "Failed to create credentials directory"
+        enhanced_permission_error "$CREDS_DIR" "create directory" "$(whoami)"
+        error_exit "Failed to create credentials directory - enhanced troubleshooting steps provided above"
     fi
     
     if ! chmod 700 "$CREDS_DIR"; then
-        error_exit "Failed to set credentials directory permissions"
+        enhanced_permission_error "$CREDS_DIR" "set permissions" "$(whoami)"
+        error_exit "Failed to set credentials directory permissions - enhanced troubleshooting steps provided above"
     fi
     
     log_message SUCCESS "Credentials directory created"
@@ -428,19 +430,22 @@ write_credential() {
     local temp_file="${CREDS_DIR}/.tmp_${filename}_$$"
     if ! echo -n "$content" > "$temp_file"; then
         rm -f "$temp_file" 2>/dev/null
-        error_exit "Failed to write $description"
+        enhanced_permission_error "$temp_file" "write file" "$(whoami)"
+        error_exit "Failed to write $description - enhanced troubleshooting steps provided above"
     fi
 
     # Set secure permissions
     if ! chmod 600 "$temp_file"; then
         rm -f "$temp_file" 2>/dev/null
-        error_exit "Failed to set permissions for $description"
+        enhanced_permission_error "$temp_file" "set file permissions" "$(whoami)"
+        error_exit "Failed to set permissions for $description - enhanced troubleshooting steps provided above"
     fi
 
     # Move to final location
     if ! mv "$temp_file" "$filepath"; then
         rm -f "$temp_file" 2>/dev/null
-        error_exit "Failed to save $description"
+        enhanced_permission_error "$filepath" "move file" "$(whoami)"
+        error_exit "Failed to save $description - enhanced troubleshooting steps provided above"
     fi
 
     log_message SUCCESS "$description saved"

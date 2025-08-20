@@ -158,16 +158,20 @@ cleanup_on_error() {
     log_message INFO "Executing cleanup procedures..."
     
     # Execute registered cleanup functions in reverse order
-    for ((i=${#CLEANUP_FUNCTIONS[@]}-1; i>=0; i--)); do
-        local func="${CLEANUP_FUNCTIONS[$i]}"
-        log_message DEBUG "Running cleanup: $func"
-        
-        if type "$func" &>/dev/null; then
-            "$func" 2>&1 | while read line; do
-                log_message DEBUG "Cleanup: $line"
-            done
-        fi
-    done
+    if [[ -n "${CLEANUP_FUNCTIONS[*]:-}" ]]; then
+        for ((i=${#CLEANUP_FUNCTIONS[@]}-1; i>=0; i--)); do
+            local func="${CLEANUP_FUNCTIONS[$i]}"
+            log_message DEBUG "Running cleanup: $func"
+            
+            if type "$func" &>/dev/null; then
+                "$func" 2>&1 | while read line; do
+                    log_message DEBUG "Cleanup: $line"
+                done
+            fi
+        done
+    else
+        log_message DEBUG "No cleanup functions registered"
+    fi
     
     # Common cleanup tasks
     if [[ -n "${TEMP_DIR:-}" ]] && [[ -d "$TEMP_DIR" ]]; then

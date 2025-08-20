@@ -306,4 +306,48 @@ generate_health_report() {
         return 0
     fi
 }
+
+# Main execution
+main() {
+    # Parse command line arguments (basic implementation)
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --verbose|-v)
+                VERBOSE=true
+                ;;
+            --service)
+                SPECIFIC_SERVICE="$2"
+                shift
+                ;;
+            --help|-h)
+                echo "Usage: $0 [options]"
+                echo "Options:"
+                echo "  --verbose, -v    Verbose output"
+                echo "  --service NAME   Check specific service only"
+                echo "  --help, -h       Show this help"
+                exit 0
+                ;;
+            *)
+                log_message WARNING "Unknown option: $1"
+                ;;
+        esac
+        shift
+    done
+    
+    log_message INFO "🏥 Starting Enhanced Splunk Cluster Health Check"
+    log_message INFO "Timestamp: $(date)"
+    
+    # Initialize service mappings and run checks
+    init_service_mappings
+    check_all_services
+    
+    local exit_code=$?
+    log_message INFO "Health check completed with exit code: $exit_code"
+    exit $exit_code
+}
+
+# Run main function if script is executed directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
     
