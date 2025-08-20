@@ -40,30 +40,351 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $*"
 }
 
-# Function to test compose with a simple file
+# Function to diagnose current state comprehensively
+diagnose_current_state() {
+    log_step "🔍 Comprehensive system diagnostics..."
+    
+    echo "=== DIAGNOSTIC INFORMATION ===" | tee -a "${LOG_FILE}"
+    
+    # Check Python version
+    if command -v python3 >/dev/null 2>&1; then
+        local python_version
+        python_version=$(python3 --version 2>&1)
+        log_step "Python version: $python_version"
+        echo "$python_version" >> "${LOG_FILE}"
+    else
+        log_error "Python3 not found"
+    fi
+    
+    # Check podman version
+    if command -v podman >/dev/null 2>&1; then
+        local podman_version
+        podman_version=$(podman --version 2>&1)
+        log_step "Podman version: $podman_version"
+        echo "$podman_version" >> "${LOG_FILE}"
+    else
+        log_error "Podman not found"
+        return 1
+    fi
+    
+    # Check pip packages
+    log_step "Checking pip packages..."
+    if command -v pip3 >/dev/null 2>&1; then
+        pip3 list | grep -E "(podman|compose|docker)" 2>&1 | tee -a "${LOG_FILE}" || true
+    fi
+    
+    # Test basic podman functionality
+    log_step "Testing basic podman functionality..."
+    if timeout 10s podman info >/dev/null 2>&1; then
+        log_success "✅ Basic podman functionality works"
+    else
+        log_error "❌ Basic podman functionality failed"
+        enhanced_runtime_error "podman" "basic functionality test failed"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Enhanced fix for podman-compose installation with multiple versions
+fix_podman_compose_installation() {
+    log_step "🔧 Enhanced podman-compose installation fix..."
+    
+    # Remove existing problematic installation
+    log_step "Removing existing podman-compose..."
+    pip3 uninstall -y podman-compose 2>&1 | tee -a "${LOG_FILE}" || true
+    
+    # Install required dependencies first
+    log_step "Installing Python dependencies..."
+    if ! pip3 install --upgrade pip 2>&1 | tee -a "${LOG_FILE}"; then
+        enhanced_installation_error "pip" "pip3" "pip upgrade failed"
+        return 1
+    fi
+    
+    pip3 install pyyaml python-dotenv 2>&1 | tee -a "${LOG_FILE}" || log_warning "Some dependencies may have failed"
+    
+    # Try different podman-compose versions (RHEL 8 compatibility)
+    local versions=("1.0.6" "1.0.3" "0.1.5")
+    
+    for version in "${versions[@]}"; do
+        log_step "Trying podman-compose version ${version}..."
+        
+        if pip3 install "podman-compose==${version}" 2>&1 | tee -a "${LOG_FILE}"; then
+            log_success "Successfully installed podman-compose ${version}"
+            
+            # Test the installation
+            if test_compose_functionality "podman-compose"; then
+                log_success "✅ podman-compose ${version} is working!"
+                return 0
+            else
+                log_warning "podman-compose ${version} installed but not working properly"
+                pip3 uninstall -y podman-compose 2>&1 | tee -a "${LOG_FILE}" || true
+            fi
+        else
+            log_warning "Failed to install podman-compose ${version}"
+            enhanced_installation_error "podman-compose" "pip3" "version ${version} installation failed"
+        fi
+    done
+    
+    log_error "All podman-compose versions failed"
+    return 1
+}
+
+# Enhanced SELinux configuration
+configure_selinux_for_containers() {
+    log_step "🔒 Configuring SELinux for containers..."
+    
+    if ! command -v getenforce >/dev/null 2>&1; then
+        log_step "SELinux tools not available"
+        return 0
+    fi
+    
+    local selinux_status
+    selinux_status=$(getenforce 2>/dev/null || echo "Unknown")
+    log_step "SELinux status: $selinux_status"
+    
+    if [[ "$selinux_status" == "Enforcing" ]]; then
+        log_step "Configuring SELinux container policies..."
+        
+        # Set container-related SELinux booleans
+        local policies=(
+            "container_manage_cgroup"
+            "container_use_cephfs"
+            "virt_use_fusefs"
+            "virt_sandbox_use_audit"
+        )
+        
+        for policy in "${policies[@]}"; do
+            if getsebool "$policy" 2>/dev/null | grep -q "off"; then
+                log_step "Enabling SELinux policy: $policy"
+                if ! sudo setsebool -P "$policy" on 2>&1 | tee -a "${LOG_FILE}"; then
+                    log_warning "Could not enable $policy"
+                fi
+            else
+                log_success "$policy already enabled"
+            fi
+        done
+        
+        # Install container SELinux policies if available
+        if command -v dnf >/dev/null 2>&1; then
+            log_step "Installing container-selinux packages..."
+            sudo dnf install -y container-selinux 2>&1 | tee -a "${LOG_FILE}" || log_warning "Could not install container-selinux"
+        elif command -v yum >/dev/null 2>&1; then
+            log_step "Installing container-selinux packages..."
+            sudo yum install -y container-selinux 2>&1 | tee -a "${LOG_FILE}" || log_warning "Could not install container-selinux"
+        fi
+        
+        log_success "SELinux configured for containers"
+    else
+        log_step "SELinux not enforcing, skipping container policy setup"
+    fi
+}
+
+# Create native compose alternative with enhanced integration
+setup_native_compose_alternative() {
+    log_step "🔄 Setting up native podman compose alternative..."
+    
+    # Check if native compose is available
+    if ! podman compose version >/dev/null 2>&1; then
+        log_warning "Native podman compose not available"
+        return 1
+    fi
+    
+    log_success "✅ Native podman compose is available"
+    
+    # Test native compose functionality
+    if test_compose_functionality "podman compose"; then
+        log_success "✅ Native podman compose functionality verified"
+        
+        # Create wrapper script for compatibility
+        local wrapper_script="/usr/local/bin/podman-compose-native"
+        log_step "Creating native compose wrapper at $wrapper_script..."
+        
+        sudo tee "$wrapper_script" > /dev/null << 'EOF'
+#!/bin/bash
+# Native podman compose wrapper for Easy_Splunk compatibility
+# This script provides podman-compose compatibility using native podman compose
+exec podman compose "$@"
+EOF
+        
+        sudo chmod +x "$wrapper_script"
+        
+        log_success "✅ Native compose wrapper created"
+        log_step "You can modify Easy_Splunk to use 'podman compose' or the wrapper"
+        return 0
+    else
+        log_error "Native podman compose available but not functional"
+        enhanced_compose_error "podman compose" "native compose functionality test failed"
+        return 1
+    fi
+}
+
+# Test if compose functionality works
 test_compose_functionality() {
     local compose_cmd="$1"
-    local test_file="${SCRIPT_DIR}/test-compose.yml"
     
-    log_step "Creating test compose file..."
-    cat > "${test_file}" << 'EOF'
+    log_step "Testing $compose_cmd functionality..."
+    
+    # Create a minimal test directory
+    local test_dir="/tmp/easy_splunk_compose_test_$$"
+    mkdir -p "$test_dir"
+    
+    # Create a minimal test compose file
+    cat > "$test_dir/docker-compose.yml" << 'EOF'
 version: '3.8'
 services:
   test:
-    image: docker.io/library/hello-world:latest
-    command: echo "Hello from compose test"
+    image: alpine:latest
+    command: echo "Compose test successful"
+EOF
+    
+    # Change to test directory
+    local original_dir
+    original_dir=$(pwd)
+    cd "$test_dir" || {
+        log_error "Failed to change to test directory"
+        return 1
+    }
+    
+    # Test compose validation
+    local test_result=0
+    if $compose_cmd config --quiet >/dev/null 2>&1; then
+        log_success "$compose_cmd config validation passed"
+    else
+        log_warning "$compose_cmd config validation failed"
+        test_result=1
+    fi
+    
+    # Clean up
+    cd "$original_dir"
+    rm -rf "$test_dir"
+    
+    return $test_result
+}
+
+# Create comprehensive diagnostics and guide
+create_enhanced_workaround_guide() {
+    log_step "📝 Creating comprehensive workaround guide..."
+    
+    local guide_file="${SCRIPT_DIR}/PODMAN_COMPOSE_WORKAROUND.md"
+    
+    cat > "$guide_file" << 'EOF'
+# Easy Splunk Podman-Compose Workaround Guide
+
+## Issue Description
+podman-compose is not working properly on your system. This guide provides multiple solution paths.
+
+## Automated Solutions Available
+
+### 🔧 Run the Automated Fix
+```bash
+./fix-podman-compose.sh
+```
+
+### 🩺 Run System Health Check
+```bash
+./health_check.sh
+```
+
+## Manual Solution Options
+
+### Option 1: Use Native Podman Compose (Recommended)
+```bash
+# Check if available
+podman compose version
+
+# If available, modify Easy Splunk scripts:
+# 1. Edit orchestrator.sh
+# 2. Replace 'podman-compose' with 'podman compose'
+# 3. Test with: ./deploy.sh small --index-name test
+```
+
+### Option 2: Docker Alternative
+```bash
+# Install Docker (RHEL 8)
+sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo dnf install docker-ce docker-ce-cli containerd.io
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+# Log out and back in, then:
+./install-prerequisites.sh --runtime docker
+```
+
+### Option 3: Upgrade Podman
+```bash
+# On RHEL 8, try newer Podman from container-tools module
+sudo dnf module install container-tools:rhel8/common
+sudo dnf update podman
+```
+
+### Option 4: Use Different Distribution
+- Ubuntu 20.04+ or Debian 11+ (better podman-compose support)
+- Fedora 35+ (latest container tools)
+- Rocky Linux 9+ or AlmaLinux 9+
+
+## Troubleshooting Commands
+
+### Diagnostic Commands
+```bash
+# Check versions
+python3 --version
+podman --version
+pip3 list | grep podman
+
+# Test basic functionality
+podman info
+podman run hello-world
+
+# Check SELinux
+getenforce
+sudo ausearch -m AVC -ts recent
+```
+
+### Reset and Retry
+```bash
+# Reset podman state
+podman system reset --force
+
+# Reinstall podman-compose
+pip3 uninstall -y podman-compose
+pip3 install podman-compose==1.0.6
+
+# Test again
+podman-compose --version
+```
+
+## Getting Help
+
+If none of these solutions work:
+
+1. **Check the Enhanced Error Messages** - They provide specific troubleshooting steps
+2. **Review the Log Files** - Look for detailed error information
+3. **Try the Health Check** - Run `./health_check.sh` for comprehensive diagnostics
+4. **Open an Issue** - Include your system info and log files
+
+## System Information Template
+
+When reporting issues, include:
+
+```bash
+# System Info
+cat /etc/os-release
+python3 --version
+podman --version
+getenforce
+
+# Container Tools
+dnf list installed | grep container
+pip3 list | grep -E "(podman|compose|docker)"
+
+# SELinux Status
+sudo sesearch -A -s container_t -t admin_home_t
+sudo ausearch -m AVC -ts recent | tail -20
+```
 EOF
 
-    log_step "Testing compose config validation with: $compose_cmd"
-    if timeout 30s $compose_cmd -f "${test_file}" config >/dev/null 2>&1; then
-        log_success "Compose config validation successful"
-        rm -f "${test_file}"
-        return 0
-    else
-        log_error "Compose config validation failed"
-        rm -f "${test_file}"
-        return 1
-    fi
+    log_success "📝 Comprehensive workaround guide created at: $guide_file"
+    echo "📖 View the guide: cat $guide_file"
 }
 
 # Function to check and fix SELinux settings
@@ -117,10 +438,19 @@ check_and_fix_selinux() {
 
 # Main fix function
 main() {
-    echo "🔧 Podman-Compose Specific Fix Script"
-    echo "====================================="
-    echo "Targeting common podman-compose issues on RHEL 8 and similar systems"
+    echo "🔧 Enhanced Podman-Compose Fix Script for Easy_Splunk"
+    echo "====================================================="
+    echo "Targeting podman-compose issues on RHEL 8 and similar systems"
+    echo "Integrating with Enhanced Error Handling system"
     echo ""
+    
+    # Step 0: Comprehensive diagnostics
+    log_step "0. Running comprehensive system diagnostics..."
+    if ! diagnose_current_state; then
+        log_error "System diagnostics failed - critical issues detected"
+        create_enhanced_workaround_guide
+        return 1
+    fi
     
     # Step 1: Verify podman-compose is working
     log_step "1. Verifying podman-compose installation and version..."
@@ -128,157 +458,94 @@ main() {
         local version_output
         if version_output=$(podman-compose --version 2>&1); then
             log_success "podman-compose found: $version_output"
+            
+            # Test functionality immediately
+            if test_compose_functionality "podman-compose"; then
+                log_success "✅ podman-compose is already working correctly!"
+                echo ""
+                echo "🎉 No fix needed - your podman-compose is functional!"
+                echo "You can proceed with: ./deploy.sh small --index-name test"
+                return 0
+            else
+                log_warning "podman-compose found but functionality test failed"
+            fi
         else
             log_error "podman-compose command exists but version check failed"
             enhanced_compose_error "podman-compose" "version check failed"
-            echo ""
             echo "Output: $version_output"
         fi
     else
         log_error "podman-compose not found in PATH"
         enhanced_installation_error "podman-compose" "pip3" "command not found"
-        echo ""
-        log_step "Attempting to install podman-compose..."
-        
-        if command -v pip3 >/dev/null 2>&1; then
-            pip3 install --user podman-compose==1.0.6 || {
-                enhanced_installation_error "podman-compose" "pip3" "installation failed"
-                return 1
-            }
-            log_success "podman-compose installed successfully"
-        else
-            log_error "pip3 not available for installation"
-            enhanced_installation_error "pip3" "package_manager" "pip3 not found"
-            return 1
-        fi
     fi
     
-    # Step 2: Test compose functionality
-    log_step "2. Testing podman-compose functionality..."
-    if ! test_compose_functionality "podman-compose"; then
-        log_warning "podman-compose functionality test failed"
-        
-        # Step 2a: Try reinstalling with specific version
-        log_step "2a. Attempting to fix by reinstalling podman-compose..."
-        if command -v pip3 >/dev/null 2>&1; then
-            log_step "Uninstalling current podman-compose..."
-            pip3 uninstall -y podman-compose >/dev/null 2>&1 || true
-            
-            log_step "Installing podman-compose version 1.0.6..."
-            if pip3 install podman-compose==1.0.6; then
-                log_success "podman-compose 1.0.6 installed successfully"
-                
-                # Test again
-                if test_compose_functionality "podman-compose"; then
-                    log_success "podman-compose is now working correctly!"
-                else
-                    log_warning "podman-compose still not working after reinstall"
-                fi
-            else
-                log_error "Failed to install podman-compose 1.0.6"
-                enhanced_installation_error "podman-compose" "pip3" "version 1.0.6 installation failed"
-            fi
-        fi
-    else
-        log_success "podman-compose is working correctly!"
-    fi
+    # Step 2: Configure SELinux (often the root cause on RHEL 8)
+    log_step "2. Configuring SELinux for container support..."
+    configure_selinux_for_containers
     
-    # Step 3: Test native podman compose as alternative
-    log_step "3. Testing native 'podman compose' as alternative..."
-    if podman compose version >/dev/null 2>&1; then
-        log_success "Native 'podman compose' is available"
+    # Step 3: Enhanced podman-compose installation fix
+    log_step "3. Attempting enhanced podman-compose installation fix..."
+    if fix_podman_compose_installation; then
+        log_success "🎉 Enhanced podman-compose fix successful!"
         
-        if test_compose_functionality "podman compose"; then
-            log_success "Native 'podman compose' is working correctly!"
+        # Final verification
+        if test_compose_functionality "podman-compose"; then
+            log_success "✅ Final verification passed - podman-compose is working!"
             echo ""
-            log_step "💡 RECOMMENDATION: Use 'podman compose' instead of 'podman-compose'"
-            echo "   You can set an alias: alias podman-compose='podman compose'"
+            echo "� Success! You can now run Easy_Splunk deployment:"
+            echo "   ./deploy.sh small --index-name test"
+            echo "   ./health_check.sh"
+            return 0
         else
-            log_warning "Native 'podman compose' exists but functionality test failed"
+            log_warning "Installation succeeded but functionality test still fails"
         fi
     else
-        log_warning "Native 'podman compose' is not available"
-        log_step "This may require a newer version of Podman (4.0+)"
+        log_warning "Enhanced podman-compose installation fix failed"
     fi
     
-    # Step 4: Check and fix SELinux issues
-    log_step "4. Checking SELinux configuration (common RHEL 8 issue)..."
-    check_and_fix_selinux
-    
-    # Step 5: Additional diagnostics
-    log_step "5. Running additional diagnostics..."
-    
-    # Check Podman version
-    if command -v podman >/dev/null 2>&1; then
-        local podman_version
-        podman_version=$(podman --version 2>/dev/null || echo "Unknown")
-        log_step "Podman version: $podman_version"
-    fi
-    
-    # Check Python version
-    if command -v python3 >/dev/null 2>&1; then
-        local python_version
-        python_version=$(python3 --version 2>/dev/null || echo "Unknown")
-        log_step "Python version: $python_version"
-    fi
-    
-    # Check if user is in podman group or has proper subuid/subgid
-    log_step "Checking rootless Podman configuration..."
-    if [[ -f /etc/subuid ]] && [[ -f /etc/subgid ]]; then
-        local user
-        user=$(whoami)
-        if grep -q "^${user}:" /etc/subuid && grep -q "^${user}:" /etc/subgid; then
-            log_success "User $user has proper subuid/subgid configuration"
-        else
-            log_warning "User $user may need subuid/subgid configuration"
-            echo "   Run: sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 $user"
-        fi
-    fi
-    
-    # Final test with both options
-    echo ""
-    echo "🧪 Final Functionality Test"
-    echo "==========================="
-    
-    local working_compose=""
-    
-    if command -v podman-compose >/dev/null 2>&1 && test_compose_functionality "podman-compose"; then
-        working_compose="podman-compose"
-        log_success "✅ podman-compose is working!"
-    fi
-    
-    if podman compose version >/dev/null 2>&1 && test_compose_functionality "podman compose"; then
-        if [[ -n "$working_compose" ]]; then
-            working_compose="$working_compose and podman compose"
-        else
-            working_compose="podman compose"
-        fi
-        log_success "✅ podman compose is working!"
-    fi
-    
-    echo ""
-    if [[ -n "$working_compose" ]]; then
-        echo "🎉 SUCCESS: Working compose implementations found: $working_compose"
+    # Step 4: Try native podman compose as alternative
+    log_step "4. Setting up native 'podman compose' alternative..."
+    if setup_native_compose_alternative; then
+        log_success "✅ Native compose alternative configured successfully!"
         echo ""
-        echo "📋 Next Steps:"
-        echo "• Update your Easy_Splunk configuration to use the working compose command"
-        echo "• Test cluster deployment: ./deploy.sh small"
-        echo "• Run health checks: ./health_check.sh"
+        echo "🔄 Alternative Solution Ready:"
+        echo "   • Native 'podman compose' is working"
+        echo "   • Wrapper script created for compatibility"
+        echo "   • Modify Easy_Splunk to use 'podman compose'"
         echo ""
-        echo "💡 TIP: If you have both working, 'podman compose' is recommended as it's native"
+        echo "Next steps:"
+        echo "1. Edit orchestrator.sh to use 'podman compose' instead of 'podman-compose'"
+        echo "2. Test with: ./deploy.sh small --index-name test"
+        return 0
     else
-        echo "❌ ISSUE: No working compose implementation found"
-        echo ""
-        echo "📋 Recommended Actions:"
-        echo "1. Check the Enhanced Error messages above for specific troubleshooting steps"
-        echo "2. Review system logs: journalctl -u podman --no-pager -n 50"
-        echo "3. Try Docker as alternative: ./install-prerequisites.sh --runtime docker"
-        echo "4. Contact support with the log file: $LOG_FILE"
-        
-        return 1
+        log_warning "Native compose alternative setup failed"
     fi
     
-    return 0
+    # Step 5: Create comprehensive workaround guide
+    log_step "5. Creating comprehensive troubleshooting guide..."
+    create_enhanced_workaround_guide
+    
+    echo ""
+    echo "❌ AUTOMATED FIX UNSUCCESSFUL"
+    echo "================================"
+    echo ""
+    echo "📋 Available Resources:"
+    echo "• Enhanced troubleshooting guide: ./PODMAN_COMPOSE_WORKAROUND.md"
+    echo "• Detailed logs: $LOG_FILE" 
+    echo "• System health check: ./health_check.sh"
+    echo "• Enhanced error demos: ./test-enhanced-errors.sh"
+    echo ""
+    echo "� Alternative Solutions:"
+    echo "1. Use Docker instead: ./install-prerequisites.sh --runtime docker"
+    echo "2. Try a different OS (Ubuntu 20.04+, Fedora 35+)"
+    echo "3. Use podman with manual container management"
+    echo "4. Contact support with the log file above"
+    echo ""
+    
+    # Show enhanced error for final guidance
+    enhanced_compose_error "podman-compose" "comprehensive fix attempt failed"
+    
+    return 1
 }
 
 # Help function
