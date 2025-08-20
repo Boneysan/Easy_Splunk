@@ -371,11 +371,15 @@ install_podman_rhel() {
     esac
   fi
   
-  # Check if we now have native compose (without external delegation)
-  if podman compose version >/dev/null 2>&1 && ! podman compose version 2>&1 | grep -q "external compose provider"; then
-    log_success "Native podman compose is available and preferred"
+  # Check if we have working compose (native or delegated)
+  if podman compose version >/dev/null 2>&1; then
+    if ! podman compose version 2>&1 | grep -q "Executing external compose provider"; then
+      log_success "Native podman compose is available and preferred"
+    else
+      log_success "Podman compose available (delegates to external provider)"
+    fi
   else
-    log_warn "Native podman compose not available; will use podman-compose as fallback"
+    log_warn "Podman compose not available; will install podman-compose as fallback"
     
     # Fallback: Install python podman-compose if not already available
     if ! command -v podman-compose >/dev/null 2>&1; then
