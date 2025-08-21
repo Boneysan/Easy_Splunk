@@ -917,10 +917,35 @@ main() {
       esac
       ;;
     rhel)
+      # RHEL 8 detection for smart runtime selection
+      local rhel8_detected=false
+      if [[ -f /etc/redhat-release ]] && grep -q "Red Hat Enterprise Linux.*release 8\|CentOS.*release 8\|Rocky Linux.*release 8\|AlmaLinux.*release 8" /etc/redhat-release 2>/dev/null; then
+        rhel8_detected=true
+      elif [[ -f /etc/os-release ]]; then
+        source /etc/os-release 2>/dev/null || true
+        if [[ "${VERSION_ID:-}" == "8"* ]] && [[ "${ID:-}" =~ ^(rhel|centos|rocky|almalinux)$ ]]; then
+          rhel8_detected=true
+        fi
+      fi
+      
       case "${RUNTIME_PREF}" in
-        podman|auto) install_podman_rhel ;;
-        docker)      install_docker_rhel ;;
-        *)           die "${E_INVALID_INPUT}" "Unknown --runtime '${RUNTIME_PREF}'" ;;
+        podman) 
+          if [[ "$rhel8_detected" == "true" ]]; then
+            log_warn "RHEL 8 detected - Podman may have Python 3.6 compatibility issues with podman-compose"
+            log_info "Consider using: ./install-prerequisites.sh --runtime docker"
+          fi
+          install_podman_rhel 
+          ;;
+        auto) 
+          if [[ "$rhel8_detected" == "true" ]]; then
+            log_info "RHEL 8 detected - Preferring Docker for better Python compatibility"
+            install_docker_rhel
+          else
+            install_podman_rhel
+          fi
+          ;;
+        docker) install_docker_rhel ;;
+        *) die "${E_INVALID_INPUT}" "Unknown --runtime '${RUNTIME_PREF}'" ;;
       esac
       ;;
     mac)

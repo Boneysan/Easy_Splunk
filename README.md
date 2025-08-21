@@ -64,13 +64,22 @@ The toolkit now features comprehensive error handling with detailed troubleshoot
 RHEL 8 ships with Python 3.6, but podman-compose requires Python 3.8+ for the walrus operator (`:=`). 
 
 **Issue**: `SyntaxError: invalid syntax` when running podman-compose
-**Solution**: Use docker-compose binary instead, which is compatible with podman
+**Solution**: The toolkit now automatically detects RHEL 8 and prefers Docker for better compatibility
+
+**🆕 Automatic RHEL 8 Optimization:**
+- **Auto-detection**: Recognizes RHEL 8, CentOS 8, Rocky Linux 8, AlmaLinux 8
+- **Smart Runtime Selection**: Automatically prefers Docker over Podman on RHEL 8
+- **Seamless Experience**: Zero user intervention required
+- **Fallback Support**: Enhanced compose fallback system as backup
 
 ```bash
-# Quick fix for RHEL 8 Python 3.6 compatibility
+# Automatic RHEL 8 optimization (recommended)
+./install-prerequisites.sh --yes        # Auto-detects RHEL 8, prefers Docker
+
+# Manual fix for existing installations
 ./fix-python-compatibility.sh
 
-# Manual fix
+# Manual docker-compose installation
 sudo rm -f /usr/local/bin/podman-compose
 sudo curl -L "https://github.com/docker/compose/releases/download/v2.21.0/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
@@ -218,7 +227,9 @@ The toolkit now includes intelligent fallback logic for compose implementations:
 git clone https://github.com/Boneysan/Easy_Splunk.git
 cd Easy_Splunk
 
-# 2) Install prerequisites (automatically detects OS and installs container runtime)
+# 2) Install prerequisites (automatically detects OS and installs optimal container runtime)
+#    RHEL 8 systems: Automatically prefers Docker for better Python compatibility
+#    Other systems: Prefers Podman with comprehensive fallback support
 ./install-prerequisites.sh --yes
 
 # 3) Generate credentials (admin user/secret, TLS as needed)
