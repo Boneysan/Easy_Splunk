@@ -258,8 +258,20 @@ install_docker_compose_fallback() {
 
 # Initialize compose command with intelligent fallback
 init_compose_command() {
-    log_message INFO "Initializing container compose command"
+    log_message INFO "Initializing container compose command with enhanced fallback system"
     
+    # Use shared compose initialization library if available
+    if type initialize_compose_system &>/dev/null; then
+        if initialize_compose_system; then
+            COMPOSE_CMD="${COMPOSE_COMMAND:-}"
+            log_message SUCCESS "Compose system initialized successfully: $COMPOSE_CMD"
+            return 0
+        else
+            log_message WARN "Shared compose initialization failed, falling back to local logic"
+        fi
+    fi
+    
+    # Fallback to local compose initialization logic
     # RHEL 8 Detection for Smart Runtime Selection
     local prefer_docker=false
     if [[ -f /etc/redhat-release ]] && grep -q "Red Hat Enterprise Linux.*release 8\|CentOS.*release 8\|Rocky Linux.*release 8\|AlmaLinux.*release 8" /etc/redhat-release 2>/dev/null; then
@@ -293,8 +305,8 @@ init_compose_command() {
         elif docker compose version &>/dev/null 2>&1; then
             COMPOSE_CMD="docker compose"
         else
-            enhanced_compose_error "docker-compose / docker compose" "Docker Compose detection failed"
-            error_exit "Docker Compose not found. Enhanced troubleshooting steps provided above."
+            log_message ERROR "Docker Compose not found"
+            error_exit "Docker Compose not found"
         fi
     elif [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
         # Try podman-compose options first
@@ -309,40 +321,19 @@ init_compose_command() {
             log_message WARNING "Podman compose not available, attempting docker-compose fallback"
             
             if command -v docker-compose &>/dev/null; then
-                # Test if docker-compose works with podman
-                if DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock" docker-compose --version &>/dev/null 2>&1; then
-                    COMPOSE_CMD="docker-compose"
-                    export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-                    log_message SUCCESS "✅ Using docker-compose with podman socket as fallback"
-                elif sudo test -S /run/podman/podman.sock && DOCKER_HOST="unix:///run/podman/podman.sock" docker-compose --version &>/dev/null 2>&1; then
-                    COMPOSE_CMD="docker-compose"
-                    export DOCKER_HOST="unix:///run/podman/podman.sock"
-                    log_message SUCCESS "✅ Using docker-compose with system podman socket as fallback"
-                else
-                    log_message WARNING "docker-compose found but cannot connect to podman socket"
-                fi
-            fi
-            
-            # If docker-compose fallback didn't work, try installing it
-            if [[ -z "$COMPOSE_CMD" ]]; then
-                log_message INFO "Attempting to install docker-compose as fallback..."
-                if install_docker_compose_fallback; then
-                    COMPOSE_CMD="docker-compose"
-                    export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-                    log_message SUCCESS "✅ Installed and configured docker-compose fallback"
-                else
-                    enhanced_compose_error "podman-compose / podman compose / docker-compose" "All compose options failed"
-                    log_message ERROR "Podman compose detection failed and docker-compose fallback unsuccessful"
-                    log_message INFO "Available options:"
-                    log_message INFO "1. Run: ./fix-podman-compose.sh"
-                    log_message INFO "2. Run: ./fix-python-compatibility.sh (RHEL 8)"
-                    log_message INFO "3. Install Docker: sudo yum install -y docker && sudo systemctl start docker"
-                    error_exit "No working compose implementation found. Enhanced troubleshooting steps provided above."
-                fi
+                COMPOSE_CMD="docker-compose"
+                export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
+                log_message SUCCESS "✅ Using docker-compose with podman socket as fallback"
+            elif install_docker_compose_fallback; then
+                COMPOSE_CMD="docker-compose"
+                export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
+                log_message SUCCESS "✅ Installed and configured docker-compose fallback"
+            else
+                log_message ERROR "All compose options failed"
+                error_exit "No working compose implementation found"
             fi
         fi
     else
-        enhanced_runtime_error "$CONTAINER_RUNTIME" "unsupported container runtime"
         error_exit "Unsupported container runtime: $CONTAINER_RUNTIME"
     fi
     
