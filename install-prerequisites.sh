@@ -37,6 +37,39 @@ if [[ -f "${SCRIPT_DIR}/versions.env" ]]; then
   source <(sed 's/\r$//' "${SCRIPT_DIR}/versions.env")
 fi
 
+# Define with_retry function directly (fallback if not loaded from error-handling.sh)
+if ! type with_retry &>/dev/null; then
+  with_retry() {
+    local retries=3 base_delay=1 max_delay=30
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --retries) retries="$2"; shift 2;;
+        --base-delay) base_delay="$2"; shift 2;;
+        --max-delay) max_delay="$2"; shift 2;;
+        --) shift; break;;
+        *) break;;
+      esac
+    done
+    local attempt=1 delay="$base_delay"
+    local cmd=("$@")
+    [[ ${#cmd[@]} -gt 0 ]] || { echo "with_retry: no command provided" >&2; return 2; }
+    while true; do
+      "${cmd[@]}" && return 0
+      local rc=$?
+      if (( attempt >= retries )); then
+        log_message ERROR "with_retry: command failed after ${attempt} attempts (rc=${rc}): ${cmd[*]}" 2>/dev/null || echo "ERROR: with_retry failed after ${attempt} attempts" >&2
+        return "$rc"
+      fi
+      log_message WARNING "Attempt ${attempt} failed (rc=${rc}); retrying in ${delay}s..." 2>/dev/null || echo "WARNING: Attempt ${attempt} failed, retrying in ${delay}s..." >&2
+      sleep "$delay"
+      attempt=$((attempt+1))
+      # Exponential backoff with cap
+      delay=$(( delay * 2 ))
+      (( delay > max_delay )) && delay="$max_delay"
+    done
+  }
+fi
+
 # --- Dependency version check ---------------------------------------------------
 if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
   die "${E_GENERAL}" "install-prerequisites.sh requires core.sh version >= 1.0.0"
