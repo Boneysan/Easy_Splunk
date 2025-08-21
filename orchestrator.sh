@@ -44,8 +44,74 @@ if ! type error_exit &>/dev/null; then
   }
 fi
 
-# Source error handling module
+if ! type error_exit &>/dev/null; then
+  error_exit() {
+    local error_code=1
+    local message="Unknown error"
+    
+    case $# in
+      1) 
+        if [[ "$1" =~ ^[0-9]+$ ]]; then
+          error_code="$1"
+        else
+          message="$1"
+        fi
+        ;;
+      2) 
+        error_code="$1"
+        message="$2"
+        ;;
+    esac
+    
+    log_message ERROR "$message"
+    exit "$error_code"
+  }
+fi
+
+# Additional fallback functions
+if ! type acquire_lock &>/dev/null; then
+  acquire_lock() {
+    local lockfile="$1"
+    local timeout="${2:-30}"
+    local count=0
+    
+    while [[ -f "$lockfile" ]] && [[ $count -lt $timeout ]]; do
+      sleep 1
+      ((count++))
+    done
+    
+    if [[ $count -ge $timeout ]]; then
+      log_message ERROR "Failed to acquire lock: $lockfile (timeout after ${timeout}s)"
+      return 1
+    fi
+    
+    echo $$ > "$lockfile"
+    return 0
+  }
+fi
+
+if ! type register_cleanup_func &>/dev/null; then
+  register_cleanup_func() {
+    local func_name="$1"
+    # Simple fallback - just store the function name
+    export CLEANUP_FUNCTIONS="${CLEANUP_FUNCTIONS:-} $func_name"
+  }
+fi
+
+# Source required libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source core library first
+source "${SCRIPT_DIR}/lib/core.sh" || {
+    log_message WARN "Cannot load core library from lib/core.sh - using fallback functions"
+}
+
+# Source compose initialization library
+source "${SCRIPT_DIR}/lib/compose-init.sh" || {
+    log_message WARN "Cannot load compose initialization from lib/compose-init.sh"
+}
+
+# Source error handling module
 source "${SCRIPT_DIR}/lib/error-handling.sh" || {
     log_message WARN "Cannot load error handling module from lib/error-handling.sh - using fallback functions"
 }
