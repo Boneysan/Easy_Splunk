@@ -9,6 +9,82 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
     exit 1
 }
 
+# Define fallback functions if not loaded from error-handling.sh
+if ! type log_message &>/dev/null; then
+  log_message() {
+    local level="$1"
+    shift
+    local message="$*"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    case "$level" in
+        ERROR)
+            echo -e "\033[0;31m[ERROR]\033[0m $message" >&2
+            ;;
+        WARNING)
+            echo -e "\033[1;33m[WARN ]\033[0m $message" >&2
+            ;;
+        INFO)
+            echo -e "\033[0;34m[INFO ]\033[0m $message"
+            ;;
+        SUCCESS)
+            echo -e "\033[0;32m[OK   ]\033[0m $message"
+            ;;
+        DEBUG)
+            if [[ "${DEBUG_MODE:-false}" == "true" ]]; then
+                echo -e "\033[1;33m[DEBUG]\033[0m $message" >&2
+            fi
+            ;;
+        *)
+            echo "$message"
+            ;;
+    esac
+  }
+fi
+
+if ! type init_error_handling &>/dev/null; then
+  init_error_handling() {
+    # Fallback initialization - just return success
+    return 0
+  }
+fi
+
+if ! type register_cleanup &>/dev/null; then
+  register_cleanup() {
+    # Fallback cleanup registration - just return success
+    return 0
+  }
+fi
+
+if ! type error_exit &>/dev/null; then
+  error_exit() {
+    local error_code="$1"
+    local error_message="$2"
+    
+    # Handle case where first argument might be the message
+    if [[ "$error_code" =~ ^[0-9]+$ ]]; then
+      # First argument is numeric (error code)
+      log_message ERROR "${error_message:-Unknown error}"
+      exit "$error_code"
+    else
+      # First argument is the message
+      log_message ERROR "$error_code"
+      exit 1
+    fi
+  }
+fi
+
+if ! type validate_safe_path &>/dev/null; then
+  validate_safe_path() {
+    local path="$1"
+    # Basic path validation - check if path is safe
+    if [[ "$path" =~ \.\. ]] || [[ "$path" =~ ^/ ]] && [[ "$path" != "${SCRIPT_DIR}"* ]]; then
+      return 1
+    fi
+    return 0
+  }
+fi
+
 # Initialize error handling
 init_error_handling
 
