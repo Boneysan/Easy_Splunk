@@ -2,119 +2,6 @@
 # lib/compose-init.sh - Shared compose command initialization with fallback system
 # This library provides compose command detection and fallback for all scripts
 
-
-# BEGIN: Fallback functions for error handling library compatibility
-# These functions provide basic functionality when lib/error-handling.sh fails to load
-
-# Fallback log_message function for error handling library compatibility
-if ! type log_message &>/dev/null; then
-  log_message() {
-    local level="${1:-INFO}"
-    local message="${2:-}"
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-    
-    case "$level" in
-      ERROR)   echo -e "\033[31m[$timestamp] ERROR: $message\033[0m" >&2 ;;
-      WARNING) echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
-      SUCCESS) echo -e "\033[32m[$timestamp] SUCCESS: $message\033[0m" ;;
-      DEBUG)   [[ "${VERBOSE:-false}" == "true" ]] && echo -e "\033[36m[$timestamp] DEBUG: $message\033[0m" ;;
-      *)       echo -e "[$timestamp] INFO: $message" ;;
-    esac
-  }
-fi
-
-# Fallback error_exit function for error handling library compatibility
-if ! type error_exit &>/dev/null; then
-  error_exit() {
-    local error_code=1
-    local error_message=""
-    
-    if [[ $# -eq 1 ]]; then
-      if [[ "$1" =~ ^[0-9]+$ ]]; then
-        error_code="$1"
-        error_message="Script failed with exit code $error_code"
-      else
-        error_message="$1"
-      fi
-    elif [[ $# -eq 2 ]]; then
-      error_message="$1"
-      error_code="$2"
-    fi
-    
-    if [[ -n "$error_message" ]]; then
-      log_message ERROR "${error_message:-Unknown error}"
-    fi
-    
-    exit "$error_code"
-  }
-fi
-
-# Fallback init_error_handling function for error handling library compatibility
-if ! type init_error_handling &>/dev/null; then
-  init_error_handling() {
-    # Basic error handling setup - no-op fallback
-    set -euo pipefail
-  }
-fi
-
-# Fallback register_cleanup function for error handling library compatibility
-if ! type register_cleanup &>/dev/null; then
-  register_cleanup() {
-    # Basic cleanup registration - no-op fallback
-    # Production systems should use proper cleanup handling
-    return 0
-  }
-fi
-
-# Fallback validate_safe_path function for error handling library compatibility
-if ! type validate_safe_path &>/dev/null; then
-  validate_safe_path() {
-    local path="$1"
-    local description="${2:-path}"
-    
-    # Basic path validation
-    if [[ -z "$path" ]]; then
-      log_message ERROR "$description cannot be empty"
-      return 1
-    fi
-    
-    if [[ "$path" == *".."* ]]; then
-      log_message ERROR "$description contains invalid characters (..)"
-      return 1
-    fi
-    
-    return 0
-  }
-fi
-
-# Fallback with_retry function for error handling library compatibility
-if ! type with_retry &>/dev/null; then
-  with_retry() {
-    local max_attempts=3
-    local delay=2
-    local attempt=1
-    local cmd=("$@")
-    
-    while [[ $attempt -le $max_attempts ]]; do
-      if "${cmd[@]}"; then
-        return 0
-      fi
-      
-      local rc=$?
-      if [[ $attempt -eq $max_attempts ]]; then
-        log_message ERROR "with_retry: command failed after ${attempt} attempts (rc=${rc}): ${cmd[*]}" 2>/dev/null || echo "ERROR: with_retry failed after ${attempt} attempts" >&2
-        return $rc
-      fi
-      
-      log_message WARNING "Attempt ${attempt} failed (rc=${rc}); retrying in ${delay}s..." 2>/dev/null || echo "WARNING: Attempt ${attempt} failed, retrying in ${delay}s..." >&2
-      sleep $delay
-      ((attempt++))
-      ((delay *= 2))
-    done
-  }
-fi
-# END: Fallback functions for error handling library compatibility
-
 # Version and guard
 if [[ -n "${COMPOSE_INIT_VERSION:-}" ]]; then
     return 0 2>/dev/null || true
@@ -124,6 +11,35 @@ readonly COMPOSE_INIT_VERSION="1.0.0"
 # Global variables
 COMPOSE_CMD=""
 COMPOSE_ARGS=""
+
+# Detect if running on RHEL 8 (known to have Python 3.6 compatibility issues)
+detect_rhel8() {
+    # Check for RHEL 8 specifically
+    if [[ -f /etc/redhat-release ]]; then
+        if grep -q "Red Hat Enterprise Linux.*release 8" /etc/redhat-release 2>/dev/null; then
+            return 0
+        fi
+        if grep -q "CentOS.*release 8" /etc/redhat-release 2>/dev/null; then
+            return 0
+        fi
+        if grep -q "Rocky Linux.*release 8" /etc/redhat-release 2>/dev/null; then
+            return 0
+        fi
+        if grep -q "AlmaLinux.*release 8" /etc/redhat-release 2>/dev/null; then
+            return 0
+        fi
+    fi
+    
+    # Check via os-release for additional RHEL 8 variants
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release 2>/dev/null || true
+        if [[ "${VERSION_ID:-}" == "8"* ]] && [[ "${ID:-}" =~ ^(rhel|centos|rocky|almalinux)$ ]]; then
+            return 0
+        fi
+    fi
+    
+    return 1
+}
 
 # Install docker-compose fallback function
 install_docker_compose_fallback() {
@@ -177,15 +93,37 @@ init_compose_command() {
     COMPOSE_CMD=""
     COMPOSE_ARGS=""
     
-    # Validate container runtime first
+    # RHEL 8 Detection and Smart Runtime Selection
+    local prefer_docker=false
+    if detect_rhel8; then
+        log_message INFO "RHEL 8 detected - Docker preferred due to Python 3.6 compatibility issues"
+        prefer_docker=true
+    fi
+    
+    # Validate container runtime with RHEL 8 preference
     if [[ -z "${CONTAINER_RUNTIME:-}" ]]; then
-        if command -v podman >/dev/null 2>&1; then
-            export CONTAINER_RUNTIME="podman"
-        elif command -v docker >/dev/null 2>&1; then
-            export CONTAINER_RUNTIME="docker"
+        if [[ "$prefer_docker" == "true" ]]; then
+            # On RHEL 8, prefer Docker if available
+            if command -v docker >/dev/null 2>&1; then
+                export CONTAINER_RUNTIME="docker"
+                log_message INFO "Selected Docker runtime (RHEL 8 optimization)"
+            elif command -v podman >/dev/null 2>&1; then
+                export CONTAINER_RUNTIME="podman"
+                log_message WARN "Using Podman on RHEL 8 - may have compose compatibility issues"
+            else
+                log_message ERROR "No container runtime detected"
+                return 1
+            fi
         else
-            log_message ERROR "No container runtime detected"
-            return 1
+            # Normal preference: podman first, then docker
+            if command -v podman >/dev/null 2>&1; then
+                export CONTAINER_RUNTIME="podman"
+            elif command -v docker >/dev/null 2>&1; then
+                export CONTAINER_RUNTIME="docker"
+            else
+                log_message ERROR "No container runtime detected"
+                return 1
+            fi
         fi
     fi
     
@@ -294,6 +232,7 @@ initialize_compose_system() {
 }
 
 # Export functions for use by other scripts
+export -f detect_rhel8
 export -f install_docker_compose_fallback
 export -f init_compose_command  
 export -f setup_compose_command_array
