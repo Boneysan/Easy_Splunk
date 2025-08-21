@@ -138,6 +138,7 @@ IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+source "${SCRIPT_DIR}/lib/compose-init.sh"
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 source "${SCRIPT_DIR}/lib/security.sh"
 
@@ -311,7 +312,7 @@ main() {
   log_info "🚀 Starting Application Cluster"
   [[ -f "${COMPOSE_FILE}" ]] || die "${E_MISSING_DEP:-3}" "Compose file not found: ${COMPOSE_FILE}"
   detect_container_runtime
-  read -r -a COMPOSE_COMMAND_ARRAY <<< "${COMPOSE_COMMAND}"
+  initialize_compose_system
   log_info "Using runtime: ${CONTAINER_RUNTIME}"
   log_info "Compose cmd:   ${COMPOSE_COMMAND}"
   log_info "Compose file:  ${COMPOSE_FILE}"

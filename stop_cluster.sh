@@ -139,6 +139,7 @@ IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+source "${SCRIPT_DIR}/lib/compose-init.sh"
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 
 # --- Defaults ---
@@ -235,7 +236,7 @@ main() {
     exit 0
   fi
   detect_container_runtime
-  read -r -a COMPOSE_COMMAND_ARRAY <<< "${COMPOSE_COMMAND}"
+  initialize_compose_system
 
   # Warn about destructive actions
   if [[ "${CLEANUP_VOLUMES}" == "true" ]]; then
