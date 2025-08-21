@@ -17,10 +17,11 @@ echo "3. 🔄 Podman-Compose Fix"
 echo "4. 🐳 Install Docker Compose"
 echo "5. 🧪 Test All Scripts Status"
 echo "6. 📋 View Complete Fix Summary"
+echo "7. 🆕 Test New Compose Fallback System"
 echo "0. Exit"
 echo ""
 
-read -p "Select option (0-6): " choice
+read -p "Select option (0-7): " choice
 
 case $choice in
     1)
@@ -77,12 +78,53 @@ case $choice in
             echo "❌ final-fix-summary.sh not found or not executable"
         fi
         ;;
+    7)
+        echo "🆕 Testing new compose fallback system..."
+        if [[ -x "./test-compose-fallback-simple.sh" ]]; then
+            ./test-compose-fallback-simple.sh
+        else
+            echo "❌ test-compose-fallback-simple.sh not found or not executable"
+            echo "🔄 Running basic fallback test..."
+            echo ""
+            echo "Current environment:"
+            echo -n "• Podman: "
+            if command -v podman >/dev/null 2>&1; then
+                echo "✅ Available"
+            else
+                echo "❌ Not available"
+            fi
+            echo -n "• Docker: "
+            if command -v docker >/dev/null 2>&1; then
+                echo "✅ Available"
+            else
+                echo "❌ Not available"
+            fi
+            echo -n "• podman-compose: "
+            if command -v podman-compose >/dev/null 2>&1; then
+                echo "✅ Available"
+            else
+                echo "❌ Not available"
+            fi
+            echo -n "• docker-compose: "
+            if command -v docker-compose >/dev/null 2>&1; then
+                echo "✅ Available"
+            else
+                echo "❌ Not available"
+            fi
+            echo ""
+            echo "✨ New Feature: The toolkit will now automatically:"
+            echo "   1. Try podman-compose first"
+            echo "   2. Try native podman compose"
+            echo "   3. 🆕 Fallback to docker-compose with podman"
+            echo "   4. 🆕 Auto-install docker-compose if needed"
+        fi
+        ;;
     0)
         echo "Exiting."
         exit 0
         ;;
     *)
-        echo "❌ Invalid option. Please select 0-6."
+        echo "❌ Invalid option. Please select 0-7."
         exit 1
         ;;
 esac

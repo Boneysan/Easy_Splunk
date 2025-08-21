@@ -99,6 +99,61 @@ All scripts now include comprehensive fallback functions to ensure reliability e
 ./fix-all-function-loading.sh
 ```
 
+---
+
+## 🔄 Automatic Compose Fallback System
+
+**NEW FEATURE**: The toolkit now includes intelligent automatic fallback from podman-compose to docker-compose when compose failures occur.
+
+### **Fallback Logic**
+```bash
+Level 1: Try podman-compose
+   ├─ If available and working → Use it
+   └─ If not available/broken → Go to Level 2
+
+Level 2: Try podman compose (native)
+   ├─ If available and working → Use it  
+   └─ If not available/broken → Go to Level 3
+
+Level 3: Try docker-compose with podman
+   ├─ If docker-compose available → Use with podman socket
+   └─ If not available → Go to Level 4
+
+Level 4: Auto-install docker-compose
+   ├─ Download docker-compose v2.21.0
+   ├─ Install to /usr/local/bin/
+   ├─ Configure podman socket
+   └─ Ready to use!
+```
+
+### **Benefits**
+- ✅ **Zero User Intervention**: Automatic recovery from compose failures
+- ✅ **RHEL 8 Compatible**: Works with Python 3.6 limitations  
+- ✅ **Seamless Operation**: No deployment interruption
+- ✅ **Smart Detection**: Intelligent environment analysis
+- ✅ **Robust Recovery**: Multiple fallback levels ensure success
+
+### **User Experience**
+```bash
+# Before: Manual intervention required
+[ERROR] podman-compose not working
+# User has to manually fix compose issues
+
+# After: Automatic recovery
+[INFO ] Trying podman-compose...
+[WARN ] podman-compose failed, trying podman compose...
+[INFO ] Installing docker-compose fallback...
+[OK   ] Compose command ready: docker-compose
+```
+
+### **Test Compose Fallback**
+```bash
+# Test the fallback system
+./quick-fixes.sh  # Select option 7
+./test-compose-fallback-simple.sh
+./compose-fallback-summary.sh
+```
+
 ### **Automated Fallback System**
 The toolkit now includes intelligent fallback logic for compose implementations:
 
@@ -187,6 +242,14 @@ If you encounter function loading errors or podman-compose issues, here are imme
 ./quick-fixes.sh
 ```
 This interactive script provides all fixes in one place with guided options.
+
+### **🆕 Test New Compose Fallback System**
+```bash
+./quick-fixes.sh  # Select option 7
+# OR run directly:
+./test-compose-fallback-simple.sh
+```
+The new automatic fallback system eliminates the need for manual compose fixes.
 
 ### **Option 1: Run the automated fix script**
 ```bash
