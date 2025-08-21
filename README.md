@@ -75,6 +75,28 @@ sudo chmod +x /usr/local/bin/docker-compose
 sudo ln -sf /usr/local/bin/docker-compose /usr/local/bin/podman-compose
 ```
 
+### **Function Loading Fixes**
+All scripts now include comprehensive fallback functions to ensure reliability even when the main error handling library fails to load.
+
+**Fixed Issues**:
+- ✅ `with_retry: command not found` - Added fallback with `--retries` argument support
+- ✅ `enhanced_installation_error: command not found` - Added fallback with troubleshooting guidance
+- ✅ `log_message: command not found` - Added color-coded logging fallback
+- ✅ Password validation regex - Fixed over-escaped special character pattern
+- ✅ All critical scripts now work independently with local fallback functions
+
+**Available Function Loading Test Scripts**:
+```bash
+# Test all critical scripts for function loading issues
+./function-loading-status.sh
+
+# Test specific functionality
+./debug-password-validation.sh
+
+# Apply comprehensive fixes to all scripts
+./fix-all-function-loading.sh
+```
+
 ### **Automated Fixes Available**
 - **./fix-podman-compose.sh** - Comprehensive fix for podman-compose issues on RHEL 8
 - **./fix-python-compatibility.sh** - Fix Python 3.6/3.8+ compatibility issues with podman-compose
