@@ -307,7 +307,7 @@ validate_password() {
     if [[ "$password" =~ [A-Z] ]]; then has_upper=true; fi
     if [[ "$password" =~ [a-z] ]]; then has_lower=true; fi
     if [[ "$password" =~ [0-9] ]]; then has_number=true; fi
-    if [[ "$password" =~ [\!\@\#\$\%\^\&\*\(\)\_\+\-\=\[\]\{\}\|\;\:\,\.\<\>\?] ]]; then has_special=true; fi
+    if [[ "$password" =~ [^a-zA-Z0-9] ]]; then has_special=true; fi
     
     # Validate against requirements
     if [[ "$REQUIRE_UPPERCASE" == "true" ]] && [[ "$has_upper" != "true" ]]; then
