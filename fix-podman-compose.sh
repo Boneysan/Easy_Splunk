@@ -48,6 +48,17 @@ diagnose_current_state() {
     
     # Check Python version
     if command -v python3 >/dev/null 2>&1; then
+        local python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
+        echo "Python version: $python_version" | tee -a "${LOG_FILE}"
+        
+        # Check for Python compatibility issues
+        if [[ "$python_version" < "3.8" && "$python_version" != "unknown" ]]; then
+            log_warning "Python $python_version detected - podman-compose may have compatibility issues"
+            log_warning "Walrus operator (:=) requires Python 3.8+, but found Python $python_version"
+            echo "PYTHON_COMPATIBILITY_ISSUE=true" >> "${LOG_FILE}"
+        else
+            echo "Python compatibility: OK" | tee -a "${LOG_FILE}"
+        fi
         local python_version
         python_version=$(python3 --version 2>&1)
         log_step "Python version: $python_version"
@@ -494,6 +505,66 @@ check_and_fix_selinux() {
     fi
 }
 
+# Fix Python compatibility issues (RHEL 8 has Python 3.6, podman-compose needs 3.8+)
+fix_python_compatibility() {
+    log_step "🐍 Checking Python compatibility for podman-compose..."
+    
+    local python_version=""
+    if command -v python3 >/dev/null 2>&1; then
+        python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
+        echo "Python version: $python_version" | tee -a "${LOG_FILE}"
+    else
+        log_error "Python 3 not found"
+        return 1
+    fi
+    
+    if [[ "$python_version" < "3.8" && "$python_version" != "unknown" ]]; then
+        log_warning "Python $python_version detected - podman-compose requires Python 3.8+ for walrus operator (:=)"
+        log_step "Installing docker-compose as compatible alternative..."
+        
+        # Remove incompatible podman-compose
+        log_step "Removing incompatible podman-compose..."
+        sudo rm -f /usr/local/bin/podman-compose 2>/dev/null || true
+        sudo rm -rf /usr/local/lib/python3.6/site-packages/podman_compose* 2>/dev/null || true
+        sudo rm -rf /root/.local/lib/python3.6/site-packages/podman_compose* 2>/dev/null || true
+        pip3 uninstall -y podman-compose 2>/dev/null || true
+        
+        # Install docker-compose binary
+        log_step "Installing docker-compose v2.21.0..."
+        if sudo curl -L "https://github.com/docker/compose/releases/download/v2.21.0/docker-compose-linux-x86_64" \
+            -o /usr/local/bin/docker-compose; then
+            sudo chmod +x /usr/local/bin/docker-compose
+            
+            # Create podman-compose symlink for compatibility
+            sudo ln -sf /usr/local/bin/docker-compose /usr/local/bin/podman-compose
+            
+            # Verify installation
+            if docker-compose --version >/dev/null 2>&1; then
+                log_success "✅ docker-compose installed successfully"
+                log_success "✅ podman-compose compatibility symlink created"
+                
+                # Test with podman
+                export DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock
+                if timeout 10 docker-compose version >/dev/null 2>&1; then
+                    log_success "✅ Compose works with podman socket"
+                else
+                    log_warning "ℹ️  Compose installed, may need podman socket setup"
+                fi
+                return 0
+            else
+                log_error "Failed to verify docker-compose installation"
+                return 1
+            fi
+        else
+            log_error "Failed to download docker-compose"
+            return 1
+        fi
+    else
+        log_success "✅ Python $python_version supports podman-compose natively"
+        return 0
+    fi
+}
+
 # Main fix function
 main() {
     echo "🔧 Enhanced Podman-Compose Fix Script for Easy_Splunk"
@@ -502,8 +573,18 @@ main() {
     echo "Integrating with Enhanced Error Handling system"
     echo ""
     
-    # Step 0: Comprehensive diagnostics
-    log_step "0. Running comprehensive system diagnostics..."
+    # Step 0: Check Python compatibility first
+    log_step "0. Checking Python compatibility..."
+    if fix_python_compatibility; then
+        log_success "Python compatibility resolved"
+        if command -v podman-compose >/dev/null 2>&1 && podman-compose --version >/dev/null 2>&1; then
+            log_success "🎉 podman-compose is now working! Skipping further fixes."
+            return 0
+        fi
+    fi
+    
+    # Step 1: Comprehensive diagnostics
+    log_step "1. Running comprehensive system diagnostics..."
     if ! diagnose_current_state; then
         log_error "System diagnostics failed - critical issues detected"
         create_enhanced_workaround_guide

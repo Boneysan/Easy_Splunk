@@ -53,10 +53,31 @@ The toolkit now features comprehensive error handling with detailed troubleshoot
 
 # Automated fix for podman-compose issues
 ./fix-podman-compose.sh
+
+# Fix Python compatibility issues (RHEL 8 specific)
+./fix-python-compatibility.sh
+```
+
+### **Python Compatibility Fix (RHEL 8)**
+RHEL 8 ships with Python 3.6, but podman-compose requires Python 3.8+ for the walrus operator (`:=`). 
+
+**Issue**: `SyntaxError: invalid syntax` when running podman-compose
+**Solution**: Use docker-compose binary instead, which is compatible with podman
+
+```bash
+# Quick fix for RHEL 8 Python 3.6 compatibility
+./fix-python-compatibility.sh
+
+# Manual fix
+sudo rm -f /usr/local/bin/podman-compose
+sudo curl -L "https://github.com/docker/compose/releases/download/v2.21.0/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+sudo ln -sf /usr/local/bin/docker-compose /usr/local/bin/podman-compose
 ```
 
 ### **Automated Fixes Available**
 - **./fix-podman-compose.sh** - Comprehensive fix for podman-compose issues on RHEL 8
+- **./fix-python-compatibility.sh** - Fix Python 3.6/3.8+ compatibility issues with podman-compose
 - **Targeted troubleshooting** - Specific commands for your exact error scenario
 - **SELinux integration** - Automatic container policy fixes for enterprise distributions
 
