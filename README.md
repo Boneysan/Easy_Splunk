@@ -5,6 +5,8 @@ Supports air-gapped environments, automated credential/TLS generation, integrate
 
 **✅ Latest Update**: Enhanced error handling with detailed troubleshooting steps and comprehensive guidance for common deployment issues. Fixed container runtime detection for RHEL 8, CentOS 8, Rocky Linux, and other enterprise distributions.
 
+**🚨 Having Issues?** Jump to [Immediate Solutions](#-immediate-solutions-troubleshooting) for quick fixes.
+
 ---
 
 # Easy_Splunk
@@ -157,6 +159,82 @@ cd Easy_Splunk
 
 # 5) Health check
 ./health_check.sh
+```
+
+---
+
+## 🚨 Immediate Solutions (Troubleshooting)
+
+If you encounter function loading errors or podman-compose issues, here are immediate fixes:
+
+### **🚀 Quick Fix Menu (Recommended)**
+```bash
+./quick-fixes.sh
+```
+This interactive script provides all fixes in one place with guided options.
+
+### **Option 1: Run the automated fix script**
+```bash
+./fix-podman-compose.sh
+```
+
+### **Option 2: Use the Python compatibility fix**
+```bash
+./fix-python-compatibility.sh
+```
+
+### **Option 3: Switch to Docker Compose (Recommended)**
+Since you're having podman-compose issues, install Docker Compose directly:
+```bash
+# Install Docker Compose v2
+curl -L https://github.com/docker/compose/releases/download/v2.21.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+
+# Verify installation
+docker-compose --version
+```
+
+### **Option 4: Try native Podman Compose**
+Newer versions of Podman include built-in compose support:
+```bash
+# Check if available
+podman compose --help
+
+# If available, the toolkit should detect and use it automatically
+```
+
+### **Root Cause Analysis**
+The issues you're seeing:
+- **Python 3.6 Compatibility** - podman-compose has known issues with older Python versions
+- **Missing podman-compose** - The package may not be properly installed
+- **Package Manager Detection** - The script is having trouble with your package manager
+
+### **Alternative Approach**
+If the fixes don't work, you can bypass podman entirely:
+```bash
+# Install Docker instead of Podman
+sudo yum install -y docker
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -aG docker $USER
+
+# Log out and back in, then retry
+./deploy.sh medium --index-name my_app_prod --splunk-user admin
+```
+
+### **Verification Steps**
+After applying any fix, verify with:
+```bash
+# Check what's available
+podman-compose --version
+podman compose --help
+docker-compose --version
+
+# Check the logs for more details
+cat /tmp/easy_splunk_*.log
+
+# Test the toolkit functionality
+./function-loading-status.sh
 ```
 
 ---
