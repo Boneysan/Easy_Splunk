@@ -8,6 +8,24 @@ if [[ -n "${COMPOSE_INIT_VERSION:-}" ]]; then
 fi
 readonly COMPOSE_INIT_VERSION="1.0.0"
 
+# Fallback log_message function for standalone operation
+if ! type log_message &>/dev/null; then
+  log_message() {
+    local level="${1:-INFO}"
+    local message="${2:-}"
+    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    
+    case "$level" in
+      ERROR)   echo -e "\033[31m[$timestamp] ERROR: $message\033[0m" >&2 ;;
+      WARN)    echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
+      WARNING) echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
+      SUCCESS) echo -e "\033[32m[$timestamp] SUCCESS: $message\033[0m" ;;
+      DEBUG)   [[ "${VERBOSE:-false}" == "true" ]] && echo -e "\033[36m[$timestamp] DEBUG: $message\033[0m" ;;
+      *)       echo -e "[$timestamp] INFO: $message" ;;
+    esac
+  }
+fi
+
 # Global variables
 COMPOSE_CMD=""
 COMPOSE_ARGS=""
