@@ -109,6 +109,24 @@ if ! type with_retry &>/dev/null; then
     local max_attempts=3
     local delay=2
     local attempt=1
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --retries)
+          max_attempts="$2"
+          shift 2
+          ;;
+        --)
+          shift
+          break
+          ;;
+        *)
+          break
+          ;;
+      esac
+    done
+    
     local cmd=("$@")
     
     while [[ $attempt -le $max_attempts ]]; do
@@ -127,6 +145,36 @@ if ! type with_retry &>/dev/null; then
       ((attempt++))
       ((delay *= 2))
     done
+  }
+fi
+
+# Fallback enhanced_installation_error function for error handling library compatibility
+if ! type enhanced_installation_error &>/dev/null; then
+  enhanced_installation_error() {
+    local error_type="$1"
+    local context="$2"
+    local message="$3"
+    
+    log_message ERROR "$message"
+    log_message INFO "Error Type: $error_type"
+    log_message INFO "Context: $context"
+    log_message INFO "Troubleshooting steps:"
+    
+    case "$error_type" in
+      "container-runtime")
+        log_message INFO "1. Check if container runtime is installed: $CONTAINER_RUNTIME --version"
+        log_message INFO "2. Verify user permissions: groups \$USER"
+        log_message INFO "3. Try restarting the service: sudo systemctl restart $CONTAINER_RUNTIME"
+        log_message INFO "4. Check service status: sudo systemctl status $CONTAINER_RUNTIME"
+        ;;
+      *)
+        log_message INFO "1. Check system logs for more details"
+        log_message INFO "2. Verify all prerequisites are installed"
+        log_message INFO "3. Try running the installation with --debug for more output"
+        ;;
+    esac
+    
+    return 1
   }
 fi
 # END: Fallback functions for error handling library compatibility
