@@ -114,8 +114,28 @@ install_podman_rhel() {
           enhanced_installation_error "podman-compose" "pip3" "pipx installation failed"
         fi
       elif have_cmd pip3; then
-        if ! sudo pip3 install podman-compose; then
-          enhanced_installation_error "podman-compose" "pip3" "pip3 installation failed"
+        # Use --user for non-root installs, system-wide for root
+        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+          if ! pip3 install podman-compose; then
+            enhanced_installation_error "podman-compose" "pip3" "pip3 installation failed"
+          fi
+        else
+          if ! pip3 install --user podman-compose; then
+            enhanced_installation_error "podman-compose" "pip3" "pip3 installation failed"
+          else
+            # Configure PATH for user installations
+            local user_bin_path="$HOME/.local/bin"
+            if [[ ":$PATH:" != *":$user_bin_path:"* ]]; then
+              export PATH="$PATH:$user_bin_path"
+              echo "Added $user_bin_path to current session PATH"
+            fi
+            
+            # Add to bashrc for persistence if not already present
+            if [[ -f "$HOME/.bashrc" ]] && ! grep -q "$user_bin_path" "$HOME/.bashrc"; then
+              echo "export PATH=\$PATH:$user_bin_path" >> "$HOME/.bashrc"
+              echo "Added $user_bin_path to ~/.bashrc for future sessions"
+            fi
+          fi
         fi
       else
         enhanced_error "COMPOSE_MISSING" \
@@ -156,8 +176,28 @@ install_podman_debian() {
           enhanced_installation_error "podman-compose" "pip3" "pipx installation failed"
         fi
       elif have_cmd pip3; then
-        if ! sudo pip3 install podman-compose; then
-          enhanced_installation_error "podman-compose" "pip3" "pip3 installation failed"
+        # Use --user for non-root installs, system-wide for root
+        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+          if ! pip3 install podman-compose; then
+            enhanced_installation_error "podman-compose" "pip3" "pip3 installation failed"
+          fi
+        else
+          if ! pip3 install --user podman-compose; then
+            enhanced_installation_error "podman-compose" "pip3" "pip3 installation failed"
+          else
+            # Configure PATH for user installations
+            local user_bin_path="$HOME/.local/bin"
+            if [[ ":$PATH:" != *":$user_bin_path:"* ]]; then
+              export PATH="$PATH:$user_bin_path"
+              echo "Added $user_bin_path to current session PATH"
+            fi
+            
+            # Add to bashrc for persistence if not already present
+            if [[ -f "$HOME/.bashrc" ]] && ! grep -q "$user_bin_path" "$HOME/.bashrc"; then
+              echo "export PATH=\$PATH:$user_bin_path" >> "$HOME/.bashrc"
+              echo "Added $user_bin_path to ~/.bashrc for future sessions"
+            fi
+          fi
         fi
       else
         enhanced_error "COMPOSE_MISSING" \

@@ -400,6 +400,19 @@ install_podman_rhel() {
             pip3 install podman-compose || log_warn "Failed to install podman-compose via pip3"
           else
             pip3 install --user podman-compose || log_warn "Failed to install podman-compose via pip3"
+            
+            # Configure PATH for user installations
+            local user_bin_path="$HOME/.local/bin"
+            if [[ ":$PATH:" != *":$user_bin_path:"* ]]; then
+              export PATH="$PATH:$user_bin_path"
+              log_info "Added $user_bin_path to current session PATH"
+            fi
+            
+            # Add to bashrc for persistence if not already present
+            if [[ -f "$HOME/.bashrc" ]] && ! grep -q "$user_bin_path" "$HOME/.bashrc"; then
+              echo "export PATH=\$PATH:$user_bin_path" >> "$HOME/.bashrc"
+              log_info "Added $user_bin_path to ~/.bashrc for future sessions"
+            fi
           fi
           
           # Re-detect runtime capabilities after installation

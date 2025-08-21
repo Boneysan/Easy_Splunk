@@ -29,10 +29,11 @@ The toolkit now features comprehensive error handling with detailed troubleshoot
 [INFO ] Troubleshooting steps:
 [INFO ] 1. Try: podman-compose --version
 [INFO ] 2. Check: pip3 list | grep podman-compose  
-[INFO ] 3. Reinstall: pip3 install podman-compose==1.0.6
-[INFO ] 4. Alternative: Use native 'podman compose' if available
-[INFO ] 5. Verify runtime: podman --version
-[INFO ] 6. Logs available at: ./install.log
+[INFO ] 3. Reinstall: pip3 install --user podman-compose==1.0.6
+[INFO ] 4. Configure PATH: export PATH=$PATH:$HOME/.local/bin
+[INFO ] 5. Alternative: Use native 'podman compose' if available
+[INFO ] 6. Verify runtime: podman --version
+[INFO ] 7. Logs available at: ./install.log
 ```
 
 ### **Error Categories**

@@ -96,10 +96,37 @@ fix_podman_compose_installation() {
     
     # Install required dependencies first
     log_step "Installing Python dependencies..."
-    if ! pip3 install --upgrade pip 2>&1 | tee -a "${LOG_FILE}"; then
-        enhanced_installation_error "pip" "pip3" "pip upgrade failed"
-        return 1
-    fi
+        pip3 install --upgrade pip 2>&1 | tee -a "$LOG_FILE" || {
+            enhanced_installation_error "pip" "pip3" "pip upgrade failed"
+            return 1
+        }
+        
+        # Configure PATH for user installations
+        local user_bin_path=""
+        if [[ "$EUID" -eq 0 ]]; then
+            user_bin_path="/root/.local/bin"
+        else
+            user_bin_path="$HOME/.local/bin"
+        fi
+        
+        # Add to current session PATH if not already present
+        if [[ ":$PATH:" != *":$user_bin_path:"* ]]; then
+            export PATH="$PATH:$user_bin_path"
+            log_step "Added $user_bin_path to current session PATH"
+        fi
+        
+        # Add to bashrc for persistence if not already present
+        local bashrc_file=""
+        if [[ "$EUID" -eq 0 ]]; then
+            bashrc_file="/root/.bashrc"
+        else
+            bashrc_file="$HOME/.bashrc"
+        fi
+        
+        if [[ -f "$bashrc_file" ]] && ! grep -q "$user_bin_path" "$bashrc_file"; then
+            echo "export PATH=\$PATH:$user_bin_path" >> "$bashrc_file"
+            log_success "Added $user_bin_path to $bashrc_file for future sessions"
+        fi
     
     pip3 install pyyaml python-dotenv 2>&1 | tee -a "${LOG_FILE}" || log_warning "Some dependencies may have failed"
     
@@ -109,8 +136,39 @@ fix_podman_compose_installation() {
     for version in "${versions[@]}"; do
         log_step "Trying podman-compose version ${version}..."
         
-        if pip3 install "podman-compose==${version}" 2>&1 | tee -a "${LOG_FILE}"; then
+        if pip3 install --user "podman-compose==${version}" 2>&1 | tee -a "${LOG_FILE}"; then
             log_success "Successfully installed podman-compose ${version}"
+            
+            # Configure PATH for user installations
+            local user_bin_path=""
+            if [[ "$EUID" -eq 0 ]]; then
+                user_bin_path="/root/.local/bin"
+            else
+                user_bin_path="$HOME/.local/bin"
+            fi
+            
+            # Add to current session PATH if not already present
+            if [[ ":$PATH:" != *":$user_bin_path:"* ]]; then
+                export PATH="$PATH:$user_bin_path"
+                log_step "Added $user_bin_path to current session PATH"
+            fi
+            
+            # Test installation with full path first, then with PATH
+            if [[ -f "$user_bin_path/podman-compose" ]]; then
+                log_step "Testing podman-compose installation..."
+                if "$user_bin_path/podman-compose" --version >/dev/null 2>&1; then
+                    log_success "✅ podman-compose ${version} is working correctly"
+                    return 0
+                fi
+            fi
+            
+            # Test with PATH
+            if command -v podman-compose >/dev/null 2>&1 && podman-compose --version >/dev/null 2>&1; then
+                log_success "✅ podman-compose ${version} is working correctly"
+                return 0
+            fi
+            
+            log_warning "podman-compose ${version} installed but not functional"
             
             # Test the installation
             if test_compose_functionality "podman-compose"; then

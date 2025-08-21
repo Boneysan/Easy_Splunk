@@ -23,7 +23,31 @@ readonly ERROR_HANDLING_VERSION="1.0.2"
 : "${NC:=\033[0m}"
 
 # Global variables for error context
-SCRIPT_NAME="${SCRIPT_NAME:-${0##*/}}"
+SCRIPT_NAMenhanced_compose_error() {
+    local        "pip3")
+            enhanced_error "INSTALLATION_FAILED" \
+                "Installation verification failed - $package_name via $installation_method" \
+                "$LOG_FILE" \
+                "Check pip3: pip3 --version" \
+                "Check permissions: pip3 install --user $package_name" \
+                "Update pip: pip3 install --upgrade pip" \
+                "Configure PATH: export PATH=\$PATH:\$HOME/.local/bin" \
+                "Check Python path: python3 -m site" \
+                "Alternative: Use system package manager"
+            ;;md="$1"
+    local error_context="$2"
+    
+    enhanced_error "COMPOSE_FAILED" \
+        "Compose verification failed - $compose_cmd not working" \
+        "$LOG_FILE" \
+        "Try: $compose_cmd --version" \
+        "Check: pip3 list | grep podman-compose" \
+        "Reinstall: pip3 install --user podman-compose==1.0.6" \
+        "Configure PATH: export PATH=\$PATH:\$HOME/.local/bin" \
+        "Alternative: Use native 'podman compose' if available" \
+        "Verify runtime: podman --version" \
+        "🔧 Run automated fix: ./fix-podman-compose.sh"
+}ME:-${0##*/}}"
 LOG_FILE="${LOG_FILE:-/tmp/easy_splunk_$(date +%Y%m%d_%H%M%S).log}"
 : "${DEBUG_MODE:=${DEBUG:-false}}"
 declare -a CLEANUP_FUNCTIONS

@@ -17,15 +17,36 @@ podman-compose is not working properly on your system. This guide provides multi
 
 ## Manual Solution Options
 
-### Option 1: Use Native Podman Compose (Recommended)
+### Option 1: Use pip3 Installation (Recommended)
 ```bash
-# Check if available
-podman compose version
+# Install podman-compose via pip3
+pip3 install --user podman-compose==1.0.6
 
-# If available, modify Easy Splunk scripts:
-# 1. Edit orchestrator.sh
-# 2. Replace 'podman-compose' with 'podman compose'
-# 3. Test with: ./deploy.sh small --index-name test
+# Configure PATH for current session
+export PATH=$PATH:$HOME/.local/bin
+
+# Make PATH persistent (add to ~/.bashrc)
+echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify installation
+podman-compose --version
+```
+
+**For root users:**
+```bash
+# Install system-wide as root
+pip3 install podman-compose==1.0.6
+
+# Configure PATH for current session
+export PATH=$PATH:/root/.local/bin
+
+# Make PATH persistent (add to /root/.bashrc)
+echo 'export PATH=$PATH:/root/.local/bin' >> /root/.bashrc
+source /root/.bashrc
+
+# Verify installation
+podman-compose --version
 ```
 
 ### Option 2: Docker Alternative
