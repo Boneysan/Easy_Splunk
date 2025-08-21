@@ -2,119 +2,6 @@
 # deploy.sh - Complete deployment wrapper with comprehensive error handling
 # Main entry point for Easy_Splunk cluster deployment
 
-
-# BEGIN: Fallback functions for error handling library compatibility
-# These functions provide basic functionality when lib/error-handling.sh fails to load
-
-# Fallback log_message function for error handling library compatibility
-if ! type log_message &>/dev/null; then
-  log_message() {
-    local level="${1:-INFO}"
-    local message="${2:-}"
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-    
-    case "$level" in
-      ERROR)   echo -e "\033[31m[$timestamp] ERROR: $message\033[0m" >&2 ;;
-      WARNING) echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
-      SUCCESS) echo -e "\033[32m[$timestamp] SUCCESS: $message\033[0m" ;;
-      DEBUG)   [[ "${VERBOSE:-false}" == "true" ]] && echo -e "\033[36m[$timestamp] DEBUG: $message\033[0m" ;;
-      *)       echo -e "[$timestamp] INFO: $message" ;;
-    esac
-  }
-fi
-
-# Fallback error_exit function for error handling library compatibility
-if ! type error_exit &>/dev/null; then
-  error_exit() {
-    local error_code=1
-    local error_message=""
-    
-    if [[ $# -eq 1 ]]; then
-      if [[ "$1" =~ ^[0-9]+$ ]]; then
-        error_code="$1"
-        error_message="Script failed with exit code $error_code"
-      else
-        error_message="$1"
-      fi
-    elif [[ $# -eq 2 ]]; then
-      error_message="$1"
-      error_code="$2"
-    fi
-    
-    if [[ -n "$error_message" ]]; then
-      log_message ERROR "${error_message:-Unknown error}"
-    fi
-    
-    exit "$error_code"
-  }
-fi
-
-# Fallback init_error_handling function for error handling library compatibility
-if ! type init_error_handling &>/dev/null; then
-  init_error_handling() {
-    # Basic error handling setup - no-op fallback
-    set -euo pipefail
-  }
-fi
-
-# Fallback register_cleanup function for error handling library compatibility
-if ! type register_cleanup &>/dev/null; then
-  register_cleanup() {
-    # Basic cleanup registration - no-op fallback
-    # Production systems should use proper cleanup handling
-    return 0
-  }
-fi
-
-# Fallback validate_safe_path function for error handling library compatibility
-if ! type validate_safe_path &>/dev/null; then
-  validate_safe_path() {
-    local path="$1"
-    local description="${2:-path}"
-    
-    # Basic path validation
-    if [[ -z "$path" ]]; then
-      log_message ERROR "$description cannot be empty"
-      return 1
-    fi
-    
-    if [[ "$path" == *".."* ]]; then
-      log_message ERROR "$description contains invalid characters (..)"
-      return 1
-    fi
-    
-    return 0
-  }
-fi
-
-# Fallback with_retry function for error handling library compatibility
-if ! type with_retry &>/dev/null; then
-  with_retry() {
-    local max_attempts=3
-    local delay=2
-    local attempt=1
-    local cmd=("$@")
-    
-    while [[ $attempt -le $max_attempts ]]; do
-      if "${cmd[@]}"; then
-        return 0
-      fi
-      
-      local rc=$?
-      if [[ $attempt -eq $max_attempts ]]; then
-        log_message ERROR "with_retry: command failed after ${attempt} attempts (rc=${rc}): ${cmd[*]}" 2>/dev/null || echo "ERROR: with_retry failed after ${attempt} attempts" >&2
-        return $rc
-      fi
-      
-      log_message WARNING "Attempt ${attempt} failed (rc=${rc}); retrying in ${delay}s..." 2>/dev/null || echo "WARNING: Attempt ${attempt} failed, retrying in ${delay}s..." >&2
-      sleep $delay
-      ((attempt++))
-      ((delay *= 2))
-    done
-  }
-fi
-# END: Fallback functions for error handling library compatibility
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source core libraries first (required by other modules)
@@ -131,6 +18,80 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 
 # Initialize error handling
 init_error_handling
+
+# Fallback enhanced_installation_error function for error handling library compatibility
+if ! type enhanced_installation_error &>/dev/null; then
+  enhanced_installation_error() {
+    local error_type="$1"
+    local context="$2"
+    local message="$3"
+    
+    log_message ERROR "$message"
+    log_message INFO "Error Type: $error_type"
+    log_message INFO "Context: $context"
+    log_message INFO "Troubleshooting steps:"
+    
+    case "$error_type" in
+      "container-runtime")
+        log_message INFO "1. Check if container runtime is installed: docker --version"
+        log_message INFO "2. Verify user permissions: groups \$USER"
+        log_message INFO "3. Try restarting the service: sudo systemctl restart docker"
+        log_message INFO "4. Check service status: sudo systemctl status docker"
+        ;;
+      "compose-failure")
+        log_message INFO "1. Try: docker-compose --version"
+        log_message INFO "2. Try: docker compose --version"
+        log_message INFO "3. Check compose file syntax: docker-compose config"
+        log_message INFO "4. Verify images are available: docker images"
+        ;;
+      "deployment-failure")
+        log_message INFO "1. Check container logs: docker-compose logs"
+        log_message INFO "2. Verify resource availability: docker system info"
+        log_message INFO "3. Check port conflicts: netstat -tulpn"
+        log_message INFO "4. Review compose file: cat docker-compose.yml"
+        ;;
+      *)
+        log_message INFO "1. Check system logs for more details"
+        log_message INFO "2. Verify all prerequisites are installed"
+        log_message INFO "3. Try running with --debug for more output"
+        log_message INFO "4. Logs available at: /tmp/easy_splunk_*.log"
+        ;;
+    esac
+    
+    return 1
+  }
+fi
+
+# Define with_retry function (fallback if not loaded from error-handling.sh)
+if ! type with_retry &>/dev/null; then
+  with_retry() {
+    local retries=3 base_delay=1 max_delay=30
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --retries) retries="$2"; shift 2;;
+        --base-delay) base_delay="$2"; shift 2;;
+        --max-delay) max_delay="$2"; shift 2;;
+        --) shift; break;;
+        *) break;;
+      esac
+    done
+    local attempt=1 delay="$base_delay"
+    local cmd=("$@")
+    [[ ${#cmd[@]} -gt 0 ]] || { echo "with_retry: no command provided" >&2; return 2; }
+    while true; do
+      "${cmd[@]}" && return 0
+      local rc=$?
+      if (( attempt >= retries )); then
+        log_message ERROR "Command failed after $retries attempts: ${cmd[*]}"
+        return $rc
+      fi
+      log_message WARN "Attempt $attempt failed (exit code $rc), retrying in ${delay}s..."
+      sleep "$delay"
+      ((attempt++))
+      [[ $delay -lt $max_delay ]] && delay=$((delay * 2))
+    done
+  }
+fi
 
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
