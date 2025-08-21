@@ -2,119 +2,6 @@
 # orchestrator.sh - Complete cluster orchestration with comprehensive error handling
 # Manages Docker/Podman compose operations for Splunk cluster
 
-
-# BEGIN: Fallback functions for error handling library compatibility
-# These functions provide basic functionality when lib/error-handling.sh fails to load
-
-# Fallback log_message function for error handling library compatibility
-if ! type log_message &>/dev/null; then
-  log_message() {
-    local level="${1:-INFO}"
-    local message="${2:-}"
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-    
-    case "$level" in
-      ERROR)   echo -e "\033[31m[$timestamp] ERROR: $message\033[0m" >&2 ;;
-      WARNING) echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
-      SUCCESS) echo -e "\033[32m[$timestamp] SUCCESS: $message\033[0m" ;;
-      DEBUG)   [[ "${VERBOSE:-false}" == "true" ]] && echo -e "\033[36m[$timestamp] DEBUG: $message\033[0m" ;;
-      *)       echo -e "[$timestamp] INFO: $message" ;;
-    esac
-  }
-fi
-
-# Fallback error_exit function for error handling library compatibility
-if ! type error_exit &>/dev/null; then
-  error_exit() {
-    local error_code=1
-    local error_message=""
-    
-    if [[ $# -eq 1 ]]; then
-      if [[ "$1" =~ ^[0-9]+$ ]]; then
-        error_code="$1"
-        error_message="Script failed with exit code $error_code"
-      else
-        error_message="$1"
-      fi
-    elif [[ $# -eq 2 ]]; then
-      error_message="$1"
-      error_code="$2"
-    fi
-    
-    if [[ -n "$error_message" ]]; then
-      log_message ERROR "${error_message:-Unknown error}"
-    fi
-    
-    exit "$error_code"
-  }
-fi
-
-# Fallback init_error_handling function for error handling library compatibility
-if ! type init_error_handling &>/dev/null; then
-  init_error_handling() {
-    # Basic error handling setup - no-op fallback
-    set -euo pipefail
-  }
-fi
-
-# Fallback register_cleanup function for error handling library compatibility
-if ! type register_cleanup &>/dev/null; then
-  register_cleanup() {
-    # Basic cleanup registration - no-op fallback
-    # Production systems should use proper cleanup handling
-    return 0
-  }
-fi
-
-# Fallback validate_safe_path function for error handling library compatibility
-if ! type validate_safe_path &>/dev/null; then
-  validate_safe_path() {
-    local path="$1"
-    local description="${2:-path}"
-    
-    # Basic path validation
-    if [[ -z "$path" ]]; then
-      log_message ERROR "$description cannot be empty"
-      return 1
-    fi
-    
-    if [[ "$path" == *".."* ]]; then
-      log_message ERROR "$description contains invalid characters (..)"
-      return 1
-    fi
-    
-    return 0
-  }
-fi
-
-# Fallback with_retry function for error handling library compatibility
-if ! type with_retry &>/dev/null; then
-  with_retry() {
-    local max_attempts=3
-    local delay=2
-    local attempt=1
-    local cmd=("$@")
-    
-    while [[ $attempt -le $max_attempts ]]; do
-      if "${cmd[@]}"; then
-        return 0
-      fi
-      
-      local rc=$?
-      if [[ $attempt -eq $max_attempts ]]; then
-        log_message ERROR "with_retry: command failed after ${attempt} attempts (rc=${rc}): ${cmd[*]}" 2>/dev/null || echo "ERROR: with_retry failed after ${attempt} attempts" >&2
-        return $rc
-      fi
-      
-      log_message WARNING "Attempt ${attempt} failed (rc=${rc}); retrying in ${delay}s..." 2>/dev/null || echo "WARNING: Attempt ${attempt} failed, retrying in ${delay}s..." >&2
-      sleep $delay
-      ((attempt++))
-      ((delay *= 2))
-    done
-  }
-fi
-# END: Fallback functions for error handling library compatibility
-
 # Source error handling module
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/error-handling.sh" || {
@@ -221,14 +108,53 @@ parse_arguments() {
     done
 }
 
-# Initialize compose command
+# Install docker-compose as fallback for podman
+install_docker_compose_fallback() {
+    log_message INFO "Installing docker-compose v2.21.0 as podman fallback..."
+    
+    local temp_file="/tmp/docker-compose-$$"
+    local install_path="/usr/local/bin/docker-compose"
+    
+    # Download docker-compose binary
+    if command -v curl >/dev/null 2>&1; then
+        if curl -L "https://github.com/docker/compose/releases/download/v2.21.0/docker-compose-linux-x86_64" -o "$temp_file" 2>/dev/null; then
+            log_message INFO "Downloaded docker-compose binary"
+        else
+            log_message ERROR "Failed to download docker-compose"
+            return 1
+        fi
+    else
+        log_message ERROR "curl not available for downloading docker-compose"
+        return 1
+    fi
+    
+    # Install with proper permissions
+    if sudo mv "$temp_file" "$install_path" && sudo chmod +x "$install_path"; then
+        log_message SUCCESS "Installed docker-compose to $install_path"
+        
+        # Verify installation
+        if docker-compose --version >/dev/null 2>&1; then
+            log_message SUCCESS "docker-compose installation verified"
+            return 0
+        else
+            log_message ERROR "docker-compose installation verification failed"
+            return 1
+        fi
+    else
+        log_message ERROR "Failed to install docker-compose (insufficient permissions?)"
+        rm -f "$temp_file" 2>/dev/null || true
+        return 1
+    fi
+}
+
+# Initialize compose command with intelligent fallback
 init_compose_command() {
     log_message INFO "Initializing container compose command"
     
     # Validate container runtime
     validate_container_runtime
     
-    # Determine compose command based on runtime
+    # Determine compose command based on runtime with intelligent fallback
     if [[ "$CONTAINER_RUNTIME" == "docker" ]]; then
         if command -v docker-compose &>/dev/null; then
             COMPOSE_CMD="docker-compose"
@@ -239,13 +165,49 @@ init_compose_command() {
             error_exit "Docker Compose not found. Enhanced troubleshooting steps provided above."
         fi
     elif [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
-        if command -v podman-compose &>/dev/null; then
+        # Try podman-compose options first
+        if command -v podman-compose &>/dev/null && podman-compose --version &>/dev/null; then
             COMPOSE_CMD="podman-compose"
+            log_message INFO "Using podman-compose (Python)"
         elif podman compose version &>/dev/null 2>&1; then
             COMPOSE_CMD="podman compose"
+            log_message INFO "Using native podman compose"
         else
-            enhanced_compose_error "podman-compose / podman compose" "Podman Compose detection failed"
-            error_exit "Podman Compose not found. Enhanced troubleshooting steps provided above."
+            # Podman compose failed - try fallback to docker-compose with podman
+            log_message WARNING "Podman compose not available, attempting docker-compose fallback"
+            
+            if command -v docker-compose &>/dev/null; then
+                # Test if docker-compose works with podman
+                if DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock" docker-compose --version &>/dev/null 2>&1; then
+                    COMPOSE_CMD="docker-compose"
+                    export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
+                    log_message SUCCESS "✅ Using docker-compose with podman socket as fallback"
+                elif sudo test -S /run/podman/podman.sock && DOCKER_HOST="unix:///run/podman/podman.sock" docker-compose --version &>/dev/null 2>&1; then
+                    COMPOSE_CMD="docker-compose"
+                    export DOCKER_HOST="unix:///run/podman/podman.sock"
+                    log_message SUCCESS "✅ Using docker-compose with system podman socket as fallback"
+                else
+                    log_message WARNING "docker-compose found but cannot connect to podman socket"
+                fi
+            fi
+            
+            # If docker-compose fallback didn't work, try installing it
+            if [[ -z "$COMPOSE_CMD" ]]; then
+                log_message INFO "Attempting to install docker-compose as fallback..."
+                if install_docker_compose_fallback; then
+                    COMPOSE_CMD="docker-compose"
+                    export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
+                    log_message SUCCESS "✅ Installed and configured docker-compose fallback"
+                else
+                    enhanced_compose_error "podman-compose / podman compose / docker-compose" "All compose options failed"
+                    log_message ERROR "Podman compose detection failed and docker-compose fallback unsuccessful"
+                    log_message INFO "Available options:"
+                    log_message INFO "1. Run: ./fix-podman-compose.sh"
+                    log_message INFO "2. Run: ./fix-python-compatibility.sh (RHEL 8)"
+                    log_message INFO "3. Install Docker: sudo yum install -y docker && sudo systemctl start docker"
+                    error_exit "No working compose implementation found. Enhanced troubleshooting steps provided above."
+                fi
+            fi
         fi
     else
         enhanced_runtime_error "$CONTAINER_RUNTIME" "unsupported container runtime"

@@ -99,6 +99,21 @@ All scripts now include comprehensive fallback functions to ensure reliability e
 ./fix-all-function-loading.sh
 ```
 
+### **Automated Fallback System**
+The toolkit now includes intelligent fallback logic for compose implementations:
+
+- **Podman Primary**: Tries `podman-compose` → `podman compose` → **automatic docker-compose fallback**
+- **Docker Primary**: Tries `docker-compose` → `docker compose`
+- **Smart Recovery**: Automatically installs docker-compose v2.21.0 if podman options fail
+- **Socket Detection**: Automatically configures docker-compose to work with podman sockets
+
+**Fallback Sequence for Podman**:
+1. Try `podman-compose` (Python implementation)
+2. Try `podman compose` (native implementation)  
+3. **NEW**: Try `docker-compose` with podman socket
+4. **NEW**: Auto-install `docker-compose` v2.21.0 if needed
+5. Provide detailed troubleshooting if all options fail
+
 ### **Automated Fixes Available**
 - **./fix-podman-compose.sh** - Comprehensive fix for podman-compose issues on RHEL 8
 - **./fix-python-compatibility.sh** - Fix Python 3.6/3.8+ compatibility issues with podman-compose
