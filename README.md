@@ -228,7 +228,8 @@ git clone https://github.com/Boneysan/Easy_Splunk.git
 cd Easy_Splunk
 
 # 2) Make all shell scripts executable (if needed)
-find . -name "*.sh" -type f -exec chmod +x {} \;
+find . -name "*.sh" -type f -exec chmod 755 {} \;
+find . -name "*.sh" -type f -exec chown root:root {} \;
 
 # 3) Install prerequisites (automatically detects OS and installs optimal container runtime)
 #    RHEL 8 systems: Automatically prefers Docker for better Python compatibility
