@@ -314,6 +314,27 @@ sudo usermod -aG docker $USER
 ./deploy.sh medium --index-name my_app_prod --splunk-user admin
 ```
 
+### **Docker Group Permission Issues**
+If you see `[WARN] User not in docker group - logout/login may be required`:
+
+**For root users:**
+```bash
+# Root users don't need to be in docker group - you can ignore this warning
+# The warning is informational only for root users
+```
+
+**For non-root users:**
+```bash
+# Add user to docker group
+sudo usermod -aG docker $USER
+
+# Log out and log back in, then verify
+groups  # Should show 'docker' in the list
+
+# Alternative: Use newgrp to activate group without logout
+newgrp docker
+```
+
 ### **Verification Steps**
 After applying any fix, verify with:
 ```bash
