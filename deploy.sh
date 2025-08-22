@@ -331,6 +331,56 @@ if ! type validate_resource_allocation &>/dev/null; then
   }
 fi
 
+# Fallback retry_with_backoff function for error handling library compatibility
+if ! type retry_with_backoff &>/dev/null; then
+  retry_with_backoff() {
+    local max_attempts=3
+    local base_delay=1
+    local max_delay=30
+    
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --max-attempts) max_attempts="$2"; shift 2;;
+        --base-delay) base_delay="$2"; shift 2;;
+        --max-delay) max_delay="$2"; shift 2;;
+        --) shift; break;;
+        *) break;;
+      esac
+    done
+    
+    local cmd=("$@")
+    [[ ${#cmd[@]} -gt 0 ]] || { log_message ERROR "retry_with_backoff: no command provided"; return 2; }
+    
+    local attempt=1
+    local delay="$base_delay"
+    
+    while [[ $attempt -le $max_attempts ]]; do
+      log_message DEBUG "Attempt $attempt/$max_attempts: ${cmd[*]}"
+      
+      if "${cmd[@]}"; then
+        log_message DEBUG "Command succeeded on attempt $attempt"
+        return 0
+      fi
+      
+      local rc=$?
+      
+      if [[ $attempt -eq $max_attempts ]]; then
+        log_message ERROR "Command failed after $max_attempts attempts: ${cmd[*]}"
+        return $rc
+      fi
+      
+      log_message WARNING "Attempt $attempt failed (exit code $rc), retrying in ${delay}s..."
+      sleep "$delay"
+      
+      ((attempt++))
+      # Exponential backoff with max delay cap
+      delay=$((delay * 2))
+      [[ $delay -gt $max_delay ]] && delay=$max_delay
+    done
+  }
+fi
+
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
