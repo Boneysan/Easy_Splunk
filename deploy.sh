@@ -164,6 +164,7 @@ Options:
     --index-name NAME       Create and configure the specified index
     --splunk-user USER      Splunk admin username (default: admin)
     --splunk-password PASS  Splunk admin password (will prompt if not provided)
+    --with-monitoring       Enable Prometheus and Grafana (default)
     --no-monitoring         Disable Prometheus and Grafana
     --skip-creds           Skip credential generation
     --skip-health          Skip post-deployment health check
@@ -267,6 +268,11 @@ parse_arguments() {
                 ;;
             --no-monitoring)
                 NO_MONITORING=true
+                shift
+                ;;
+            --with-monitoring)
+                ENABLE_MONITORING=true
+                NO_MONITORING=false
                 shift
                 ;;
             --skip-creds)
