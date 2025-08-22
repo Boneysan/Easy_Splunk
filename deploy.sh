@@ -780,19 +780,73 @@ handle_credentials() {
             log_message INFO "- Must contain special characters"
             log_message INFO "- Cannot contain username"
             echo
-            read -s -p "Enter Splunk admin password: " SPLUNK_PASSWORD
-            echo
-            read -s -p "Confirm password: " SPLUNK_PASSWORD_CONFIRM
-            echo
+            
+            while true; do
+                read -s -p "Enter Splunk admin password: " SPLUNK_PASSWORD
+                echo
+                read -s -p "Confirm password: " SPLUNK_PASSWORD_CONFIRM
+                echo
 
-            if [[ "$SPLUNK_PASSWORD" != "$SPLUNK_PASSWORD_CONFIRM" ]]; then
-                error_exit "Passwords do not match"
-            fi
-        fi
-
-        # Validate password strength
-        if [[ ${#SPLUNK_PASSWORD} -lt $MIN_PASSWORD_LENGTH ]]; then
-            error_exit "Password must be at least $MIN_PASSWORD_LENGTH characters long"
+                if [[ "$SPLUNK_PASSWORD" != "$SPLUNK_PASSWORD_CONFIRM" ]]; then
+                    log_message ERROR "Passwords do not match. Please try again."
+                    echo
+                    continue
+                fi
+                
+                # Validate password requirements
+                local password_valid=true
+                local error_messages=()
+                
+                # Check minimum length
+                if [[ ${#SPLUNK_PASSWORD} -lt $MIN_PASSWORD_LENGTH ]]; then
+                    error_messages+=("Password must be at least $MIN_PASSWORD_LENGTH characters long")
+                    password_valid=false
+                fi
+                
+                # Check for uppercase letter
+                if [[ ! "$SPLUNK_PASSWORD" =~ [A-Z] ]]; then
+                    error_messages+=("Password must contain at least one uppercase letter")
+                    password_valid=false
+                fi
+                
+                # Check for lowercase letter
+                if [[ ! "$SPLUNK_PASSWORD" =~ [a-z] ]]; then
+                    error_messages+=("Password must contain at least one lowercase letter")
+                    password_valid=false
+                fi
+                
+                # Check for number
+                if [[ ! "$SPLUNK_PASSWORD" =~ [0-9] ]]; then
+                    error_messages+=("Password must contain at least one number")
+                    password_valid=false
+                fi
+                
+                # Check for special character
+                if [[ ! "$SPLUNK_PASSWORD" =~ [^a-zA-Z0-9] ]]; then
+                    error_messages+=("Password must contain at least one special character")
+                    password_valid=false
+                fi
+                
+                # Check if password contains username
+                if [[ "$SPLUNK_PASSWORD" == *"$SPLUNK_USER"* ]]; then
+                    error_messages+=("Password cannot contain the username")
+                    password_valid=false
+                fi
+                
+                if [[ "$password_valid" == "true" ]]; then
+                    log_message INFO "Password meets all requirements."
+                    break
+                else
+                    echo
+                    log_message ERROR "Password does not meet requirements:"
+                    for error in "${error_messages[@]}"; do
+                        log_message ERROR "- $error"
+                    done
+                    echo
+                    log_message INFO "Please try again."
+                    echo
+                fi
+            done
         fi
 
         # Generate credentials with retry logic
