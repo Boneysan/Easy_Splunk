@@ -108,6 +108,42 @@ if ! type validate_commands &>/dev/null; then
   }
 fi
 
+# Fallback validate_container_runtime function for error handling library compatibility
+if ! type validate_container_runtime &>/dev/null; then
+  validate_container_runtime() {
+    local runtime="${1:-}"
+    
+    # If no runtime specified, try to detect available runtime
+    if [[ -z "$runtime" ]]; then
+      if command -v docker &>/dev/null; then
+        runtime="docker"
+      elif command -v podman &>/dev/null; then
+        runtime="podman"
+      else
+        log_message ERROR "No container runtime found (docker or podman)"
+        return 1
+      fi
+    fi
+    
+    log_message INFO "Validating container runtime: $runtime"
+    
+    if ! command -v "$runtime" &>/dev/null; then
+      log_message ERROR "Container runtime not found: $runtime"
+      log_message INFO "Please install $runtime and try again"
+      return 1
+    fi
+    
+    # Test if the runtime is working
+    if ! "$runtime" --version &>/dev/null; then
+      log_message ERROR "Container runtime not working: $runtime"
+      return 1
+    fi
+    
+    log_message INFO "Container runtime validated: $runtime"
+    return 0
+  }
+fi
+
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
