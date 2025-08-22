@@ -227,18 +227,21 @@ The toolkit now includes intelligent fallback logic for compose implementations:
 git clone https://github.com/Boneysan/Easy_Splunk.git
 cd Easy_Splunk
 
-# 2) Install prerequisites (automatically detects OS and installs optimal container runtime)
+# 2) Make all shell scripts executable (if needed)
+find . -name "*.sh" -type f -exec chmod +x {} \;
+
+# 3) Install prerequisites (automatically detects OS and installs optimal container runtime)
 #    RHEL 8 systems: Automatically prefers Docker for better Python compatibility
 #    Other systems: Prefers Podman with comprehensive fallback support
 ./install-prerequisites.sh --yes
 
-# 3) Generate credentials (admin user/secret, TLS as needed)
+# 4) Generate credentials (admin user/secret, TLS as needed)
 ./generate-credentials.sh
 
-# 4) Deploy a small cluster with monitoring
+# 5) Deploy a small cluster with monitoring
 ./deploy.sh small --with-monitoring
 
-# 5) Health check
+# 6) Health check
 ./health_check.sh
 ```
 
