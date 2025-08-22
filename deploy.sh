@@ -240,6 +240,48 @@ if ! type validate_path &>/dev/null; then
   }
 fi
 
+# Fallback validate_cluster_config function for error handling library compatibility
+if ! type validate_cluster_config &>/dev/null; then
+  validate_cluster_config() {
+    log_message INFO "Validating cluster configuration"
+    
+    # Check required environment variables
+    local required_vars=("CLUSTER_NAME" "INDEXER_COUNT" "SEARCH_HEAD_COUNT")
+    for var in "${required_vars[@]}"; do
+      if [[ -z "${!var:-}" ]]; then
+        log_message WARNING "Configuration variable $var is not set or empty"
+      else
+        log_message DEBUG "$var=${!var}"
+      fi
+    done
+    
+    # Validate numeric values
+    if [[ -n "${INDEXER_COUNT:-}" ]] && [[ ! "${INDEXER_COUNT}" =~ ^[0-9]+$ ]]; then
+      log_message ERROR "INDEXER_COUNT must be a number: ${INDEXER_COUNT}"
+      return 1
+    fi
+    
+    if [[ -n "${SEARCH_HEAD_COUNT:-}" ]] && [[ ! "${SEARCH_HEAD_COUNT}" =~ ^[0-9]+$ ]]; then
+      log_message ERROR "SEARCH_HEAD_COUNT must be a number: ${SEARCH_HEAD_COUNT}"
+      return 1
+    fi
+    
+    # Validate resource constraints if set
+    if [[ -n "${CPU_INDEXER:-}" ]] && [[ ! "${CPU_INDEXER}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      log_message ERROR "CPU_INDEXER must be a number: ${CPU_INDEXER}"
+      return 1
+    fi
+    
+    if [[ -n "${MEMORY_INDEXER:-}" ]] && [[ ! "${MEMORY_INDEXER}" =~ ^[0-9]+[MGmg]?$ ]]; then
+      log_message ERROR "MEMORY_INDEXER must be a valid memory specification: ${MEMORY_INDEXER}"
+      return 1
+    fi
+    
+    log_message INFO "Cluster configuration validation completed"
+    return 0
+  }
+fi
+
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
