@@ -177,6 +177,69 @@ if ! type check_disk_space &>/dev/null; then
   }
 fi
 
+# Fallback validate_network function for error handling library compatibility
+if ! type validate_network &>/dev/null; then
+  validate_network() {
+    local host="${1:-google.com}"
+    local port="${2:-80}"
+    local timeout="${3:-5}"
+    
+    log_message INFO "Checking network connectivity to $host:$port (timeout: ${timeout}s)"
+    
+    if command -v nc &>/dev/null; then
+      if nc -z -w"$timeout" "$host" "$port" 2>/dev/null; then
+        log_message INFO "Network connectivity check passed: $host:$port"
+        return 0
+      fi
+    elif command -v telnet &>/dev/null; then
+      if timeout "$timeout" telnet "$host" "$port" </dev/null 2>/dev/null | grep -q "Connected"; then
+        log_message INFO "Network connectivity check passed: $host:$port"
+        return 0
+      fi
+    elif command -v wget &>/dev/null; then
+      if wget --spider --timeout="$timeout" "http://$host:$port" 2>/dev/null; then
+        log_message INFO "Network connectivity check passed: $host:$port"
+        return 0
+      fi
+    elif command -v curl &>/dev/null; then
+      if curl -s --connect-timeout "$timeout" "http://$host:$port" >/dev/null 2>&1; then
+        log_message INFO "Network connectivity check passed: $host:$port"
+        return 0
+      fi
+    fi
+    
+    log_message WARNING "Network connectivity check failed: $host:$port"
+    return 1
+  }
+fi
+
+# Fallback validate_path function for error handling library compatibility
+if ! type validate_path &>/dev/null; then
+  validate_path() {
+    local path="$1"
+    local description="${2:-path}"
+    
+    if [[ -z "$path" ]]; then
+      log_message ERROR "Empty $description provided"
+      return 1
+    fi
+    
+    # Check for invalid characters or patterns
+    if [[ "$path" =~ [[:space:]] ]]; then
+      log_message ERROR "Invalid $description contains spaces: $path"
+      return 1
+    fi
+    
+    if [[ "$path" =~ \.\. ]]; then
+      log_message ERROR "Invalid $description contains '..': $path"
+      return 1
+    fi
+    
+    log_message DEBUG "Path validation passed: $path"
+    return 0
+  }
+fi
+
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
