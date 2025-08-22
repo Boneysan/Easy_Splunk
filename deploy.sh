@@ -772,7 +772,15 @@ handle_credentials() {
 
         # Get password if not provided
         if [[ -z "$SPLUNK_PASSWORD" ]]; then
-            read -s -p "Enter Splunk admin password (min $MIN_PASSWORD_LENGTH chars): " SPLUNK_PASSWORD
+            echo
+            log_message INFO "Password Requirements:"
+            log_message INFO "- Minimum $MIN_PASSWORD_LENGTH characters"
+            log_message INFO "- Must contain uppercase and lowercase letters"
+            log_message INFO "- Must contain numbers"
+            log_message INFO "- Must contain special characters"
+            log_message INFO "- Cannot contain username"
+            echo
+            read -s -p "Enter Splunk admin password: " SPLUNK_PASSWORD
             echo
             read -s -p "Confirm password: " SPLUNK_PASSWORD_CONFIRM
             echo
