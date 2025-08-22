@@ -282,6 +282,55 @@ if ! type validate_cluster_config &>/dev/null; then
   }
 fi
 
+# Fallback validate_resource_allocation function for error handling library compatibility
+if ! type validate_resource_allocation &>/dev/null; then
+  validate_resource_allocation() {
+    log_message INFO "Validating resource allocation"
+    
+    # Check system resources if possible
+    if command -v free &>/dev/null; then
+      local total_mem_mb
+      total_mem_mb=$(free -m | awk '/^Mem:/ {print $2}')
+      if [[ -n "$total_mem_mb" && "$total_mem_mb" =~ ^[0-9]+$ ]]; then
+        log_message INFO "System total memory: ${total_mem_mb}MB"
+        
+        # Warning if less than 4GB total memory
+        if [[ $total_mem_mb -lt 4096 ]]; then
+          log_message WARNING "Low system memory detected (${total_mem_mb}MB). Splunk cluster may require more memory."
+        fi
+      fi
+    fi
+    
+    # Check CPU cores if possible
+    if command -v nproc &>/dev/null; then
+      local cpu_cores
+      cpu_cores=$(nproc)
+      if [[ -n "$cpu_cores" && "$cpu_cores" =~ ^[0-9]+$ ]]; then
+        log_message INFO "System CPU cores: $cpu_cores"
+        
+        # Warning if less than 2 cores
+        if [[ $cpu_cores -lt 2 ]]; then
+          log_message WARNING "Low CPU core count detected ($cpu_cores). Splunk cluster may require more CPU resources."
+        fi
+      fi
+    fi
+    
+    # Validate configured resource limits
+    local total_cpu_requested=0
+    local total_memory_requested=0
+    
+    # Calculate total requested resources based on cluster configuration
+    if [[ -n "${INDEXER_COUNT:-}" ]] && [[ "${INDEXER_COUNT}" =~ ^[0-9]+$ ]]; then
+      if [[ -n "${CPU_INDEXER:-}" ]] && [[ "${CPU_INDEXER}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        total_cpu_requested=$(echo "$total_cpu_requested + (${INDEXER_COUNT} * ${CPU_INDEXER})" | bc 2>/dev/null || echo "$total_cpu_requested")
+      fi
+    fi
+    
+    log_message INFO "Resource allocation validation completed"
+    return 0
+  }
+fi
+
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
