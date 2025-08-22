@@ -144,6 +144,39 @@ if ! type validate_container_runtime &>/dev/null; then
   }
 fi
 
+# Fallback check_disk_space function for error handling library compatibility
+if ! type check_disk_space &>/dev/null; then
+  check_disk_space() {
+    local path="${1:-/}"
+    local required_mb="${2:-1024}"
+    
+    log_message INFO "Checking disk space for path: $path (required: ${required_mb}MB)"
+    
+    if ! command -v df &>/dev/null; then
+      log_message WARNING "df command not available, skipping disk space check"
+      return 0
+    fi
+    
+    # Get available space in MB
+    local available_mb
+    available_mb=$(df -m "$path" 2>/dev/null | awk 'NR==2 {print $4}')
+    
+    if [[ -z "$available_mb" ]] || [[ ! "$available_mb" =~ ^[0-9]+$ ]]; then
+      log_message WARNING "Could not determine disk space for $path, skipping check"
+      return 0
+    fi
+    
+    if [[ $available_mb -lt $required_mb ]]; then
+      log_message ERROR "Insufficient disk space: ${available_mb}MB available, ${required_mb}MB required"
+      log_message INFO "Please free up disk space and try again"
+      return 1
+    fi
+    
+    log_message INFO "Disk space check passed: ${available_mb}MB available"
+    return 0
+  }
+fi
+
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
