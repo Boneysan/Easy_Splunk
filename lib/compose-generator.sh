@@ -61,6 +61,13 @@ if ! type error_exit &>/dev/null; then
   }
 fi
 
+# Fallback log_warning function for error handling library compatibility
+if ! type log_warning &>/dev/null; then
+  log_warning() {
+    log_message WARNING "$@"
+  }
+fi
+
 # Fallback init_error_handling function for error handling library compatibility
 if ! type init_error_handling &>/dev/null; then
   init_error_handling() {
@@ -152,7 +159,12 @@ fi
 # Source the secret helper if available
 readonly SECRET_HELPER="${LIB_DIR}/secret-helper.sh"
 if [[ ! -x "$SECRET_HELPER" ]]; then
-    log_warning "secret-helper.sh not found or not executable, secrets may use defaults"
+    # Use fallback logging if log_warning not available
+    if type log_warning &>/dev/null; then
+        log_warning "secret-helper.sh not found or not executable, secrets may use defaults"
+    else
+        echo "WARNING: secret-helper.sh not found or not executable, secrets may use defaults" >&2
+    fi
 fi
 
 # Configuration defaults with environment override support
