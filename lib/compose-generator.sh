@@ -68,6 +68,69 @@ if ! type log_warning &>/dev/null; then
   }
 fi
 
+# Fallback begin_step function for error handling library compatibility
+if ! type begin_step &>/dev/null; then
+  begin_step() {
+    local step_name="${1:-Unknown Step}"
+    log_message INFO "Starting: $step_name"
+  }
+fi
+
+# Fallback complete_step function for error handling library compatibility
+if ! type complete_step &>/dev/null; then
+  complete_step() {
+    local step_name="${1:-Step}"
+    log_message INFO "Completed: $step_name"
+  }
+fi
+
+# Fallback validate_environment_vars function for error handling library compatibility
+if ! type validate_environment_vars &>/dev/null; then
+  validate_environment_vars() {
+    local required_vars=("$@")
+    local missing_vars=()
+    
+    for var in "${required_vars[@]}"; do
+      if [[ -z "${!var:-}" ]]; then
+        missing_vars+=("$var")
+      fi
+    done
+    
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+      log_message ERROR "Missing required environment variables: ${missing_vars[*]}"
+      return 1
+    fi
+    
+    log_message DEBUG "All required environment variables are set"
+    return 0
+  }
+fi
+
+# Fallback atomic_write_file function for error handling library compatibility
+if ! type atomic_write_file &>/dev/null; then
+  atomic_write_file() {
+    local target_file="$1"
+    local temp_file="${target_file}.tmp.$$"
+    
+    # Read from stdin and write to temp file
+    cat > "$temp_file" || {
+      log_message ERROR "Failed to write to temporary file: $temp_file"
+      rm -f "$temp_file"
+      return 1
+    }
+    
+    # Atomically move temp file to target
+    mv "$temp_file" "$target_file" || {
+      log_message ERROR "Failed to move temporary file to target: $target_file"
+      rm -f "$temp_file"
+      return 1
+    }
+    
+    log_message DEBUG "Atomically wrote file: $target_file"
+    return 0
+  }
+fi
+
 # Fallback init_error_handling function for error handling library compatibility
 if ! type init_error_handling &>/dev/null; then
   init_error_handling() {

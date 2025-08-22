@@ -381,6 +381,34 @@ if ! type retry_with_backoff &>/dev/null; then
   }
 fi
 
+# Fallback acquire_lock function for error handling library compatibility
+if ! type acquire_lock &>/dev/null; then
+  acquire_lock() {
+    local lock_name="${1:-deployment}"
+    local timeout="${2:-30}"
+    local lock_file="/tmp/easy_splunk_${lock_name}.lock"
+    
+    log_message INFO "Acquiring lock: $lock_name (timeout: ${timeout}s)"
+    
+    local count=0
+    while [[ $count -lt $timeout ]]; do
+      if (set -C; echo $$ > "$lock_file") 2>/dev/null; then
+        log_message DEBUG "Lock acquired: $lock_file"
+        # Set trap to remove lock on exit
+        trap "rm -f '$lock_file'" EXIT INT TERM
+        return 0
+      fi
+      
+      log_message DEBUG "Lock unavailable, waiting... ($count/$timeout)"
+      sleep 1
+      ((count++))
+    done
+    
+    log_message ERROR "Failed to acquire lock after ${timeout}s: $lock_name"
+    return 1
+  }
+fi
+
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
