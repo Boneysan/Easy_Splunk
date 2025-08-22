@@ -93,6 +93,21 @@ if ! type with_retry &>/dev/null; then
   }
 fi
 
+# Fallback validate_commands function for error handling library compatibility
+if ! type validate_commands &>/dev/null; then
+  validate_commands() {
+    for cmd in "$@"; do
+      if ! command -v "$cmd" >/dev/null 2>&1; then
+        log_message ERROR "Required command not found: $cmd"
+        log_message INFO "Please install $cmd and try again"
+        return 1
+      fi
+    done
+    log_message DEBUG "All required commands are available: $*"
+    return 0
+  }
+fi
+
 # Source compose generator after core libs are loaded
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
