@@ -370,8 +370,16 @@ validate_environment() {
     # Check required commands
     validate_commands bash grep sed awk
     
-    # Validate container runtime
-    validate_container_runtime
+    # Validate container runtime (auto-detect if available)
+    if command -v docker &>/dev/null; then
+        validate_container_runtime docker
+    elif command -v podman &>/dev/null; then
+        validate_container_runtime podman
+    else
+        log_message ERROR "No container runtime found (docker or podman)"
+        log_message INFO "Please install docker or podman and try again"
+        return 1
+    fi
     
     # Check disk space (require at least 10GB)
     check_disk_space "/" 10240
