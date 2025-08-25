@@ -282,8 +282,9 @@ find . -name "*.sh" -type f -exec chown root:root {} \;
 #    Other systems: Prefers Docker with comprehensive Podman fallback support
 ./install-prerequisites.sh --yes
 
-# 4) Generate credentials (admin user/secret, TLS as needed)
-./generate-credentials.sh
+# 4) Generate credentials (admin user/secret, TLS as needed) unneeded because
+#it is handled with ./deploy.sh
+#./generate-credentials.sh
 
 # 5) Deploy a small cluster with monitoring
 ./deploy.sh small --with-monitoring
