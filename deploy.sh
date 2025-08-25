@@ -410,6 +410,10 @@ if ! type acquire_lock &>/dev/null; then
 fi
 
 # Source compose generator after core libs are loaded
+# Set environment defaults for compose generation
+: "${ENABLE_SPLUNK:=true}"   # Default to true for Easy_Splunk toolkit
+export ENABLE_SPLUNK
+
 if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
     # shellcheck source=lib/compose-generator.sh
     source "${SCRIPT_DIR}/lib/compose-generator.sh" || {
