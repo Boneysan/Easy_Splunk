@@ -311,8 +311,54 @@ _filter_services_to_present() {
 main() {
   log_info "🚀 Starting Application Cluster"
   [[ -f "${COMPOSE_FILE}" ]] || die "${E_MISSING_DEP:-3}" "Compose file not found: ${COMPOSE_FILE}"
+  
+  # Use centralized runtime configuration from config/active.conf
+  local config_file="${SCRIPT_DIR}/config/active.conf"
+  if [[ -f "$config_file" ]]; then
+    local configured_runtime
+    configured_runtime=$(grep -E "^CONTAINER_RUNTIME=" "$config_file" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+    if [[ -n "$configured_runtime" ]]; then
+      export CONTAINER_RUNTIME="$configured_runtime"
+      log_info "Using configured runtime from config: $CONTAINER_RUNTIME"
+    fi
+  fi
+  
+  # If no configured runtime, apply Docker-first logic (same as orchestrator)
+  if [[ -z "${CONTAINER_RUNTIME:-}" ]]; then
+    log_info "No configured runtime found, applying Docker-first detection logic"
+    local prefer_docker=false
+    local os_name=""
+    
+    if [[ -f /etc/os-release ]]; then
+      source /etc/os-release 2>/dev/null || true
+      os_name="${ID:-unknown}"
+      
+      # Docker-first for Ubuntu/Debian systems
+      if [[ "$os_name" =~ ^(ubuntu|debian)$ ]]; then
+        prefer_docker=true
+        log_info "Ubuntu/Debian system detected - Docker preferred for better ecosystem compatibility"
+      # Docker-first for RHEL 8 systems due to Python 3.6 limitations
+      elif [[ "${VERSION_ID:-}" == "8"* ]] && [[ "$os_name" =~ ^(rhel|centos|rocky|almalinux)$ ]]; then
+        prefer_docker=true
+        log_info "RHEL 8-family system detected - Docker preferred due to Python 3.6 compatibility issues"
+      fi
+    fi
+    
+    # Apply Docker-first preference
+    if [[ "$prefer_docker" == "true" ]]; then
+      if command -v docker &>/dev/null && docker version &>/dev/null 2>&1; then
+        export CONTAINER_RUNTIME="docker"
+        log_info "Auto-selected Docker runtime for $os_name system"
+      else
+        log_info "Docker preferred for $os_name but not available - will detect available runtime"
+      fi
+    fi
+  fi
+  
+  # Initialize compose system with centralized logic
   detect_container_runtime
   initialize_compose_system
+  
   log_info "Using runtime: ${CONTAINER_RUNTIME}"
   log_info "Compose cmd:   ${COMPOSE_COMMAND}"
   log_info "Compose file:  ${COMPOSE_FILE}"
