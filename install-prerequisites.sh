@@ -547,7 +547,6 @@ rollback_installation() {
   if [[ -f "${SCRIPT_DIR}/config/active.conf" ]]; then
     sudo rm -f "${SCRIPT_DIR}/config/active.conf" 2>/dev/null || true
   fi
-  esac
 
   log_info "Rollback completed. Some configuration files may remain."
 }
