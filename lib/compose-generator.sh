@@ -18,6 +18,15 @@
 # BEGIN: Fallback functions for error handling library compatibility
 # These functions provide basic functionality when lib/error-handling.sh fails to load
 
+# Fallback is_true function for core library compatibility
+if ! type is_true &>/dev/null; then
+  is_true() {
+    local v="${1:-}"
+    v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
+    [[ "$v" == "true" || "$v" == "yes" || "$v" == "1" ]]
+  }
+fi
+
 # Fallback log_message function for error handling library compatibility
 if ! type log_message &>/dev/null; then
   log_message() {
