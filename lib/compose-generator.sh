@@ -80,6 +80,11 @@ fi
 # Fallback begin_step function for error handling library compatibility
 if ! type begin_step &>/dev/null; then
   begin_step() {
+    log_message INFO "Starting: $1"
+  }
+fi
+if ! type begin_step &>/dev/null; then
+  begin_step() {
     local step_name="${1:-Unknown Step}"
     log_message INFO "Starting: $step_name"
   }
@@ -218,6 +223,34 @@ LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${LIB_DIR}/error-handling.sh" ]]; then
   # shellcheck source=/dev/null
   source "${LIB_DIR}/error-handling.sh"
+fi
+# Load validation library
+if [[ -f "${LIB_DIR}/validation.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${LIB_DIR}/validation.sh"
+fi
+
+# Fallback validate_rf_sf function for validation library compatibility
+if ! type validate_rf_sf &>/dev/null; then
+  validate_rf_sf() {
+    local rf="$1"
+    local sf="$2"
+    local indexer_count="$3"
+    
+    # Basic validation - replication factor should not exceed indexer count
+    if [[ "$rf" -gt "$indexer_count" ]]; then
+      log_message WARNING "Replication factor ($rf) exceeds indexer count ($indexer_count)"
+      return 1
+    fi
+    
+    # Search factor should not exceed indexer count
+    if [[ "$sf" -gt "$indexer_count" ]]; then
+      log_message WARNING "Search factor ($sf) exceeds indexer count ($indexer_count)"
+      return 1
+    fi
+    
+    return 0
+  }
 fi
 # Load versions.env from repo root
 if [[ -f "${LIB_DIR}/../versions.env" ]]; then
