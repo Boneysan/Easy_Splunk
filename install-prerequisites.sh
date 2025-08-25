@@ -1074,9 +1074,26 @@ main() {
       unregister_cleanup "rollback_installation"
     fi
 
+    # Fix Docker permissions for non-root users
+    if [[ "$CONTAINER_RUNTIME" == "docker" ]] && [[ $EUID -ne 0 ]]; then
+      log_info "Fixing Docker group permissions for user: $USER"
+      if [[ -f "${SCRIPT_DIR}/fix-docker-permissions.sh" ]]; then
+        "${SCRIPT_DIR}/fix-docker-permissions.sh" || {
+          log_warn "Docker permissions fix script encountered issues"
+          log_info "You may need to manually activate Docker group membership:"
+          log_info "  newgrp docker  # or log out and back in"
+        }
+      else
+        log_warn "Docker permissions fix script not found"
+        log_info "Manual Docker group setup may be required:"
+        log_info "  sudo usermod -aG docker $USER"
+        log_info "  newgrp docker  # or log out and back in"
+      fi
+    fi
+
     log_info ""
     log_info "Next steps:"
-    log_info "• If you installed Docker, you may need to log out and back in for group changes to take effect"
+    log_info "• If you installed Docker, verify access with: docker ps"
     log_info "• Test the installation: '${CONTAINER_RUNTIME} run hello-world'"
     log_info "• Run your deployment script to continue with cluster setup"
     exit 0

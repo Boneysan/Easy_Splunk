@@ -362,7 +362,13 @@ sudo usermod -aG docker $USER
 ```
 
 ### **Docker Group Permission Issues**
-If you see `[WARN] User not in docker group - logout/login may be required`:
+If you see `[WARN] User not in docker group - logout/login may be required` or permission denied errors when running Docker commands:
+
+**🆕 Automated Fix (Recommended):**
+```bash
+# Run the automated Docker permissions fix
+./fix-docker-permissions.sh
+```
 
 **For root users:**
 ```bash
@@ -370,7 +376,7 @@ If you see `[WARN] User not in docker group - logout/login may be required`:
 # The warning is informational only for root users
 ```
 
-**For non-root users:**
+**For non-root users - Manual fix:**
 ```bash
 # Add your user to docker group (example with 'rangetech' user)
 sudo usermod -aG docker rangetech
@@ -387,6 +393,13 @@ newgrp docker
 
 # Log out and log back in, then verify
 groups  # Should show 'docker' in the list
+```
+
+**Common Permission Error:**
+```bash
+# Error: permission denied while trying to connect to the Docker daemon socket
+# Solution: Run the fix script or manual steps above
+./fix-docker-permissions.sh
 ```
 
 ### **Verification Steps**
