@@ -3,11 +3,13 @@
 # install-prerequisites.sh
 # Installs and verifies a container runtime + compose implementation.
 #
-# Prefers: Podman + native "podman compose" (podman-plugins)
+# Ubuntu/Debian: Prefers Docker CE + Docker Compose v2 (use --prefer-podman for Podman)
+# RHEL 8+: Prefers Docker for Python compatibility (podman-compose has issues with Python 3.6)
+# Other RHEL: Prefers Podman + native "podman compose" (podman-plugins)
 # Fallbacks: Docker + "docker compose", then podman-compose/python, then docker-compose v1
 #
 # Usage:
-#   ./install-prerequisites.sh [--yes] [--runtime auto|podman|docker] [--air-gapped DIR]
+#   ./install-prerequisites.sh [--yes] [--runtime auto|podman|docker] [--prefer-podman] [--air-gapped DIR]
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh, lib/validation.sh, lib/runtime-detection.sh, versions.env
 # Version: 1.0.0
@@ -15,6 +17,7 @@
 # Usage Examples:
 #   ./install-prerequisites.sh --yes --runtime podman
 #   ./install-prerequisites.sh --air-gapped /opt/pkgs
+#   ./install-prerequisites.sh --prefer-podman  # Ubuntu/Debian: use Podman instead of Docker
 #   ./install-prerequisites.sh --rollback-on-failure
 # ==============================================================================
 
@@ -243,6 +246,7 @@ OS_FAMILY=""                # debian|rhel|mac|other
 OS_VERSION=""               # OS version info
 AIR_GAPPED_DIR=""           # Directory with local packages for air-gapped install
 ROLLBACK_ON_FAILURE=0       # 1 = rollback on failure
+PREFER_PODMAN=0             # 1 = prefer podman on Ubuntu/Debian (escape hatch)
 
 # --- CLI parsing ----------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -251,6 +255,7 @@ while [[ $# -gt 0 ]]; do
     --runtime) RUNTIME_PREF="${2:-auto}"; shift 2;;
     --air-gapped) AIR_GAPPED_DIR="${2:?}"; shift 2;;
     --rollback-on-failure) ROLLBACK_ON_FAILURE=1; shift;;
+    --prefer-podman) PREFER_PODMAN=1; shift;;
     -h|--help)
       cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -262,12 +267,14 @@ Options:
   --runtime VALUE        Choose 'auto' (default), 'podman', or 'docker'
   --air-gapped DIR       Install from local packages in DIR (for air-gapped environments)
   --rollback-on-failure  Remove packages if installation verification fails
+  --prefer-podman        On Ubuntu/Debian, prefer Podman over Docker (escape hatch)
   --help                 Show this help and exit
 
 Examples:
   $(basename "$0")                           # Interactive installation with auto-detection
   $(basename "$0") --yes --runtime podman   # Automated Podman installation
   $(basename "$0") --air-gapped /opt/pkgs   # Install from local packages
+  $(basename "$0") --prefer-podman          # Ubuntu/Debian: prefer Podman over Docker
 EOF
       exit 0
       ;;
@@ -471,8 +478,40 @@ install_air_gapped_packages() {
 rollback_installation() {
   log_warn "Rolling back installation..."
 
-  case "${RUNTIME_PREF}" in
-    podman|auto)
+  # Determine what was actually installed based on the OS and preference
+  local actual_runtime="$RUNTIME_PREF"
+  if [[ "$RUNTIME_PREF" == "auto" ]]; then
+    case "${OS_FAMILY}" in
+      debian)
+        if [[ "$PREFER_PODMAN" == "1" ]]; then
+          actual_runtime="podman"
+        else
+          actual_runtime="docker"
+        fi
+        ;;
+      rhel)
+        # RHEL 8 detection for smart runtime selection
+        local rhel8_detected=false
+        if [[ -f /etc/redhat-release ]] && grep -q "Red Hat Enterprise Linux.*release 8\|CentOS.*release 8\|Rocky Linux.*release 8\|AlmaLinux.*release 8" /etc/redhat-release 2>/dev/null; then
+          rhel8_detected=true
+        elif [[ -f /etc/os-release ]]; then
+          source /etc/os-release 2>/dev/null || true
+          if [[ "${VERSION_ID:-}" == "8"* ]] && [[ "${ID:-}" =~ ^(rhel|centos|rocky|almalinux)$ ]]; then
+            rhel8_detected=true
+          fi
+        fi
+        
+        if [[ "$rhel8_detected" == "true" ]]; then
+          actual_runtime="docker"
+        else
+          actual_runtime="podman"
+        fi
+        ;;
+    esac
+  fi
+
+  case "${actual_runtime}" in
+    podman)
       case "${OS_FAMILY}" in
         debian)
           sudo apt-get remove -y podman podman-plugins podman-compose 2>/dev/null || true
@@ -488,8 +527,9 @@ rollback_installation() {
     docker)
       case "${OS_FAMILY}" in
         debian)
-          sudo apt-get remove -y docker.io docker-ce docker-ce-cli 2>/dev/null || true
+          sudo apt-get remove -y docker.io docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>/dev/null || true
           sudo gpasswd -d "${USER}" docker 2>/dev/null || true
+          sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg 2>/dev/null || true
           ;;
         rhel)
           local pmgr="yum"
@@ -501,6 +541,12 @@ rollback_installation() {
           ;;
       esac
       ;;
+  esac
+
+  # Remove runtime preference file
+  if [[ -f "${SCRIPT_DIR}/config/active.conf" ]]; then
+    sudo rm -f "${SCRIPT_DIR}/config/active.conf" 2>/dev/null || true
+  fi
   esac
 
   log_info "Rollback completed. Some configuration files may remain."
@@ -639,23 +685,72 @@ install_podman_rhel() {
 }
 
 install_docker_debian() {
-  log_info "Installing Docker on Debian/Ubuntu..."
+  log_info "Installing Docker CE + Docker Compose v2 on Debian/Ubuntu..."
   if [[ -n "$AIR_GAPPED_DIR" ]]; then
     install_air_gapped_packages "$AIR_GAPPED_DIR"
     return 0
   fi
 
-  need_confirm "Install Docker Engine + Compose via apt-get?" || die "${E_GENERAL}" "User cancelled."
+  need_confirm "Install Docker CE + Docker Compose v2 via official Docker repository?" || die "${E_GENERAL}" "User cancelled."
   require_cmd sudo
-  pkg_install apt-get curl git ca-certificates
-  # Use distro docker as a reasonable default
-  pkg_install apt-get docker.io
-  # Compose v2 is usually present as a plugin with recent Docker; prompt if missing
-  if ! docker compose version >/dev/null 2>&1; then
-    log_warn "'docker compose' not detected; install the plugin package if available, or consider Docker Desktop."
+  
+  # Install prerequisites
+  pkg_install apt-get ca-certificates curl gnupg lsb-release
+
+  # Add Docker's official GPG key
+  sudo mkdir -p /etc/apt/keyrings
+  if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
+    log_info "Adding Docker's official GPG key..."
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
   fi
+
+  # Add Docker repository
+  if [[ ! -f /etc/apt/sources.list.d/docker.list ]]; then
+    log_info "Adding Docker CE repository..."
+    # Detect Ubuntu/Debian for correct repository
+    local distro_id
+    if [[ -f /etc/os-release ]]; then
+      source /etc/os-release
+      distro_id="${ID:-ubuntu}"
+    else
+      distro_id="ubuntu"
+    fi
+    
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${distro_id} \
+      $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  fi
+
+  # Update package index
+  log_info "Updating package index..."
+  sudo apt-get update
+
+  # Install Docker CE + Docker Compose v2
+  log_info "Installing Docker CE, CLI, containerd, and Docker Compose plugin..."
+  pkg_install apt-get docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  # Enable and start Docker service
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl enable --now docker 2>/dev/null || true
+  fi
+
+  # Add user to docker group
   log_info "Adding current user to 'docker' group (you may need to log out/in)."
   sudo usermod -aG docker "${USER}" || true
+
+  # Verify Docker Compose v2 is available
+  if docker compose version >/dev/null 2>&1; then
+    log_success "Docker Compose v2 successfully installed"
+  else
+    log_warn "Docker Compose v2 not detected after installation"
+  fi
+
+  # Set persistent runtime preference to docker
+  if [[ -f "${SCRIPT_DIR}/config/active.conf" ]] || mkdir -p "${SCRIPT_DIR}/config"; then
+    echo "CONTAINER_RUNTIME=docker" > "${SCRIPT_DIR}/config/active.conf"
+    log_info "Set persistent runtime preference to Docker"
+  fi
 }
 
 install_docker_rhel() {
@@ -911,9 +1006,18 @@ main() {
   case "${OS_FAMILY}" in
     debian)
       case "${RUNTIME_PREF}" in
-        podman|auto) install_podman_debian ;;
-        docker)      install_docker_debian ;;
-        *)           die "${E_INVALID_INPUT}" "Unknown --runtime '${RUNTIME_PREF}'" ;;
+        podman) install_podman_debian ;;
+        docker) install_docker_debian ;;
+        auto) 
+          if [[ "$PREFER_PODMAN" == "1" ]]; then
+            log_info "Ubuntu/Debian detected with --prefer-podman flag - installing Podman"
+            install_podman_debian
+          else
+            log_info "Ubuntu/Debian detected - installing Docker CE + Docker Compose v2 (use --prefer-podman for Podman)"
+            install_docker_debian
+          fi
+          ;;
+        *) die "${E_INVALID_INPUT}" "Unknown --runtime '${RUNTIME_PREF}'" ;;
       esac
       ;;
     rhel)
