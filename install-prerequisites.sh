@@ -5,7 +5,7 @@
 #
 # Ubuntu/Debian: Prefers Docker CE + Docker Compose v2 (use --prefer-podman for Podman)
 # RHEL 8+: Prefers Docker for Python compatibility (podman-compose has issues with Python 3.6)
-# Other RHEL: Prefers Podman + native "podman compose" (podman-plugins)
+# Other RHEL/Fedora: Prefers Docker for consistency (use --prefer-podman for Podman)
 # Fallbacks: Docker + "docker compose", then podman-compose/python, then docker-compose v1
 #
 # Usage:
@@ -486,7 +486,7 @@ rollback_installation() {
         if [[ "$PREFER_PODMAN" == "1" ]]; then
           actual_runtime="podman"
         else
-          actual_runtime="docker"
+          actual_runtime="docker"  # Default to Docker first
         fi
         ;;
       rhel)
@@ -502,9 +502,9 @@ rollback_installation() {
         fi
         
         if [[ "$rhel8_detected" == "true" ]]; then
-          actual_runtime="docker"
+          actual_runtime="docker"  # RHEL 8: Docker for Python compatibility
         else
-          actual_runtime="podman"
+          actual_runtime="docker"  # Default to Docker first for all RHEL/Fedora
         fi
         ;;
     esac
@@ -1012,7 +1012,7 @@ main() {
             log_info "Ubuntu/Debian detected with --prefer-podman flag - installing Podman"
             install_podman_debian
           else
-            log_info "Ubuntu/Debian detected - installing Docker CE + Docker Compose v2 (use --prefer-podman for Podman)"
+            log_info "Ubuntu/Debian detected - installing Docker CE + Docker Compose v2 (preferred, use --prefer-podman for Podman)"
             install_docker_debian
           fi
           ;;
@@ -1044,7 +1044,8 @@ main() {
             log_info "RHEL 8 detected - Preferring Docker for better Python compatibility"
             install_docker_rhel
           else
-            install_podman_rhel
+            log_info "RHEL/Fedora detected - Preferring Docker (use --prefer-podman for Podman)"
+            install_docker_rhel
           fi
           ;;
         docker) install_docker_rhel ;;
@@ -1055,7 +1056,7 @@ main() {
       install_on_macos
       ;;
     *)
-      die "${E_GENERAL}" "Unsupported OS family: ${OS_FAMILY}. Please install Podman (preferred) or Docker manually."
+      die "${E_GENERAL}" "Unsupported OS family: ${OS_FAMILY}. Please install Docker (preferred) or Podman manually."
       ;;
   esac
 

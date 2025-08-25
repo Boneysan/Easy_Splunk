@@ -277,9 +277,9 @@ find . -name "*.sh" -type f -exec chmod 755 {} \;
 find . -name "*.sh" -type f -exec chown root:root {} \;
 
 # 3) Install prerequisites (automatically detects OS and installs optimal container runtime)
-#    Ubuntu/Debian systems: Automatically prefers Docker for better ecosystem compatibility
+#    All systems: Automatically prefers Docker for better ecosystem compatibility
 #    RHEL 8 systems: Automatically prefers Docker for better Python compatibility
-#    Other systems: Prefers Podman with comprehensive fallback support
+#    Other systems: Prefers Docker with comprehensive Podman fallback support
 ./install-prerequisites.sh --yes
 
 # 4) Generate credentials (admin user/secret, TLS as needed)

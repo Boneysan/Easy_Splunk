@@ -144,6 +144,25 @@ if ! type validate_container_runtime &>/dev/null; then
   }
 fi
 
+# Fallback validate_input function for error handling library compatibility
+if ! type validate_input &>/dev/null; then
+  validate_input() {
+    local value="$1"
+    local pattern="${2:-.*}"
+    local description="${3:-input}"
+    
+    # Basic validation using pattern matching
+    if [[ ! "$value" =~ $pattern ]]; then
+      log_message ERROR "Invalid $description: $value"
+      log_message INFO "Expected pattern: $pattern"
+      return 1
+    fi
+    
+    log_message DEBUG "Input validation passed for $description: $value"
+    return 0
+  }
+fi
+
 # Fallback check_disk_space function for error handling library compatibility
 if ! type check_disk_space &>/dev/null; then
   check_disk_space() {
