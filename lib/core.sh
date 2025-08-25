@@ -449,6 +449,75 @@ run_cleanup() {
   CLEANUP_COMMANDS_STR=()
 }
 
+# --- Atomic file operations for secure writing --------------------------------
+# Atomic write function for secure file operations
+atomic_write() {
+  local target_file="$1"
+  local perms="${2:-644}"
+  
+  if [[ -z "$target_file" ]]; then
+    log_error "atomic_write: target file path required"
+    return 1
+  fi
+  
+  # Create temp file in same directory as target for atomic move
+  local target_dir; target_dir="$(dirname "$target_file")"
+  local temp_file; temp_file="$(mktemp -p "$target_dir" ".$(basename "$target_file").tmp.XXXXXX")"
+  
+  if [[ -z "$temp_file" ]]; then
+    log_error "atomic_write: failed to create temporary file in $target_dir"
+    return 1
+  fi
+  
+  # Set permissions on temp file
+  if ! chmod "$perms" "$temp_file"; then
+    rm -f "$temp_file"
+    log_error "atomic_write: failed to set permissions $perms on temporary file"
+    return 1
+  fi
+  
+  # Read from stdin and write to temp file
+  if ! cat > "$temp_file"; then
+    rm -f "$temp_file"
+    log_error "atomic_write: failed to write content to temporary file"
+    return 1
+  fi
+  
+  # Atomic move to final location
+  if ! mv "$temp_file" "$target_file"; then
+    rm -f "$temp_file"
+    log_error "atomic_write: failed to move temporary file to $target_file"
+    return 1
+  fi
+  
+  return 0
+}
+
+# Atomic file write function (alternative interface)
+atomic_write_file() {
+  local source_file="$1"
+  local target_file="$2"
+  local perms="${3:-644}"
+  
+  if [[ -z "$source_file" || -z "$target_file" ]]; then
+    log_error "atomic_write_file: source and target file paths required"
+    return 1
+  fi
+  
+  if [[ ! -f "$source_file" ]]; then
+    log_error "atomic_write_file: source file does not exist: $source_file"
+    return 1
+  fi
+  
+  # Use atomic_write with file content
+  if ! cat "$source_file" | atomic_write "$target_file" "$perms"; then
+    log_error "atomic_write_file: failed to atomically write $source_file to $target_file"
+    return 1
+  fi
+  
+  return 0
+}
+
 # --- Enhanced with_retry (if not overridden by an external lib) ----------------
 # (Re-define to ensure this enhanced version is present in final surface)
 with_retry() {
