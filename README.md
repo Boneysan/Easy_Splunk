@@ -372,14 +372,21 @@ If you see `[WARN] User not in docker group - logout/login may be required`:
 
 **For non-root users:**
 ```bash
-# Add user to docker group
+# Add your user to docker group (example with 'rangetech' user)
+sudo usermod -aG docker rangetech
+
+# Apply the group change immediately (alternative to logging out/in)
+newgrp docker
+
+# Test docker access
+docker ps
+
+# Alternative: Generic version for current user
 sudo usermod -aG docker $USER
+newgrp docker
 
 # Log out and log back in, then verify
 groups  # Should show 'docker' in the list
-
-# Alternative: Use newgrp to activate group without logout
-newgrp docker
 ```
 
 ### **Verification Steps**
