@@ -314,89 +314,172 @@ enable_socket_system() {
 }
 
 verify_setup() {
-  # docker CLI shim
+  local runtime_found=false
+  
+  # Check Docker first
   if have_cmd docker; then
     log_info "docker --version:"
-    docker --version || true
-    log_success "'docker' CLI shim is available."
-  else
-    log_warn "'docker' command not found. Some tools may expect it. (podman-docker not installed?)"
+    if docker --version >/dev/null 2>&1; then
+      docker --version || true
+      log_success "Docker runtime is available."
+      runtime_found=true
+      
+      # Check Docker Compose
+      if docker compose version >/dev/null 2>&1; then
+        log_success "Docker Compose v2 available via 'docker compose'."
+      elif have_cmd docker-compose; then
+        log_success "Docker Compose v1 available via 'docker-compose'."
+      else
+        log_warn "No Docker Compose detected."
+      fi
+      
+      # Check Docker daemon
+      if docker info >/dev/null 2>&1; then
+        log_success "Docker daemon is running."
+      else
+        log_warn "Docker daemon not accessible. You may need to:"
+        log_warn "  - Start the Docker service: sudo systemctl start docker"
+        log_warn "  - Log out and back in (for group membership)"
+        log_warn "  - Add yourself to docker group: sudo usermod -aG docker \${USER}"
+      fi
+    fi
   fi
+  
+  # Check Podman as fallback or if specifically installed
+  if have_cmd podman; then
+    if ! $runtime_found; then
+      log_info "Docker not found, checking Podman..."
+    fi
+    
+    if podman --version >/dev/null 2>&1; then
+      log_success "Podman runtime is available."
+      runtime_found=true
+      
+      # Check Podman API socket (user first, then system)
+      local user_sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock"
+      if [[ -S "${user_sock}" ]]; then
+        log_success "Rootless Podman API socket is active at: unix://${user_sock}"
+      elif [[ -S /run/podman/podman.sock ]]; then
+        log_success "System Podman API socket is active at: unix:///run/podman/podman.sock"
+      else
+        log_warn "No Podman API socket detected. You may need to re-login or start the socket manually."
+      fi
 
-  # Podman OK?
-  podman --version >/dev/null 2>&1 || die "${E_GENERAL:-1}" "Podman not working after install."
-
-  # Socket check (user first, then system)
-  local user_sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock"
-  if [[ -S "${user_sock}" ]]; then
-    log_success "Rootless API socket is active at: unix://${user_sock}"
-  elif [[ -S /run/podman/podman.sock ]]; then
-    log_success "System API socket is active at: unix:///run/podman/podman.sock"
-  else
-    log_warn "No Podman API socket detected. You may need to re-login or start the socket manually."
+      # Check Podman Compose
+      if podman compose version >/dev/null 2>&1; then
+        log_success "Podman Compose available via 'podman compose'."
+      elif have_cmd podman-compose; then
+        log_success "Podman Compose available via 'podman-compose'."
+      else
+        log_warn "No Podman compose tool detected."
+      fi
+    fi
   fi
-
-  # Compose check
-  if podman compose version >/dev/null 2>&1; then
-    log_success "Compose available via 'podman compose'."
-  elif have_cmd podman-compose; then
-    log_success "Compose available via 'podman-compose'."
-  else
-    log_warn "No compose tool detected."
+  
+  if ! $runtime_found; then
+    die "${E_GENERAL:-1}" "No container runtime (Docker or Podman) is working after installation."
   fi
 }
 
 main() {
-  log_info "🚀 Podman & Docker Compatibility Setup"
+  log_info "🚀 Container Runtime Setup (Docker preferred, Podman fallback)"
 
   # Parse flags
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -y|--yes) AUTO_YES=1; shift;;
+      --prefer-podman) PREFER_PODMAN=1; shift;;
       -h|--help) usage; exit 0;;
       *) die "${E_INVALID_INPUT:-2}" "Unknown option: $1";;
     esac
   done
 
   ensure_sudo
-  log_info "This will install Podman and configure Docker compatibility."
-  confirm_or_exit "Continue?"
-
-  if is_rhel_like; then
-    install_podman_rhel
-  elif is_debian_like; then
-    install_podman_debian
+  
+  if [[ $PREFER_PODMAN -eq 1 ]]; then
+    log_info "--prefer-podman specified: Will install Podman instead of Docker."
+    confirm_or_exit "Continue with Podman installation?"
   else
-    local os; os="$(get_os)"
-    if [[ "${os}" == "darwin" ]]; then
-      log_warn "macOS detected. Recommended:"
-      log_warn "  brew install podman"
-      log_warn "  podman machine init && podman machine start"
-      log_warn "For Docker CLI compat, use DOCKER_HOST from:"
-      log_warn "  podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}'"
-      exit 0
-    fi
-    die "${E_GENERAL:-1}" "Unsupported Linux distribution for this automated script."
+    log_info "This will install container runtime with Docker preference, Podman fallback."
+    confirm_or_exit "Continue?"
   fi
 
-  # Enable socket (prefer rootless)
-  if [[ $EUID -eq 0 ]]; then
-    enable_socket_system || true
+  local install_success=false
+
+  if [[ $PREFER_PODMAN -eq 1 ]]; then
+    # Legacy compatibility: force Podman installation
+    log_info "Installing Podman (--prefer-podman specified)..."
+    if is_rhel_like; then
+      install_podman_rhel && install_success=true
+    elif is_debian_like; then
+      install_podman_debian && install_success=true
+    fi
   else
-    # Make sure user has a systemd user session
-    if loginctl show-user "${USER}" &>/dev/null; then
-      enable_socket_rootless || enable_socket_system || true
-    else
-      log_warn "No systemd user session detected; enabling system socket instead."
+    # Try Docker first (preferred)
+    log_info "Attempting Docker installation (preferred)..."
+    if is_rhel_like; then
+      if install_docker_rhel; then
+        install_success=true
+        log_success "Docker installation successful."
+      else
+        log_warn "Docker installation failed, trying Podman fallback..."
+        install_podman_rhel && install_success=true
+      fi
+    elif is_debian_like; then
+      if install_docker_debian; then
+        install_success=true
+        log_success "Docker installation successful."
+      else
+        log_warn "Docker installation failed, trying Podman fallback..."
+        install_podman_debian && install_success=true
+      fi
+    fi
+  fi
+
+  # Handle unsupported OS
+  if ! $install_success; then
+    local os; os="$(get_os)"
+    if [[ "${os}" == "darwin" ]]; then
+      log_warn "macOS detected. Recommended options:"
+      log_warn "  For Docker: Install Docker Desktop from https://docker.com/products/docker-desktop"
+      log_warn "  For Podman: brew install podman && podman machine init && podman machine start"
+      exit 0
+    fi
+    die "${E_GENERAL:-1}" "Failed to install any container runtime. Unsupported distribution or installation failure."
+  fi
+
+  # Configure sockets for Podman if it was installed
+  if have_cmd podman && ! have_cmd docker; then
+    log_info "Configuring Podman API socket..."
+    if [[ $EUID -eq 0 ]]; then
       enable_socket_system || true
+    else
+      # Make sure user has a systemd user session
+      if loginctl show-user "${USER}" &>/dev/null; then
+        enable_socket_rootless || enable_socket_system || true
+      else
+        log_warn "No systemd user session detected; enabling system socket instead."
+        enable_socket_system || true
+      fi
     fi
   fi
 
   verify_setup
 
-  log_success "✅ Podman setup complete."
-  log_info "Tip (rootless): add to your shell profile to make Docker clients use Podman:"
-  log_info "  export DOCKER_HOST=\"unix://${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock\""
+  log_success "✅ Container runtime setup complete."
+  
+  if have_cmd docker; then
+    log_info "Docker is installed and configured."
+    if groups | grep -q docker; then
+      log_info "User is in docker group - no logout required."
+    else
+      log_info "Note: You may need to log out and back in for Docker group membership to take effect."
+    fi
+  elif have_cmd podman; then
+    log_info "Podman is installed and configured."
+    log_info "Tip (rootless): add to your shell profile to make Docker clients use Podman:"
+    log_info "  export DOCKER_HOST=\"unix://${XDG_RUNTIME_DIR:-/run/user/$UID}/podman/podman.sock\""
+  fi
 }
 
 main "$@"
