@@ -89,6 +89,70 @@ ensure_sudo() {
   fi
 }
 
+# Docker installation functions (preferred)
+install_docker_rhel() {
+  local pm="yum"
+  have_cmd dnf && pm="dnf"
+  log_info "Installing Docker via ${pm}..."
+  
+  # Try Docker CE from official repository if available
+  if sudo "${pm}" install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null 2>&1; then
+    log_success "Installed Docker CE with Compose plugin."
+  elif sudo "${pm}" install -y moby-engine moby-cli moby-compose >/dev/null 2>&1; then
+    log_success "Installed Moby engine with compose."
+  elif sudo "${pm}" install -y docker >/dev/null 2>&1; then
+    log_success "Installed Docker from distribution packages."
+    # Try to install docker-compose separately
+    if ! sudo "${pm}" install -y docker-compose >/dev/null 2>&1; then
+      log_warn "docker-compose not available from package manager."
+    fi
+  else
+    return 1  # Failed to install Docker
+  fi
+
+  # Enable and start Docker service
+  if have_cmd systemctl; then
+    sudo systemctl enable --now docker || log_warn "Failed to enable Docker service"
+  fi
+
+  # Add user to docker group
+  if [[ $EUID -ne 0 ]]; then
+    sudo usermod -aG docker "${USER}" || log_warn "Failed to add user to docker group"
+    log_info "Added user to docker group. You may need to log out and back in."
+  fi
+
+  return 0
+}
+
+install_docker_debian() {
+  log_info "Installing Docker via APT..."
+  sudo apt-get update -y
+
+  # Try Docker CE with official repository setup if available
+  if command -v docker >/dev/null 2>&1 || sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null 2>&1; then
+    log_success "Installed Docker CE with Compose plugin."
+  elif sudo apt-get install -y docker.io docker-compose >/dev/null 2>&1; then
+    log_success "Installed Docker from distribution packages."
+  else
+    return 1  # Failed to install Docker
+  fi
+
+  # Enable and start Docker service
+  if have_cmd systemctl; then
+    sudo systemctl enable --now docker || log_warn "Failed to enable Docker service"
+  fi
+
+  # Add user to docker group
+  if [[ $EUID -ne 0 ]]; then
+    sudo usermod -aG docker "${USER}" || log_warn "Failed to add user to docker group"
+    log_info "Added user to docker group. You may need to log out and back in."
+  fi
+
+  return 0
+}
+
+# Podman installation functions (fallback)
+
 install_podman_rhel() {
   local pm="yum"
   have_cmd dnf && pm="dnf"
