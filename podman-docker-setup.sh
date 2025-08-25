@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # podman-docker-setup.sh
-# Install Podman and configure Docker compatibility (CLI + API socket).
+# Install container runtime with Docker preference and Podman fallback.
 #
 # Flags:
 #   --yes, -y      Non-interactive (skip confirmation)
+#   --prefer-podman Force Podman instead of Docker (legacy compatibility)
 #   -h, --help     Show usage
 #
 # Behavior:
+#   - Prefers Docker + Docker Compose v2 (better compatibility)
+#   - Falls back to Podman + compose if Docker unavailable/fails
 #   - RHEL-like: uses dnf/yum
 #   - Debian-like: uses apt
-#   - Prefers rootless Podman socket (systemd --user); falls back to system socket if root
-#   - Installs a Compose solution:
-#       * prefer: `podman compose` (Podman v4+)
-#       * fallback: `podman-compose` (python package) via distro pkg or pip
+#   - Configures API socket and compose solution
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh
 # Required by  : install-prerequisites.sh
@@ -29,19 +29,21 @@ source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 
 AUTO_YES=0
+PREFER_PODMAN=0  # Force Podman instead of Docker (legacy compatibility)
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--yes]
+Usage: $(basename "$0") [--yes] [--prefer-podman]
 
-Installs Podman and sets up Docker compatibility:
-  - 'docker' CLI shim (via podman-docker if available)
-  - Docker-compatible API socket (podman.socket)
-  - Compose support (podman compose or podman-compose)
+Installs container runtime and compose with Docker preference:
+  - Tries Docker + Docker Compose v2 first (better compatibility)
+  - Falls back to Podman + compose solution if Docker fails
+  - Configures API socket and compose support
 
 Options:
-  --yes, -y    Run non-interactively (no confirmation prompt)
-  -h, --help   Show this help and exit
+  --yes, -y        Run non-interactively (no confirmation prompt)
+  --prefer-podman  Force Podman instead of Docker (legacy compatibility)
+  -h, --help       Show this help and exit
 EOF
 }
 
