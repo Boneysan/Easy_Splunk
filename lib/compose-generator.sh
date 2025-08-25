@@ -234,7 +234,7 @@ fi
 : "${SECRETS_DIR:=./secrets}"
 : "${ENABLE_MONITORING:=false}"
 : "${ENABLE_HEALTHCHECKS:=true}"
-: "${ENABLE_SPLUNK:=false}"
+: "${ENABLE_SPLUNK:=true}"  # Default to true for Easy_Splunk toolkit
 : "${ENABLE_SECRETS:=false}"
 
 # Load credentials from secrets manager with fallbacks
@@ -808,11 +808,7 @@ generate_compose_file() {
   # Header
   _generate_header > "${tmp}"
 
-  # Core services
-  _generate_app_service      >> "${tmp}"
-  _generate_redis_service    >> "${tmp}"
-
-  # Splunk cluster services
+  # For Easy_Splunk toolkit, generate Splunk services first (primary purpose)
   if is_true "${ENABLE_SPLUNK}"; then
     log_info "  -> Splunk cluster enabled: ${INDEXER_COUNT} indexers, ${SEARCH_HEAD_COUNT} search heads"
 
@@ -830,6 +826,13 @@ generate_compose_file() {
     for ((i=1; i<=SEARCH_HEAD_COUNT; i++)); do
       _generate_splunk_search_head_service "$i" >> "${tmp}"
     done
+  fi
+
+  # Optional: Generic app services (only if explicitly enabled)
+  if is_true "${ENABLE_APP_SERVICES:-false}"; then
+    log_info "  -> Generic app services enabled"
+    _generate_app_service      >> "${tmp}"
+    _generate_redis_service    >> "${tmp}"
   fi
 
   # Monitoring (via profiles)
