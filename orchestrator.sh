@@ -256,9 +256,35 @@ install_docker_compose_fallback() {
     fi
 }
 
+# Source runtime configuration from active configuration
+source_runtime_config() {
+    log_message INFO "Sourcing runtime configuration from active configuration"
+    
+    # Source runtime configuration from config/active.conf if available
+    if [[ -f "$CONFIG_FILE" ]]; then
+        log_message INFO "Loading runtime configuration from: $CONFIG_FILE"
+        
+        # Extract CONTAINER_RUNTIME from config file safely
+        local configured_runtime
+        configured_runtime=$(grep -E "^CONTAINER_RUNTIME=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+        
+        if [[ -n "$configured_runtime" ]]; then
+            export CONTAINER_RUNTIME="$configured_runtime"
+            log_message INFO "Runtime configuration loaded: CONTAINER_RUNTIME=$CONTAINER_RUNTIME"
+        else
+            log_message INFO "No CONTAINER_RUNTIME found in config file, will use auto-detection"
+        fi
+    else
+        log_message INFO "No active configuration file found, using auto-detection"
+    fi
+}
+
 # Initialize compose command with intelligent fallback
 init_compose_command() {
     log_message INFO "Initializing container compose command with enhanced fallback system"
+    
+    # Source runtime configuration first
+    source_runtime_config
     
     # Use shared compose initialization library if available
     if type initialize_compose_system &>/dev/null; then
@@ -271,73 +297,107 @@ init_compose_command() {
         fi
     fi
     
-    # Fallback to local compose initialization logic
-    # RHEL 8 Detection for Smart Runtime Selection
+    # Fallback to local compose initialization logic with Docker-first semantics
+    # Detect OS for intelligent runtime selection
     local prefer_docker=false
-    if [[ -f /etc/redhat-release ]] && grep -q "Red Hat Enterprise Linux.*release 8\|CentOS.*release 8\|Rocky Linux.*release 8\|AlmaLinux.*release 8" /etc/redhat-release 2>/dev/null; then
-        prefer_docker=true
-        log_message INFO "RHEL 8-based system detected - Docker preferred due to Python 3.6 compatibility issues"
-    elif [[ -f /etc/os-release ]]; then
+    local os_name=""
+    
+    if [[ -f /etc/os-release ]]; then
         source /etc/os-release 2>/dev/null || true
-        if [[ "${VERSION_ID:-}" == "8"* ]] && [[ "${ID:-}" =~ ^(rhel|centos|rocky|almalinux)$ ]]; then
+        os_name="${ID:-unknown}"
+        
+        # Docker-first for Ubuntu/Debian systems
+        if [[ "$os_name" =~ ^(ubuntu|debian)$ ]]; then
             prefer_docker=true
-            log_message INFO "RHEL 8-family system detected - Docker preferred for better compatibility"
+            log_message INFO "Ubuntu/Debian system detected - Docker preferred for better ecosystem compatibility"
+        # Docker-first for RHEL 8 systems due to Python 3.6 limitations
+        elif [[ "${VERSION_ID:-}" == "8"* ]] && [[ "$os_name" =~ ^(rhel|centos|rocky|almalinux)$ ]]; then
+            prefer_docker=true
+            log_message INFO "RHEL 8-family system detected - Docker preferred due to Python 3.6 compatibility issues"
+        fi
+    elif [[ -f /etc/redhat-release ]]; then
+        if grep -q "Red Hat Enterprise Linux.*release 8\|CentOS.*release 8\|Rocky Linux.*release 8\|AlmaLinux.*release 8" /etc/redhat-release 2>/dev/null; then
+            prefer_docker=true
+            log_message INFO "RHEL 8-based system detected via redhat-release - Docker preferred"
         fi
     fi
     
-    # Override container runtime detection for RHEL 8
-    if [[ "$prefer_docker" == "true" ]] && [[ "${CONTAINER_RUNTIME:-}" != "docker" ]]; then
+    # Apply Docker-first preference if not explicitly configured
+    if [[ "$prefer_docker" == "true" ]] && [[ -z "${CONTAINER_RUNTIME:-}" ]]; then
         if command -v docker &>/dev/null; then
             export CONTAINER_RUNTIME="docker"
-            log_message INFO "Switched to Docker runtime for RHEL 8 compatibility"
+            log_message INFO "Auto-selected Docker runtime for $os_name system"
         else
-            log_message WARN "RHEL 8 detected but Docker not available - will use Podman with enhanced fallback"
+            log_message WARN "Docker preferred for $os_name but not available - will detect available runtime"
+        fi
+    fi
+    
+    # Detect container runtime if not already set
+    if [[ -z "${CONTAINER_RUNTIME:-}" ]]; then
+        log_message INFO "Auto-detecting container runtime with Docker-first preference"
+        
+        if command -v docker &>/dev/null && docker version &>/dev/null 2>&1; then
+            export CONTAINER_RUNTIME="docker"
+            log_message INFO "Auto-detected Docker runtime"
+        elif command -v podman &>/dev/null && podman version &>/dev/null 2>&1; then
+            export CONTAINER_RUNTIME="podman"
+            log_message INFO "Auto-detected Podman runtime"
+        else
+            log_message ERROR "No container runtime (Docker or Podman) found"
+            error_exit "No container runtime available. Please install Docker or Podman."
         fi
     fi
     
     # Validate container runtime
-    validate_container_runtime
+    if ! validate_container_runtime "$CONTAINER_RUNTIME"; then
+        error_exit "Container runtime validation failed: $CONTAINER_RUNTIME"
+    fi
     
-    # Determine compose command based on runtime with intelligent fallback
+    # Determine compose command based on runtime with Docker-first preference
+    log_message INFO "Resolving compose command for runtime: $CONTAINER_RUNTIME"
+    
     if [[ "$CONTAINER_RUNTIME" == "docker" ]]; then
-        if command -v docker-compose &>/dev/null; then
-            COMPOSE_CMD="docker-compose"
-        elif docker compose version &>/dev/null 2>&1; then
+        # Docker Compose v2 (native) preferred, then standalone docker-compose
+        if docker compose version &>/dev/null 2>&1; then
             COMPOSE_CMD="docker compose"
+            log_message SUCCESS "Using Docker Compose v2 (native): $COMPOSE_CMD"
+        elif command -v docker-compose &>/dev/null && docker-compose --version &>/dev/null; then
+            COMPOSE_CMD="docker-compose"
+            log_message SUCCESS "Using Docker Compose v1 (standalone): $COMPOSE_CMD"
         else
-            log_message ERROR "Docker Compose not found"
-            error_exit "Docker Compose not found"
+            log_message ERROR "Docker runtime selected but no Docker Compose found"
+            error_exit "Docker Compose not found. Please install Docker Compose."
         fi
     elif [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
-        # Try podman-compose options first
-        if command -v podman-compose &>/dev/null && podman-compose --version &>/dev/null; then
-            COMPOSE_CMD="podman-compose"
-            log_message INFO "Using podman-compose (Python)"
-        elif podman compose version &>/dev/null 2>&1; then
+        # Try podman compose options with enhanced fallback
+        if podman compose version &>/dev/null 2>&1; then
             COMPOSE_CMD="podman compose"
-            log_message INFO "Using native podman compose"
+            log_message SUCCESS "Using native podman compose: $COMPOSE_CMD"
+        elif command -v podman-compose &>/dev/null && podman-compose --version &>/dev/null; then
+            COMPOSE_CMD="podman-compose"
+            log_message SUCCESS "Using podman-compose (Python): $COMPOSE_CMD"
         else
-            # Podman compose failed - try fallback to docker-compose with podman
+            # Podman compose failed - try fallback to docker-compose with podman socket
             log_message WARNING "Podman compose not available, attempting docker-compose fallback"
             
             if command -v docker-compose &>/dev/null; then
                 COMPOSE_CMD="docker-compose"
                 export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-                log_message SUCCESS "✅ Using docker-compose with podman socket as fallback"
+                log_message SUCCESS "Using docker-compose with podman socket as fallback: $COMPOSE_CMD"
             elif install_docker_compose_fallback; then
                 COMPOSE_CMD="docker-compose"
                 export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-                log_message SUCCESS "✅ Installed and configured docker-compose fallback"
+                log_message SUCCESS "Installed and configured docker-compose fallback: $COMPOSE_CMD"
             else
-                log_message ERROR "All compose options failed"
-                error_exit "No working compose implementation found"
+                log_message ERROR "All compose options failed for Podman runtime"
+                error_exit "No working compose implementation found for Podman"
             fi
         fi
     else
         error_exit "Unsupported container runtime: $CONTAINER_RUNTIME"
     fi
     
-    log_message INFO "Using compose command: $COMPOSE_CMD"
+    log_message SUCCESS "Compose system initialized: $COMPOSE_CMD (runtime: $CONTAINER_RUNTIME)"
     
     # Build compose file list
     COMPOSE_FILES=("-f" "$COMPOSE_FILE")
