@@ -817,6 +817,9 @@ generate_compose_file() {
   # Header
   _generate_header > "${tmp}"
 
+  # Debug: Show current ENABLE_SPLUNK value
+  log_message INFO "DEBUG: ENABLE_SPLUNK='${ENABLE_SPLUNK}', is_true result: $(is_true "${ENABLE_SPLUNK}" && echo "TRUE" || echo "FALSE")"
+
   # For Easy_Splunk toolkit, generate Splunk services first (primary purpose)
   if is_true "${ENABLE_SPLUNK}"; then
     log_info "  -> Splunk cluster enabled: ${INDEXER_COUNT} indexers, ${SEARCH_HEAD_COUNT} search heads"
