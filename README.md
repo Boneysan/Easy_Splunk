@@ -86,6 +86,49 @@ sudo chmod +x /usr/local/bin/docker-compose
 sudo ln -sf /usr/local/bin/docker-compose /usr/local/bin/podman-compose
 ```
 
+### **Ubuntu/Debian Docker Optimization**
+Ubuntu and Debian systems benefit from Docker's mature ecosystem and better integration with the broader containerization landscape.
+
+**🆕 Automatic Ubuntu/Debian Optimization:**
+- **Auto-detection**: Recognizes Ubuntu 20.04+, Debian 10+
+- **Smart Runtime Selection**: Automatically prefers Docker over Podman on Ubuntu/Debian
+- **Ecosystem Compatibility**: Better integration with Docker tooling and documentation
+- **Seamless Experience**: Zero user intervention required
+
+```bash
+# Automatic Ubuntu/Debian optimization (recommended)
+./install-prerequisites.sh --yes        # Auto-detects Ubuntu/Debian, prefers Docker
+
+# Ubuntu-specific Docker installation examples
+# Option 1: Official Docker repository (recommended)
+sudo apt-get update
+sudo apt-get install -y docker.io docker-compose-v2
+
+# Option 2: Docker CE from Docker's official repository
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# Verify installation
+docker --version && docker compose version
+```
+
+### **OS-Specific Optimization Details**
+For detailed information about OS-specific optimizations:
+
+```bash
+# RHEL 8 Docker preference details
+./rhel8-docker-preference-summary.sh
+
+# Ubuntu/Debian Docker preference details  
+./ubuntu-docker-preference-summary.sh
+
+# Test OS-specific detection and preferences
+./test_detection.sh
+./test-docker-compatibility.sh
+```
+
 ### **Function Loading Fixes**
 All scripts now include comprehensive fallback functions to ensure reliability even when the main error handling library fails to load.
 
@@ -214,11 +257,13 @@ The toolkit now includes intelligent fallback logic for compose implementations:
 ## 🚀 Quick Start
 
 ### **Supported Operating Systems**
-- ✅ **RHEL 8+** (Red Hat Enterprise Linux)
-- ✅ **CentOS 8+** / **Rocky Linux 8+** / **AlmaLinux 8+**
-- ✅ **Ubuntu 20.04+** / **Debian 10+**
+- ✅ **RHEL 8+** (Red Hat Enterprise Linux) - *Docker-optimized*
+- ✅ **CentOS 8+** / **Rocky Linux 8+** / **AlmaLinux 8+** - *Docker-optimized*
+- ✅ **Ubuntu 20.04+** / **Debian 10+** - *Docker-optimized*
 - ✅ **Fedora 35+**
 - ✅ **WSL2** (Windows Subsystem for Linux)
+
+**Docker-optimized** = Automatically prefers Docker for optimal compatibility
 
 ### **Installation Steps**
 
@@ -232,6 +277,7 @@ find . -name "*.sh" -type f -exec chmod 755 {} \;
 find . -name "*.sh" -type f -exec chown root:root {} \;
 
 # 3) Install prerequisites (automatically detects OS and installs optimal container runtime)
+#    Ubuntu/Debian systems: Automatically prefers Docker for better ecosystem compatibility
 #    RHEL 8 systems: Automatically prefers Docker for better Python compatibility
 #    Other systems: Prefers Podman with comprehensive fallback support
 ./install-prerequisites.sh --yes
