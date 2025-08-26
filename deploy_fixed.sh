@@ -180,5 +180,267 @@ EOF
 }
 
 echo "Easy_Splunk deployment script loaded successfully!"
-echo "Run with --help for usage information."
-echo "This is a minimal working version - full functions need to be added."
+
+# ============================= Argument Parsing ===========================
+parse_arguments() {
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            small|medium|large) SIZE="$1"; shift;;
+            --monitoring)       WITH_MONITORING=1; shift;;
+            --no-monitoring)    WITH_MONITORING=0; shift;;
+            --env-file)
+                ENVFILE="${2:-}"; [[ -z "$ENVFILE" ]] && error_exit "--env-file requires a path"
+                [[ ! -f "$ENVFILE" ]] && error_exit "Environment file not found: $ENVFILE"
+                shift 2;;
+            --index)            INDEX_NAME="$2"; shift 2;;
+            --skip-creds)       SKIP_CREDS=1; shift;;
+            --skip-health)      SKIP_HEALTH=1; shift;;
+            --force-recreate)   FORCE_RECREATE=1; shift;;
+            --force-deploy)     FORCE_DEPLOY=1; shift;;
+            --dry-run)          DRY_RUN=1; shift;;
+            --debug)            DEBUG_MODE=1; export DEBUG=true; shift;;
+            --quiet)            QUIET=1; shift;;
+            --non-interactive)  NON_INTERACTIVE=1; shift;;
+            -h|--help)          usage; exit 0;;
+            *)                  args+=("$1"); shift;;
+        esac
+    done
+    set -- "${args[@]}"
+    log_message INFO "Configuration: size=$SIZE, monitoring=$WITH_MONITORING"
+}
+
+# ============================= Validation Helpers ===========================
+validate_index_name() {
+    local name="$1"
+    [[ -z "$name" ]] && error_exit "Index name cannot be empty"
+    [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || error_exit "Invalid index name: $name (use alphanumeric, underscore, hyphen only)"
+    for reserved in "${RESERVED_INDEXES[@]}"; do
+        [[ "$name" == "$reserved" ]] && error_exit "Cannot use reserved index name: $name"
+    done
+}
+
+validate_username() {
+    local user="$1"
+    [[ -z "$user" ]] && error_exit "Username cannot be empty"
+    [[ "$user" =~ ^[a-zA-Z0-9_-]+$ ]] || error_exit "Invalid username: $user"
+}
+
+validate_password() {
+    local pass="$1"
+    [[ ${#pass} -lt $MIN_PASSWORD_LENGTH ]] && error_exit "Password must be at least $MIN_PASSWORD_LENGTH characters"
+    [[ "$pass" =~ [[:space:]] ]] && error_exit "Password cannot contain spaces"
+}
+
+generate_random_password() {
+    local length="${1:-12}"
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -base64 "$length" | tr -d "=+/" | cut -c1-"$length"
+    elif [[ -r /dev/urandom ]]; then
+        tr -dc 'A-Za-z0-9!@#$%^&*' < /dev/urandom | head -c "$length"
+    else
+        error_exit "Cannot generate random password: no openssl or /dev/urandom"
+    fi
+}
+
+# ============================= Runtime Detection ===========================
+detect_runtime() {
+    if command -v docker >/dev/null 2>&1; then
+        RUNTIME="docker"
+    elif command -v podman >/dev/null 2>&1; then
+        RUNTIME="podman"
+    else
+        error_exit "No container runtime found. Install Docker or Podman first."
+    fi
+    log_message INFO "Detected runtime: $RUNTIME"
+}
+
+detect_compose() {
+    if [[ "$RUNTIME" == "docker" ]] && docker compose version >/dev/null 2>&1; then
+        COMPOSE="docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE="docker-compose"
+    elif [[ "$RUNTIME" == "podman" ]] && command -v podman-compose >/dev/null 2>&1; then
+        COMPOSE="podman-compose"
+    else
+        error_exit "No compose tool found. Install docker-compose or podman-compose."
+    fi
+    log_message INFO "Detected compose: $COMPOSE"
+}
+
+verify_runtime() {
+    log_message INFO "Verifying runtime permissions..."
+    if ! $RUNTIME ps >/dev/null 2>&1; then
+        if [[ "$RUNTIME" == "docker" ]] && groups | grep -q docker; then
+            error_exit "Docker group detected but not active. Please log out and back in, then retry." 78
+        else
+            error_exit "$RUNTIME is not accessible. Check permissions or group membership."
+        fi
+    fi
+    log_message SUCCESS "Runtime verification passed"
+}
+
+# ============================= Simplified Credential Handling ===========================
+handle_credentials() {
+    log_message INFO "Setting up credentials..."
+    
+    # Simple credential mode - just use environment variables or prompt
+    if [[ -z "$SPLUNK_PASSWORD" ]]; then
+        if (( NON_INTERACTIVE )); then
+            SPLUNK_PASSWORD=$(generate_random_password 12)
+            log_message INFO "Generated random password for non-interactive mode"
+        else
+            echo -n "Enter Splunk admin password (min $MIN_PASSWORD_LENGTH chars): "
+            read -s SPLUNK_PASSWORD
+            echo
+            validate_password "$SPLUNK_PASSWORD"
+        fi
+    fi
+    
+    # Create credentials directory
+    mkdir -p "$CREDS_DIR"
+    
+    # Simple file-based storage (no encryption for now)
+    echo "$SPLUNK_USER" > "$CREDS_USER_FILE"
+    echo "$SPLUNK_PASSWORD" > "$CREDS_PASS_FILE"
+    chmod 600 "$CREDS_USER_FILE" "$CREDS_PASS_FILE"
+    
+    CREDENTIALS_GENERATED=1
+    log_message SUCCESS "Credentials configured"
+}
+
+# ============================= Environment File Generation ===========================
+create_env_file() {
+    log_message INFO "Creating environment file..."
+    
+    mkdir -p "$CONFIG_DIR"
+    
+    cat > "$ENV_FILE" << EOF
+# Easy_Splunk Environment Configuration
+# Generated: $(date)
+
+# Deployment Configuration
+SIZE=$SIZE
+ENABLE_MONITORING=$WITH_MONITORING
+SPLUNK_USER=$SPLUNK_USER
+
+# Image References (from versions.env)
+SPLUNK_IMAGE=$SPLUNK_IMAGE
+UF_IMAGE=$UF_IMAGE
+PROMETHEUS_IMAGE=$PROMETHEUS_IMAGE
+GRAFANA_IMAGE=$GRAFANA_IMAGE
+APP_IMAGE=$APP_IMAGE
+REDIS_IMAGE=$REDIS_IMAGE
+
+# Compose Configuration
+COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME
+EOF
+
+    # Add password if specified
+    if (( WRITE_PASSWORD_TO_ENV )); then
+        echo "SPLUNK_PASSWORD=$SPLUNK_PASSWORD" >> "$ENV_FILE"
+    fi
+    
+    chmod 600 "$ENV_FILE"
+    ENV_GENERATED=1
+    log_message SUCCESS "Environment file created: $ENV_FILE"
+}
+
+# ============================= Main Deployment Logic ===========================
+deploy_cluster() {
+    log_message INFO "Starting cluster deployment..."
+    STARTED_DEPLOY=1
+    
+    # Generate compose file if needed
+    if [[ ! -f "$BASE_COMPOSE" ]]; then
+        log_message INFO "Generating Docker Compose configuration..."
+        if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
+            source "${SCRIPT_DIR}/lib/compose-generator.sh"
+            generate_compose_file "$BASE_COMPOSE"
+        else
+            error_exit "Compose generator not found: ${SCRIPT_DIR}/lib/compose-generator.sh"
+        fi
+    fi
+    
+    # Build compose command
+    local compose_files=("-f" "$BASE_COMPOSE")
+    if (( WITH_MONITORING )) && [[ -f "$MON_COMPOSE" ]]; then
+        compose_files+=("-f" "$MON_COMPOSE")
+    fi
+    
+    if (( DRY_RUN )); then
+        log_message INFO "DRY RUN: Would execute: $COMPOSE ${compose_files[*]} up -d"
+        return 0
+    fi
+    
+    # Deploy
+    log_message INFO "Bringing up services..."
+    $COMPOSE "${compose_files[@]}" up -d
+    
+    log_message SUCCESS "Cluster deployment completed"
+}
+
+configure_index() {
+    if [[ -z "$INDEX_NAME" ]]; then
+        log_message INFO "No custom index specified, skipping index creation"
+        return 0
+    fi
+    
+    log_message INFO "Creating custom index: $INDEX_NAME"
+    # This would normally use Splunk REST API
+    log_message INFO "Index creation would happen here (not implemented in minimal version)"
+}
+
+run_health_checks() {
+    if (( SKIP_HEALTH )); then
+        log_message INFO "Health checks skipped"
+        return 0
+    fi
+    
+    log_message INFO "Running health checks..."
+    # Basic container health check
+    if $COMPOSE ps | grep -q "Up"; then
+        log_message SUCCESS "Containers are running"
+    else
+        log_message WARN "Some containers may not be healthy"
+    fi
+}
+
+display_summary() {
+    log_message SUCCESS "Deployment Summary:"
+    log_message INFO "  Size: $SIZE"
+    log_message INFO "  Monitoring: $(( WITH_MONITORING ? "enabled" : "disabled" ))"
+    log_message INFO "  Runtime: $RUNTIME"
+    log_message INFO "  Compose: $COMPOSE"
+    if [[ -n "$INDEX_NAME" ]]; then
+        log_message INFO "  Custom Index: $INDEX_NAME"
+    fi
+    log_message INFO "  Logs: $LOG_FILE"
+}
+
+# ============================= Main Function ===========================
+main() {
+    log_message INFO "Easy_Splunk deployment starting..."
+    
+    # Parse arguments
+    parse_arguments "$@"
+    
+    # Runtime detection and verification
+    detect_runtime
+    detect_compose
+    verify_runtime
+    
+    # Credential and environment setup
+    handle_credentials
+    create_env_file
+    
+    # Deploy the cluster
+    deploy_cluster
+    configure_index
+    run_health_checks
+    display_summary
+    
+    log_message SUCCESS "Deployment completed successfully!"
+}
+
+main "$@"
