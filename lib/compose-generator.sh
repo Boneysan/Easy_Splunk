@@ -323,7 +323,6 @@ EOF
 
 _generate_app_service() {
   cat <<'EOF'
-services:
   # Main application service
   app:
     image: "${APP_IMAGE}"
@@ -849,6 +848,10 @@ generate_compose_file() {
 
   # Header
   _generate_header > "${tmp}"
+  
+  # Add services section header
+  echo "" >> "${tmp}"
+  echo "services:" >> "${tmp}"
 
   # Debug: Show current ENABLE_SPLUNK value
   log_message INFO "DEBUG: ENABLE_SPLUNK='${ENABLE_SPLUNK}', is_true result: $(is_true "${ENABLE_SPLUNK}" && echo "TRUE" || echo "FALSE")"

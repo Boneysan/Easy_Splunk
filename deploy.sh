@@ -767,6 +767,10 @@ generate_compose() {
         generate_compose_file "${SCRIPT_DIR}/docker-compose.yml" || \
             error_exit "Failed to generate docker-compose.yml"
         chmod 600 "${SCRIPT_DIR}/docker-compose.yml" || true
+        
+        # Create .env file with required environment variables
+        create_env_file
+        
         log_message SUCCESS "Compose file generated"
     else
         log_message WARNING "Compose generator not available; assuming docker-compose.yml exists"
@@ -936,9 +940,70 @@ handle_credentials() {
     log_message SUCCESS "Credentials prepared"
 }
 
+# Create .env file with required environment variables for compose
+create_env_file() {
+    local env_file="${SCRIPT_DIR}/.env"
+    local secrets_cli="$SCRIPT_DIR/security/secrets_manager.sh"
+    
+    log_message INFO "Creating .env file for Docker Compose"
+    
+    # Extract credentials from secrets manager or use exported variables
+    local splunk_password="${SPLUNK_PASSWORD}"
+    local splunk_secret=""
+    local cluster_secret=""
+    local indexer_discovery_secret=""
+    local shc_secret=""
+    
+    if [[ -x "$secrets_cli" ]]; then
+        # Try to get secrets from secrets manager
+        splunk_secret=$(timeout 10 "$secrets_cli" retrieve_credential splunk splunk_secret 2>/dev/null || echo "")
+        cluster_secret=$(timeout 10 "$secrets_cli" retrieve_credential splunk cluster_secret 2>/dev/null || echo "")
+        indexer_discovery_secret=$(timeout 10 "$secrets_cli" retrieve_credential splunk indexer_discovery_secret 2>/dev/null || echo "")
+        shc_secret=$(timeout 10 "$secrets_cli" retrieve_credential splunk shc_secret 2>/dev/null || echo "")
+    fi
+    
+    # Generate default secrets if not available
+    [[ -z "$splunk_secret" ]] && splunk_secret=$(openssl rand -hex 32 2>/dev/null || echo "default_splunk_secret_$(date +%s)")
+    [[ -z "$cluster_secret" ]] && cluster_secret=$(openssl rand -hex 32 2>/dev/null || echo "default_cluster_secret_$(date +%s)")
+    [[ -z "$indexer_discovery_secret" ]] && indexer_discovery_secret=$(openssl rand -hex 32 2>/dev/null || echo "default_indexer_discovery_secret_$(date +%s)")
+    [[ -z "$shc_secret" ]] && shc_secret=$(openssl rand -hex 32 2>/dev/null || echo "default_shc_secret_$(date +%s)")
+    
+    # Create .env file
+    cat > "$env_file" << EOF
+# Auto-generated .env file for Easy_Splunk deployment
+# Generated on: $(date)
+
+# Splunk Configuration
+SPLUNK_USER=${SPLUNK_USER:-admin}
+SPLUNK_PASSWORD=${splunk_password}
+SPLUNK_SECRET=${splunk_secret}
+CLUSTER_SECRET=${cluster_secret}
+INDEXER_DISCOVERY_SECRET=${indexer_discovery_secret}
+SHC_SECRET=${shc_secret}
+SPLUNK_HOME=/opt/splunk
+
+# Project Configuration
+COMPOSE_PROJECT_NAME=\${COMPOSE_PROJECT_NAME:-splunk}
+
+# Monitoring Configuration
+GRAFANA_ADMIN_PASSWORD=\${GRAFANA_ADMIN_PASSWORD:-admin123}
+
+# Image Configuration (loaded from versions.env)
+# These will be set by sourcing versions.env
+EOF
+
+    chmod 600 "$env_file"
+    log_message SUCCESS ".env file created: $env_file"
+}
+
 # Deploy the cluster
 deploy_cluster() {
     log_message INFO "Starting cluster deployment"
+    
+    # Check if docker-compose.yml exists
+    if [[ ! -f "${SCRIPT_DIR}/docker-compose.yml" ]]; then
+        error_exit "Docker compose file not found. Run generate_compose first."
+    fi
     
     # Acquire deployment lock
     acquire_lock "${CONFIG_DIR}/.deploy.lock" 60
@@ -946,7 +1011,7 @@ deploy_cluster() {
     # Register cleanup function
     register_cleanup cleanup_deployment
     
-    # Build orchestrator command
+    # Try orchestrator first, then fallback to direct compose
     local orchestrator_cmd=("${SCRIPT_DIR}/orchestrator.sh")
     
     if [[ "${ENABLE_MONITORING:-true}" == "true" ]] && [[ "$NO_MONITORING" != "true" ]]; then
@@ -957,23 +1022,82 @@ deploy_cluster() {
         orchestrator_cmd+=("--force")
     fi
     
-    # Deploy with retry logic for network-related failures
-    log_message INFO "Executing orchestrator with command: ${orchestrator_cmd[*]}"
+    # Try orchestrator first
+    log_message INFO "Attempting deployment via orchestrator: ${orchestrator_cmd[*]}"
     
-    if ! retry_network_operation "cluster deployment" "${orchestrator_cmd[@]}"; then
+    if retry_network_operation "orchestrator deployment" "${orchestrator_cmd[@]}"; then
+        log_message SUCCESS "Cluster deployment completed via orchestrator"
+        return 0
+    fi
+    
+    # Fallback to direct docker compose deployment
+    log_message WARN "Orchestrator failed, falling back to direct compose deployment"
+    
+    if ! start_containers_direct; then
         enhanced_error "DEPLOYMENT_FAILED" \
-            "Cluster deployment failed - orchestrator execution unsuccessful" \
+            "Both orchestrator and direct compose deployment failed" \
             "$LOG_FILE" \
             "Check container runtime: \${CONTAINER_RUNTIME} --version" \
             "Verify compose command: \${COMPOSE_CMD} --version" \
             "Check resource availability: free -h && df -h" \
-            "Review orchestrator logs: cat \${LOG_FILE}" \
+            "Review deployment logs: cat \${LOG_FILE}" \
             "Try manual restart: ./stop_cluster.sh && ./deploy.sh --force" \
             "Check network connectivity: ping -c 3 registry-1.docker.io"
         error_exit "Cluster deployment failed - enhanced troubleshooting steps provided above"
     fi
     
-    log_message SUCCESS "Cluster deployment completed"
+    log_message SUCCESS "Cluster deployment completed via direct compose"
+}
+
+# Direct container startup using docker compose
+start_containers_direct() {
+    log_message INFO "Starting containers directly with ${COMPOSE_CMD}"
+    
+    # Change to script directory for relative paths
+    cd "${SCRIPT_DIR}" || error_exit "Failed to change to script directory"
+    
+    # Source .env file if it exists
+    if [[ -f ".env" ]]; then
+        set -a
+        source .env
+        set +a
+        log_message INFO "Loaded .env file"
+    fi
+    
+    # Pull images first
+    log_message INFO "Pulling container images..."
+    if ! ${COMPOSE_CMD} -f docker-compose.yml pull; then
+        log_message WARN "Image pull failed, continuing with cached images"
+    fi
+    
+    # Start containers
+    log_message INFO "Starting containers in detached mode..."
+    if ! ${COMPOSE_CMD} -f docker-compose.yml up -d; then
+        log_message ERROR "Failed to start containers"
+        return 1
+    fi
+    
+    # Wait for containers to be ready
+    log_message INFO "Waiting for containers to be ready..."
+    local max_wait=300  # 5 minutes
+    local wait_time=0
+    local interval=10
+    
+    while [[ $wait_time -lt $max_wait ]]; do
+        if ${COMPOSE_CMD} -f docker-compose.yml ps --filter "status=running" | grep -q "splunk"; then
+            log_message SUCCESS "Containers are running"
+            return 0
+        fi
+        
+        sleep $interval
+        wait_time=$((wait_time + interval))
+        log_message INFO "Waiting for containers... (${wait_time}/${max_wait}s)"
+    done
+    
+    log_message ERROR "Containers failed to start within ${max_wait} seconds"
+    ${COMPOSE_CMD} -f docker-compose.yml ps
+    ${COMPOSE_CMD} -f docker-compose.yml logs --tail=20
+    return 1
 }
 
 # Configure Splunk indexes
