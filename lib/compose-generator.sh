@@ -795,13 +795,29 @@ EOF
 validate_compose_config() {
   log_info "Validating compose configuration..."
 
-  # Base images must exist
-  local base_required=("APP_IMAGE" "REDIS_IMAGE")
+  # Base images - only required when specific features are enabled
+  local base_required=()
   local maybe_required=()
-  is_true "${ENABLE_MONITORING}" && maybe_required+=("PROMETHEUS_IMAGE" "GRAFANA_IMAGE")
-  is_true "${ENABLE_SPLUNK}" && maybe_required+=("SPLUNK_IMAGE")
+  
+  # App services only required when explicitly enabled
+  if is_true "${ENABLE_APP_SERVICES:-false}"; then
+    base_required+=("APP_IMAGE" "REDIS_IMAGE")
+  fi
+  
+  # Monitoring images required when monitoring is enabled
+  if is_true "${ENABLE_MONITORING}"; then
+    maybe_required+=("PROMETHEUS_IMAGE" "GRAFANA_IMAGE")
+  fi
+  
+  # Splunk images required when Splunk services are enabled
+  if is_true "${ENABLE_SPLUNK}"; then
+    maybe_required+=("SPLUNK_IMAGE")
+  fi
 
-  validate_environment_vars "${base_required[@]}" "${maybe_required[@]}"
+  # Only validate if we have required variables
+  if (( ${#base_required[@]} > 0 )) || (( ${#maybe_required[@]} > 0 )); then
+    validate_environment_vars "${base_required[@]}" "${maybe_required[@]}"
+  fi
 
   # Validate Splunk cluster configuration
   if is_true "${ENABLE_SPLUNK}"; then
