@@ -52,6 +52,14 @@ error_exit() { log_message ERROR "$1"; exit "${2:-1}"; }
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Load versions.env to get image references
+if [[ -f "${SCRIPT_DIR}/versions.env" ]]; then
+    source "${SCRIPT_DIR}/versions.env" || error_exit "Failed to load versions.env"
+    log_message DEBUG "Loaded image versions from versions.env"
+else
+    error_exit "versions.env not found - required for image references"
+fi
+
 # Defaults / Flags
 SIZE="${SIZE:-small}"              # small|medium|large
 WITH_MONITORING=0
