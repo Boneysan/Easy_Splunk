@@ -1091,11 +1091,31 @@ main() {
       fi
     fi
 
-    log_info ""
-    log_info "Next steps:"
-    log_info "• If you installed Docker, verify access with: docker ps"
-    log_info "• Test the installation: '${CONTAINER_RUNTIME} run hello-world'"
-    log_info "• Run your deployment script to continue with cluster setup"
+    echo ""
+    echo "✅ INSTALLATION COMPLETE!"
+    echo "========================"
+    echo ""
+    log_info "Container runtime '${CONTAINER_RUNTIME}' has been successfully installed"
+    
+    if [[ $EUID -ne 0 && "$CONTAINER_RUNTIME" == "docker" ]]; then
+      echo ""
+      echo "⚠️  IMPORTANT: Group membership changes require a session restart"
+      echo "⚠️  You must log out and log back in for Docker group changes to take effect."
+      echo ""
+      echo "📋 NEXT STEPS:"
+      echo "1. Log out of your current session"
+      echo "2. Log back in (or restart your terminal)"
+      echo "3. Run: ./verify-installation.sh"
+      echo "4. Then deploy: ./deploy.sh medium --index-name my_app"
+    else
+      echo ""
+      echo "📋 NEXT STEPS:"
+      echo "1. Verify installation: ./verify-installation.sh"
+      echo "2. Deploy cluster: ./deploy.sh medium --index-name my_app"
+    fi
+    
+    echo ""
+    echo "🆘 Need help? Run: ./quick-fixes.sh"
     exit 0
   else
     enhanced_installation_error "container-runtime" "package_manager" "installation verification failed"

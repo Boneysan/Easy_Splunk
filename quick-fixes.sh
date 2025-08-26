@@ -1,6 +1,22 @@
 #!/bin/bash
 # quick-fixes.sh - One-stop shop for all Easy_Splunk immediate s    6)
+        echo "🧪 Te    7)
         echo "🧪 Testing all scripts status..."
+        if [[ -x "./function-loading-status.sh" ]]; then
+            ./function-loading-status.sh
+        else
+            echo "❌ function-loading-status.sh not found or not executable"
+        fi
+        ;;
+    8)
+        echo "📋 Displaying complete fix summary..."
+        if [[ -x "./final-fix-summary.sh" ]]; then
+            ./final-fix-summary.sh
+        else
+            echo "❌ final-fix-summary.sh not found or not executable"
+        fi
+        ;;
+    9) status..."
         if [[ -x "./function-loading-status.sh" ]]; then
             ./function-loading-status.sh
         else
@@ -30,13 +46,14 @@ echo "2. 🐍 Python Compatibility Fix (RHEL 8)"
 echo "3. 🔄 Podman-Compose Fix"
 echo "4. 🐳 Install Docker Compose"
 echo "5. 🔑 Fix Docker Permissions (Docker group access)"
-echo "6. 🧪 Test All Scripts Status"
-echo "7. 📋 View Complete Fix Summary"
-echo "8. 🆕 Test New Compose Fallback System"
+echo "6. ✅ Verify Installation (Phase 2 after logout/login)"
+echo "7. 🧪 Test All Scripts Status"
+echo "8. 📋 View Complete Fix Summary"
+echo "9. 🆕 Test New Compose Fallback System"
 echo "0. Exit"
 echo ""
 
-read -p "Select option (0-8): " choice
+read -p "Select option (0-9): " choice
 
 case $choice in
     1)
@@ -89,6 +106,17 @@ case $choice in
         fi
         ;;
     6)
+        echo "✅ Running installation verification..."
+        if [[ -x "./verify-installation.sh" ]]; then
+            ./verify-installation.sh
+        else
+            echo "❌ verify-installation.sh not found or not executable"
+            echo "🔧 Manual verification:"
+            echo "   docker ps  # Should work without sudo"
+            echo "   docker run hello-world  # Test basic functionality"
+        fi
+        ;;
+    7)
         echo "🧪 Testing all scripts status..."
         if [[ -x "./function-loading-status.sh" ]]; then
             ./function-loading-status.sh
@@ -150,7 +178,7 @@ case $choice in
         exit 0
         ;;
     *)
-        echo "❌ Invalid option. Please select 0-8."
+        echo "❌ Invalid option. Please select 0-9."
         exit 1
         ;;
 esac

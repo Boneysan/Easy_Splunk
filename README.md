@@ -267,6 +267,9 @@ The toolkit now includes intelligent fallback logic for compose implementations:
 
 ### **Installation Steps**
 
+The installation process uses a **two-phase approach** for reliable Docker group permission handling:
+
+#### **Phase 1: Install Prerequisites**
 ```bash
 # 1) Clone and enter
 git clone https://github.com/Boneysan/Easy_Splunk.git
@@ -274,23 +277,33 @@ cd Easy_Splunk
 
 # 2) Make all shell scripts executable (if needed)
 find . -name "*.sh" -type f -exec chmod 755 {} \;
-find . -name "*.sh" -type f -exec chown root:root {} \;
 
-# 3) Install prerequisites (automatically detects OS and installs optimal container runtime)
-#    All systems: Automatically prefers Docker for better ecosystem compatibility
-#    RHEL 8 systems: Automatically prefers Docker for better Python compatibility
-#    Other systems: Prefers Docker with comprehensive Podman fallback support
+# 3) Phase 1: Install prerequisites (container runtime and permissions)
 ./install-prerequisites.sh --yes
 
-# 4) Generate credentials (admin user/secret, TLS as needed) unneeded because
-#it is handled with ./deploy.sh
-#./generate-credentials.sh
+# 4) Phase 2: Log out and back in, then verify installation
+exit
+# (log back in to your system)
 
-# 5) Deploy a small cluster with monitoring
+# 5) Verify installation and get ready to deploy
+./verify-installation.sh
+
+# 6) Deploy a cluster with monitoring
 ./deploy.sh small --with-monitoring
 
-# 6) Health check
+# 7) Health check
 ./health_check.sh
+```
+
+#### **Why Two Phases?**
+- **Phase 1** (`install-prerequisites.sh`): Installs Docker/Podman and adds your user to the docker group
+- **Session Restart**: Required for group membership changes to take effect (Linux limitation)
+- **Phase 2** (`verify-installation.sh`): Confirms everything works and you're ready to deploy
+
+#### **Quick Installation (if you understand the requirements)**
+```bash
+# All-in-one for experienced users who will log out/in manually
+./install-prerequisites.sh --yes && echo "⚠️ Log out/in, then run: ./verify-installation.sh"
 ```
 
 ---
