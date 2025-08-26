@@ -6,6 +6,34 @@
 # BEGIN: Fallback functions for error handling library compatibility
 # These functions provide basic functionality when lib/error-handling.sh fails to load
 
+# Progress tracking for health checks
+HEALTH_CHECK_PROGRESS=0
+TOTAL_HEALTH_CHECKS=8
+
+show_progress() {
+    local current=$1
+    local total=$2
+    local description=$3
+    local percent=$((current * 100 / total))
+    local filled=$((current * 20 / total))
+    local empty=$((20 - filled))
+    
+    printf "\r[%s%s] %d%% - %s" \
+        "$(printf "%0.s█" $(seq 1 $filled))" \
+        "$(printf "%0.s░" $(seq 1 $empty))" \
+        "$percent" \
+        "$description"
+    
+    if [[ $current -eq $total ]]; then
+        echo ""
+    fi
+}
+
+update_health_progress() {
+    ((HEALTH_CHECK_PROGRESS++))
+    show_progress $HEALTH_CHECK_PROGRESS $TOTAL_HEALTH_CHECKS "$1"
+}
+
 # Fallback log_message function for error handling library compatibility
 if ! type log_message &>/dev/null; then
   log_message() {
@@ -380,8 +408,13 @@ check_all_services() {
         ["grafana"]="http"
     )
     
-    # Check each service
-    for service in "${!service_ports[@]}"; do
+    # Check container runtime first
+    update_health_progress "Checking container runtime"
+    check_container_runtime
+    
+    # Check each service with progress updates
+    local service_list=(splunk-cluster-master splunk-search-head splunk-indexer prometheus grafana)
+    for service in "${service_list[@]}"; do
         if [[ -n "$SPECIFIC_SERVICE" && "$service" != "$SPECIFIC_SERVICE" ]]; then
             continue
         fi
@@ -389,12 +422,59 @@ check_all_services() {
         local port="${service_ports[$service]}"
         local protocol="${service_protocols[$service]}"
         
-        log_message INFO "Checking $service..."
+        update_health_progress "Checking $service"
         check_service_status "$service" "$service" "$port" "$protocol"
     done
     
+    # Final checks
+    update_health_progress "Validating cluster connectivity"
+    check_cluster_connectivity
+    
+    update_health_progress "Checking resource usage"
+    check_resource_usage
+    
+    update_health_progress "Generating health report"
     # Generate summary report
     generate_health_report
+}
+
+# Check cluster connectivity
+check_cluster_connectivity() {
+    local connectivity_check="PASS"
+    local cluster_urls=(
+        "http://localhost:${SPLUNK_WEB_PORT:-8000}/en-US/account/login"
+        "http://localhost:${PROMETHEUS_PORT:-9090}/-/healthy"
+        "http://localhost:${GRAFANA_PORT:-3000}/api/health"
+    )
+    
+    for url in "${cluster_urls[@]}"; do
+        if ! curl -s --max-time 5 "$url" >/dev/null 2>&1; then
+            connectivity_check="FAIL"
+            log_health_check "Connectivity Check" "FAIL" "Cannot reach $url" "Check if services are running and ports are accessible"
+        fi
+    done
+    
+    if [[ "$connectivity_check" == "PASS" ]]; then
+        log_health_check "Connectivity Check" "PASS" "All services are reachable" ""
+    fi
+}
+
+# Check resource usage
+check_resource_usage() {
+    local memory_usage=$(free | awk '/^Mem:/{printf("%.1f", $3/$2 * 100.0)}')
+    local disk_usage=$(df / | awk 'NR==2{print $5}' | sed 's/%//')
+    
+    if (( $(echo "$memory_usage > 90" | bc -l) )); then
+        log_health_check "Memory Usage" "WARN" "High memory usage: ${memory_usage}%" "Consider increasing system memory"
+    else
+        log_health_check "Memory Usage" "PASS" "Memory usage: ${memory_usage}%" ""
+    fi
+    
+    if (( disk_usage > 85 )); then
+        log_health_check "Disk Usage" "WARN" "High disk usage: ${disk_usage}%" "Consider cleaning up disk space"
+    else
+        log_health_check "Disk Usage" "PASS" "Disk usage: ${disk_usage}%" ""
+    fi
 }
 
 # Generate comprehensive health report
@@ -448,6 +528,10 @@ main() {
     done
     
     log_message INFO "🏥 Starting Enhanced Splunk Cluster Health Check"
+    log_message INFO "Performing $TOTAL_HEALTH_CHECKS comprehensive health checks..."
+    echo ""
+    
+    update_health_progress "Checking container runtime"
     log_message INFO "Timestamp: $(date)"
     
     # Initialize service mappings and run checks

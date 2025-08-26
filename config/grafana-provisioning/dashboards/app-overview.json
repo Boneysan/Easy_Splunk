@@ -1,0 +1,29 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "text",
+      "title": "My Application Dashboard",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "content": "## Welcome\n\nThis is a placeholder dashboard. Export your own dashboard JSON and place it in the 'config/grafana-provisioning/dashboards' directory to have it automatically loaded.",
+        "mode": "markdown"
+      }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 30,
+  "style": "dark",
+  "tags": [],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "App Overview",
+  "uid": "placeholder-dashboard",
+  "version": 1
+}

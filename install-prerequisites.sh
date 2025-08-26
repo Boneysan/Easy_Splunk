@@ -1061,6 +1061,41 @@ main() {
   esac
 
   log_info "🔁 Validating installation..."
+  # For non-root Docker installations, skip immediate verification
+  # Group membership changes require logout/login to take effect
+  if [[ $EUID -ne 0 && "$CONTAINER_RUNTIME" == "docker" ]]; then
+    log_success "✅ Installation phase completed successfully!"
+    if command -v enhanced_runtime_summary >/dev/null 2>&1; then
+      enhanced_runtime_summary
+    else
+      runtime_summary
+    fi
+
+    # Cancel rollback since installation succeeded
+    if [[ "$ROLLBACK_ON_FAILURE" == "1" ]]; then
+      unregister_cleanup "rollback_installation"
+    fi
+
+    echo ""
+    echo "✅ PHASE 1 INSTALLATION COMPLETE!"
+    echo "=================================="
+    echo ""
+    log_info "Container runtime '${CONTAINER_RUNTIME}' has been successfully installed"
+    echo ""
+    echo "⚠️  CRITICAL: Group membership changes require a session restart"
+    echo "⚠️  You MUST log out and log back in for Docker permissions to work."
+    echo ""
+    echo "📋 NEXT STEPS (Two-Phase Installation):"
+    echo "1. 🚪 Log out of your current session"
+    echo "2. 🚪 Log back in (or restart your terminal)"
+    echo "3. ✅ Run: ./verify-installation.sh"
+    echo "4. 🚀 Deploy: ./deploy.sh medium --index-name my_app"
+    echo ""
+    echo "🆘 Need help? Run: ./quick-fixes.sh"
+    exit 0
+  fi
+  
+  # For root users or non-Docker runtimes, proceed with verification
   if verify_installation_detailed; then
     log_success "✅ Installation completed successfully!"
     if command -v enhanced_runtime_summary >/dev/null 2>&1; then
@@ -1074,45 +1109,15 @@ main() {
       unregister_cleanup "rollback_installation"
     fi
 
-    # Fix Docker permissions for non-root users
-    if [[ "$CONTAINER_RUNTIME" == "docker" ]] && [[ $EUID -ne 0 ]]; then
-      log_info "Fixing Docker group permissions for user: $USER"
-      if [[ -f "${SCRIPT_DIR}/fix-docker-permissions.sh" ]]; then
-        "${SCRIPT_DIR}/fix-docker-permissions.sh" || {
-          log_warn "Docker permissions fix script encountered issues"
-          log_info "You may need to manually activate Docker group membership:"
-          log_info "  newgrp docker  # or log out and back in"
-        }
-      else
-        log_warn "Docker permissions fix script not found"
-        log_info "Manual Docker group setup may be required:"
-        log_info "  sudo usermod -aG docker $USER"
-        log_info "  newgrp docker  # or log out and back in"
-      fi
-    fi
-
     echo ""
     echo "✅ INSTALLATION COMPLETE!"
     echo "========================"
     echo ""
     log_info "Container runtime '${CONTAINER_RUNTIME}' has been successfully installed"
     
-    if [[ $EUID -ne 0 && "$CONTAINER_RUNTIME" == "docker" ]]; then
-      echo ""
-      echo "⚠️  IMPORTANT: Group membership changes require a session restart"
-      echo "⚠️  You must log out and log back in for Docker group changes to take effect."
-      echo ""
-      echo "📋 NEXT STEPS:"
-      echo "1. Log out of your current session"
-      echo "2. Log back in (or restart your terminal)"
-      echo "3. Run: ./verify-installation.sh"
-      echo "4. Then deploy: ./deploy.sh medium --index-name my_app"
-    else
-      echo ""
-      echo "📋 NEXT STEPS:"
-      echo "1. Verify installation: ./verify-installation.sh"
-      echo "2. Deploy cluster: ./deploy.sh medium --index-name my_app"
-    fi
+    echo ""
+    echo "📋 NEXT STEPS:"
+    echo "1. Deploy cluster: ./deploy.sh medium --index-name my_app"
     
     echo ""
     echo "🆘 Need help? Run: ./quick-fixes.sh"

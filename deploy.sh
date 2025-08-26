@@ -797,9 +797,6 @@ handle_credentials() {
 
     if [[ "$SKIP_CREDS" == "true" ]]; then
         log_message INFO "Skipping credential generation (--skip-creds specified)"
-
-    if [[ "$SKIP_CREDS" == "true" ]]; then
-        log_message INFO "Skipping credential generation (--skip-creds specified)"
         log_message DEBUG "Current SPLUNK_PASSWORD value: [${SPLUNK_PASSWORD:-<unset>}]"
 
         # Use provided password if available
@@ -1005,6 +1002,68 @@ EOF
     log_message SUCCESS ".env file created: $env_file"
 }
 
+# Check for port conflicts before deployment
+check_port_conflicts() {
+    log_message INFO "Checking for port conflicts..."
+    
+    local conflicts=()
+    local required_ports=(8000 8089 9090 3000)
+    local port_descriptions=("Splunk Web" "Splunk Management" "Prometheus" "Grafana")
+    
+    for i in "${!required_ports[@]}"; do
+        local port="${required_ports[$i]}"
+        local desc="${port_descriptions[$i]}"
+        
+        # Check if port is in use
+        if command -v ss >/dev/null 2>&1; then
+            # Use ss (modern)
+            if ss -tlun | grep -q ":${port}\s"; then
+                conflicts+=("${port} (${desc})")
+            fi
+        elif command -v netstat >/dev/null 2>&1; then
+            # Use netstat (legacy)
+            if netstat -tlun 2>/dev/null | grep -q ":${port}\s"; then
+                conflicts+=("${port} (${desc})")
+            fi
+        else
+            # Use lsof as fallback
+            if command -v lsof >/dev/null 2>&1 && lsof -i ":${port}" >/dev/null 2>&1; then
+                conflicts+=("${port} (${desc})")
+            fi
+        fi
+    done
+    
+    if [[ ${#conflicts[@]} -gt 0 ]]; then
+        log_message WARN "Port conflicts detected:"
+        for conflict in "${conflicts[@]}"; do
+            log_message WARN "  - Port ${conflict} is already in use"
+        done
+        
+        echo ""
+        log_message INFO "Port conflict resolution options:"
+        log_message INFO "1. Stop conflicting services:"
+        for conflict in "${conflicts[@]}"; do
+            local port=$(echo "$conflict" | cut -d' ' -f1)
+            log_message INFO "   sudo lsof -ti:${port} | xargs sudo kill -9"
+        done
+        log_message INFO "2. Use --force to deploy anyway (may cause failures)"
+        log_message INFO "3. Configure alternative ports in config file"
+        echo ""
+        
+        if [[ "$FORCE_DEPLOY" != "true" ]]; then
+            echo "Continue with deployment despite port conflicts? [y/N]"
+            read -r response
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                error_exit "Deployment cancelled due to port conflicts. Use --force to override."
+            fi
+        else
+            log_message WARN "Proceeding with deployment despite port conflicts (--force specified)"
+        fi
+    else
+        log_message SUCCESS "No port conflicts detected"
+    fi
+}
+
 # Deploy the cluster
 deploy_cluster() {
     log_message INFO "Starting cluster deployment"
@@ -1203,31 +1262,77 @@ display_summary() {
     echo -e "\nDeployment log: $LOG_FILE"
 }
 
+# Progress tracking for deployment
+DEPLOYMENT_PROGRESS=0
+TOTAL_DEPLOYMENT_STEPS=8
+
+show_deployment_progress() {
+    local current=$1
+    local total=$2
+    local description=$3
+    local percent=$((current * 100 / total))
+    local filled=$((current * 25 / total))
+    local empty=$((25 - filled))
+    
+    printf "\r🚀 [%s%s] %d%% - %s" \
+        "$(printf "%0.s█" $(seq 1 $filled))" \
+        "$(printf "%0.s░" $(seq 1 $empty))" \
+        "$percent" \
+        "$description"
+    
+    if [[ $current -eq $total ]]; then
+        echo ""
+        echo ""
+    fi
+}
+
+update_deployment_progress() {
+    ((DEPLOYMENT_PROGRESS++))
+    show_deployment_progress $DEPLOYMENT_PROGRESS $TOTAL_DEPLOYMENT_STEPS "$1"
+    sleep 0.5  # Brief pause for visual effect
+}
+
 # Main execution
 main() {
     log_message INFO "Starting Easy_Splunk deployment script"
+    echo ""
+    log_message INFO "🎯 Deployment will complete $TOTAL_DEPLOYMENT_STEPS steps"
+    echo ""
+    
+    update_deployment_progress "Parsing command line arguments"
     
     # Parse arguments
     parse_arguments "$@"
     
+    update_deployment_progress "Validating environment"
     # Validate environment
     validate_environment
     
+    update_deployment_progress "Loading configuration"
     # Load configuration
     load_configuration
     
+    update_deployment_progress "Handling credentials"
     # Handle credentials
     handle_credentials
     
+    update_deployment_progress "Checking port conflicts"
+    # Check for port conflicts
+    check_port_conflicts
+    
+    update_deployment_progress "Generating compose file"
     # Generate compose file
     generate_compose
 
+    update_deployment_progress "Preparing monitoring configs"
     # Prepare monitoring configs (if enabled)
     prepare_monitoring_configs
 
+    update_deployment_progress "Starting cluster containers"
     # Deploy cluster
     deploy_cluster
     
+    update_deployment_progress "Finalizing deployment"
     # Configure indexes
     configure_indexes
     

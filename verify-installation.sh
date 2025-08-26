@@ -32,7 +32,8 @@ log_error() {
 }
 
 echo "🔍 EASY_SPLUNK INSTALLATION VERIFICATION"
-echo "========================================"
+echo "========================================="
+echo "📋 PHASE 2: Verifying installation after logout/login"
 echo ""
 
 # Check if this is being run as root
