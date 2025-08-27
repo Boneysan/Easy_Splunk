@@ -1,0 +1,66 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 14:15:30 MDT 2025
+PID: 74378
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 14:15:30] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/logs/run-2025-08-27_141530.log
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 14:15:30 MDT 2025
+PID: 74378
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 14:15:30] [INFO] Starting Compose Validation Tests
+[2025-08-27 14:15:30] [INFO] =================================
+[2025-08-27 14:15:30] [INFO] === Test 1: Compose Engine Detection ===
+[2025-08-27 14:15:30] [INFO] Detected Docker Compose v1: Docker Compose version v2.21.0
+[2025-08-27 14:15:30] [SUCCESS] ✅ Compose engine detected successfully
+[2025-08-27 14:15:30] [INFO] === Test 2: Valid Compose File Validation ===
+[2025-08-27 14:15:30] [INFO] Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 14:15:30] [INFO] Using: docker-compose (schema version: 3.8)
+[2025-08-27 14:15:31] [SUCCESS] Compose schema validation passed
+[2025-08-27 14:15:31] [SUCCESS] ✅ Valid compose file passed validation
+[2025-08-27 14:15:31] [INFO] === Test 3: Invalid Compose File Detection ===
+[2025-08-27 14:15:31] [INFO] Testing invalid compose file (should fail validation)...
+[2025-08-27 14:15:31] [INFO] Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-invalid-compose.yml
+[2025-08-27 14:15:31] [INFO] Using: docker-compose (schema version: 3.8)
+[2025-08-27 14:15:31] [SUCCESS] Compose schema validation passed
+[2025-08-27 14:15:31] [ERROR] ❌ Invalid compose file should have failed validation
+[2025-08-27 14:15:31] [INFO] === Test 4: Metadata Addition ===
+[2025-08-27 14:15:31] [SUCCESS] Added version metadata to compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 14:15:31] [SUCCESS] ✅ Metadata added successfully
+[2025-08-27 14:15:31] [SUCCESS] ✅ Metadata header found in compose file
+[2025-08-27 14:15:31] [SUCCESS] ✅ Original compose content preserved
+[2025-08-27 14:15:31] [INFO] === Test 5: Full Pre-deployment Validation ===
+[2025-08-27 14:15:31] [INFO] Starting pre-deployment validation for: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 14:15:31] [INFO] Detected Docker Compose v1: Docker Compose version v2.21.0
+[2025-08-27 14:15:31] [INFO] Checking compose file compatibility: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 14:15:32] [WARNING] Found deprecated 'version' field: version: '3.8'
+[2025-08-27 14:15:32] [WARNING] Consider removing the version field for better compatibility
+[2025-08-27 14:15:32] [SUCCESS] Compose file compatibility check passed
+[2025-08-27 14:15:32] [INFO] Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 14:15:32] [INFO] Using: docker-compose (schema version: 3.8)
+[2025-08-27 14:15:32] [SUCCESS] Compose schema validation passed
+[2025-08-27 14:15:32] [SUCCESS] Added version metadata to compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 14:15:32] [SUCCESS] Pre-deployment validation completed successfully
+[2025-08-27 14:15:32] [INFO] Compose file is ready for deployment with docker
+[2025-08-27 14:15:32] [SUCCESS] ✅ Full pre-deployment validation passed
+[2025-08-27 14:15:32] [SUCCESS] ✅ Validation status updated in metadata
+[2025-08-27 14:15:32] [INFO] === Test 6: Compatibility Checking ===
+[2025-08-27 14:15:32] [INFO] Checking compose file compatibility: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 14:15:32] [WARNING] Found deprecated 'version' field: version: '3.8'
+[2025-08-27 14:15:32] [WARNING] Consider removing the version field for better compatibility
+[2025-08-27 14:15:32] [SUCCESS] Compose file compatibility check passed
+[2025-08-27 14:15:32] [SUCCESS] ✅ Compatibility check completed
+[2025-08-27 14:15:32] [INFO] =================================
+[2025-08-27 14:15:32] [INFO] Test Results Summary:
+[2025-08-27 14:15:32] [INFO]   ✅ Passed: 5
+[2025-08-27 14:15:32] [INFO]   ❌ Failed: 1
+[2025-08-27 14:15:32] [INFO]   📊 Total:  6
+[2025-08-27 14:15:32] [ERROR] ❌ 1 test(s) failed
+[2025-08-27 14:15:32] [ERROR] Compose validation system has issues that need to be fixed.

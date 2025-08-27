@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  test-app:
+    image: nginx:latest
+    ports:
+      - "8080:80"
+    networks:
+      - test-net
+
+networks:
+  test-net:
+    driver: bridge
