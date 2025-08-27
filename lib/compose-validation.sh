@@ -92,7 +92,11 @@ validate_compose_schema() {
         docker)
             if command -v docker &>/dev/null && docker compose version &>/dev/null; then
                 # docker plugin supports -f
-                out="$(docker compose -f "$compose_file" config --quiet 2>&1)" || rc=$?
+                if out=$(docker compose -f "$compose_file" config --quiet 2>&1); then
+                    rc=0
+                else
+                    rc=$?
+                fi
             else
                 # standalone docker-compose binary
                 # Some distributions' docker-compose expect docker-compose.yml in cwd
@@ -101,15 +105,29 @@ validate_compose_schema() {
                     cp "$compose_file" docker-compose.yml
                     copied=true
                 fi
-                out="$(docker-compose config --quiet 2>&1)" || rc=$?
-                if $copied; then rm -f docker-compose.yml; fi
+                if out=$(docker-compose config --quiet 2>&1); then
+                    rc=0
+                else
+                    rc=$?
+                fi
+                if [[ "$copied" == true ]]; then
+                    rm -f docker-compose.yml
+                fi
             fi
             ;;
         podman)
             if command -v podman &>/dev/null && podman compose version &>/dev/null; then
-                out="$(podman compose -f "$compose_file" config --quiet 2>&1)" || rc=$?
+                if out=$(podman compose -f "$compose_file" config --quiet 2>&1); then
+                    rc=0
+                else
+                    rc=$?
+                fi
             else
-                out="$(podman-compose -f "$compose_file" config --quiet 2>&1)" || rc=$?
+                if out=$(podman-compose -f "$compose_file" config --quiet 2>&1); then
+                    rc=0
+                else
+                    rc=$?
+                fi
             fi
             ;;
         *)
