@@ -166,3 +166,20 @@ main() {
 
 TEST_DEPLOY_VERSION="1.0.1"
 main
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "test_deploy"
+
+# Set error handling
+set -euo pipefail
+
+

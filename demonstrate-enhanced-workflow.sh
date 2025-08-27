@@ -308,3 +308,20 @@ echo "📁 Documentation:"
 echo "• ENHANCED_ERROR_HANDLING.md - Comprehensive documentation"
 echo "• ENHANCED_ERROR_IMPLEMENTATION_SUMMARY.md - Implementation details"
 echo ""
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "demonstrate-enhanced-workflow"
+
+# Set error handling
+set -euo pipefail
+
+

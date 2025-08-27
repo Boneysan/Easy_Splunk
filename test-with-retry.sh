@@ -14,3 +14,20 @@ echo "Test 2: Command that will fail"
 with_retry --retries 2 false && echo "✅ Test 2 passed" || echo "❌ Test 2 failed as expected (exit code: $?)"
 
 echo "with_retry function tests completed"
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "test-with-retry"
+
+# Set error handling
+set -euo pipefail
+
+

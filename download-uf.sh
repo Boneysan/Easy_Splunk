@@ -333,3 +333,20 @@ EOCMD
 else
   log_warn "Unable to find '${uf_home}/bin/splunk'. If on macOS, complete installation from the DMG first."
 fi
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "download-uf"
+
+# Set error handling
+set -euo pipefail
+
+

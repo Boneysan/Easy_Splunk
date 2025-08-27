@@ -1,3 +1,19 @@
+
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "create-airgapped-bundle"
+
+# Set error handling
+set -euo pipefail
 ```bash
 #!/usr/bin/env bash
 # ==============================================================================
@@ -348,3 +364,4 @@ main() {
 
 main "$@"
 ```
+

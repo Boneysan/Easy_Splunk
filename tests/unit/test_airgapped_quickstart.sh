@@ -1,3 +1,19 @@
+
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "test_airgapped_quickstart"
+
+# Set error handling
+set -euo pipefail
 ```bash
 #!/usr/bin/env bash
 # ==============================================================================
@@ -9,7 +25,6 @@
 #               lib/security.sh, lib/air-gapped.sh, airgapped-quickstart.sh
 # Version: 1.0.0
 # ==============================================================================
-set -euo pipefail
 IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
@@ -122,3 +137,4 @@ run_test "Missing bundle files" test_missing_bundle_files
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
 ```
+

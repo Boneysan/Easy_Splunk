@@ -1,3 +1,19 @@
+
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "test_generate_monitoring_config"
+
+# Set error handling
+set -euo pipefail
 ```bash
 #!/usr/bin/env bash
 # ==============================================================================
@@ -9,7 +25,6 @@
 #               generate-monitoring-config.sh
 # Version: 1.0.0
 # ==============================================================================
-set -euo pipefail
 IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
@@ -119,3 +134,4 @@ run_test "Custom targets" test_custom_targets
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
 ```
+

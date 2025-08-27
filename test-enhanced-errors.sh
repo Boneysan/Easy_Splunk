@@ -75,3 +75,20 @@ echo "           [INFO ] 2. Check: pip3 list | grep podman-compose"
 echo "           [INFO ] 3. Reinstall: pip3 install podman-compose==1.0.6"
 echo "           [INFO ] 4. Alternative: Use native 'podman compose' if available"
 echo "           [INFO ] 5. Logs available at: /path/to/logfile"
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "test-enhanced-errors"
+
+# Set error handling
+set -euo pipefail
+
+
