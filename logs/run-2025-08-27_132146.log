@@ -1,0 +1,26 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation.sh
+Started: Wed Aug 27 13:21:46 MDT 2025
+PID: 63877
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 13:21:46 MDT 2025
+PID: 63877
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 13:21:46] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/logs/run-2025-08-27_132146.log
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 13:21:46 MDT 2025
+PID: 63877
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 13:21:47] [ERROR] Failed to load compose validation library

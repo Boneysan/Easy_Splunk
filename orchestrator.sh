@@ -16,55 +16,6 @@ setup_standard_logging "orchestrator.sh"
 
 # Set error handling
 set -euo pipefail
-    
-    case $# in
-      1) 
-        if [[ "$1" =~ ^[0-9]+$ ]]; then
-          error_code="$1"
-        else
-          message="$1"
-        fi
-        ;;
-      2) 
-        error_code="$1"
-        message="$2"
-        ;;
-    esac
-    
-    log_message ERROR "$message"
-    exit "$error_code"
-  }
-fi
-
-# Additional fallback functions
-if ! type acquire_lock &>/dev/null; then
-  acquire_lock() {
-    local lockfile="$1"
-    local timeout="${2:-30}"
-    local count=0
-    
-    while [[ -f "$lockfile" ]] && [[ $count -lt $timeout ]]; do
-      sleep 1
-      ((count++))
-    done
-    
-    if [[ $count -ge $timeout ]]; then
-      log_message ERROR "Failed to acquire lock: $lockfile (timeout after ${timeout}s)"
-      return 1
-    fi
-    
-    echo $$ > "$lockfile"
-    return 0
-  }
-fi
-
-if ! type register_cleanup_func &>/dev/null; then
-  register_cleanup_func() {
-    local func_name="$1"
-    # Simple fallback - just store the function name
-    export CLEANUP_FUNCTIONS="${CLEANUP_FUNCTIONS:-} $func_name"
-  }
-fi
 
 # Source required libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -74,6 +25,9 @@ source "${SCRIPT_DIR}/lib/core.sh" || error_exit "Cannot load core library from 
 
 # Source compose initialization library
 source "${SCRIPT_DIR}/lib/compose-init.sh" || error_exit "Cannot load compose initialization from lib/compose-init.sh"
+
+# Source compose validation library
+source "${SCRIPT_DIR}/lib/compose-validation.sh" || error_exit "Cannot load compose validation from lib/compose-validation.sh"
 
 # Source error handling module (already loaded above, but ensure it's available)
 if ! type log_message &>/dev/null; then
@@ -400,7 +354,17 @@ pull_images() {
 # Start services with retry logic
 start_services() {
     log_message INFO "Starting services"
-    
+
+    # Validate compose files before starting services
+    log_message INFO "Validating compose files before starting services..."
+    for compose_file in "${COMPOSE_FILES[@]}"; do
+        if [[ -f "$compose_file" ]]; then
+            validate_before_deploy "$compose_file" "orchestrator.sh"
+        else
+            error_exit "Compose file not found: $compose_file"
+        fi
+    done
+
     # Determine which services to start
     local services_cmd=""
     if [[ ${#SERVICES_TO_START[@]} -gt 0 ]]; then

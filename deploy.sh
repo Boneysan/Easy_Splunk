@@ -35,6 +35,9 @@ else
     error_exit "versions.env not found - required for image references"
 fi
 
+# Load compose validation library
+source "${SCRIPT_DIR}/lib/compose-validation.sh" || error_exit "Failed to load compose validation library"
+
 # Defaults / Flags
 SIZE="${SIZE:-small}"              # small|medium|large
 WITH_MONITORING=0
@@ -1064,6 +1067,16 @@ deploy_cluster() {
         echo "----------------------"
         return 0
     fi
+
+    # Validate compose files before deployment
+    log_message INFO "Validating compose files before deployment..."
+    for compose_file in "${COMPOSE_FILES[@]}"; do
+        if [[ -f "$compose_file" ]]; then
+            validate_before_deploy "$compose_file" "deploy.sh"
+        else
+            error_exit "Compose file not found: $compose_file"
+        fi
+    done
 
     cd "$SCRIPT_DIR" || error_exit "Failed to change to script directory"
 
