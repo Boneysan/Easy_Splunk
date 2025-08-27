@@ -303,6 +303,10 @@ export -f detect_compose_engine
 export -f validate_compose_schema
 export -f add_compose_metadata
 export -f check_compose_compatibility
+# Export functions for use in other scripts
+export -f detect_compose_engine
+export -f validate_compose_schema
+export -f add_compose_metadata
+export -f check_compose_compatibility
 export -f validate_before_deploy
-export -f get_compose_info</content>
-<parameter name="filePath">/mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/compose-validation.sh
+export -f get_compose_info

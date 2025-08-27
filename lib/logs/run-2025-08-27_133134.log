@@ -1,0 +1,22 @@
+===============================================
+Easy_Splunk Execution Log
+Script: simple-compose-test.sh
+Started: Wed Aug 27 13:31:34 MDT 2025
+PID: 65810
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+===============================================
+Easy_Splunk Execution Log
+Script: simple-compose-test
+Started: Wed Aug 27 13:31:34 MDT 2025
+PID: 65810
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 13:31:34] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/logs/run-2025-08-27_133134.log
+[2025-08-27 13:31:34] [INFO] Detected Docker Compose v1: Docker Compose version v2.21.0
+[2025-08-27 13:31:35] [SUCCESS] Added version metadata to compose file: test-compose.yml
+[2025-08-27 13:31:35] [INFO] Validating compose file: valid-compose.yml
+[2025-08-27 13:31:35] [INFO] Using: docker compose (schema version: 3.8)
+[2025-08-27 13:31:35] [SUCCESS] Compose schema validation passed
