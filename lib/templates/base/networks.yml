@@ -1,0 +1,9 @@
+networks:
+  app-net:
+    driver: bridge
+    name: "${COMPOSE_PROJECT_NAME:-myapp}_app_network"
+  {{#ENABLE_SPLUNK}}
+  splunk-net:
+    driver: bridge
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_cluster_network"
+  {{/ENABLE_SPLUNK}}

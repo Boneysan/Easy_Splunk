@@ -1,0 +1,51 @@
+# Splunk Search Head {{INSTANCE_NUM}}
+splunk-sh{{INSTANCE_NUM}}:
+  image: "{{SPLUNK_IMAGE}}"
+  container_name: "${COMPOSE_PROJECT_NAME:-splunk}_splunk-sh{{INSTANCE_NUM}}"
+  hostname: "splunk-sh{{INSTANCE_NUM}}"
+  restart: unless-stopped
+  ports:
+    - "{{WEB_PORT}}:8000"  # Splunk Web
+    - "{{MGMT_PORT}}:8089"  # Management port
+  environment:
+    SPLUNK_START_ARGS: "--accept-license --answer-yes"
+    SPLUNK_ROLE: "splunk_search_head"
+    SPLUNK_CLUSTER_MASTER_URL: "https://splunk-cm:8089"
+    SPLUNK_SEARCH_HEAD_URL: "https://splunk-sh{{INSTANCE_NUM}}:8089"
+    SPLUNK_PASSWORD: "${SPLUNK_PASSWORD}"
+    SPLUNK_SECRET: "${SPLUNK_SECRET}"
+  networks:
+    - splunk-net
+  volumes:
+    - splunk-sh{{INSTANCE_NUM}}-etc:/opt/splunk/etc
+    - splunk-sh{{INSTANCE_NUM}}-var:/opt/splunk/var
+  profiles: ["splunk"]
+  {{#ENABLE_HEALTHCHECKS}}
+  healthcheck:
+    test: ["CMD-SHELL", "curl -sf http://localhost:8000/en-US/account/login >/dev/null || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 10
+    start_period: 120s
+  {{/ENABLE_HEALTHCHECKS}}
+  deploy:
+    resources:
+      limits:
+        cpus: '${SPLUNK_SEARCH_HEAD_CPU_LIMIT:-1.5}'
+        memory: '${SPLUNK_SEARCH_HEAD_MEM_LIMIT:-2G}'
+      reservations:
+        cpus: '${SPLUNK_SEARCH_HEAD_CPU_RESERVE:-0.5}'
+        memory: '${SPLUNK_SEARCH_HEAD_MEM_RESERVE:-1G}'
+  depends_on:
+    splunk-cm:
+      condition: service_healthy
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "5"
+  {{#ENABLE_SECRETS}}
+  secrets:
+    - splunk_password
+    - splunk_secret
+  {{/ENABLE_SECRETS}}

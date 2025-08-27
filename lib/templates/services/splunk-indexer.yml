@@ -1,0 +1,53 @@
+# Splunk Indexer {{INSTANCE_NUM}}
+splunk-idx{{INSTANCE_NUM}}:
+  image: "{{SPLUNK_IMAGE}}"
+  container_name: "${COMPOSE_PROJECT_NAME:-splunk}_splunk-idx{{INSTANCE_NUM}}"
+  hostname: "splunk-idx{{INSTANCE_NUM}}"
+  restart: unless-stopped
+  ports:
+    - "{{SPLUNK_PORT}}:9997"  # Splunk2Splunk
+    - "{{HEC_PORT}}:8088"     # HTTP Event Collector
+  environment:
+    SPLUNK_START_ARGS: "--accept-license --answer-yes"
+    SPLUNK_ROLE: "splunk_indexer"
+    SPLUNK_CLUSTER_MASTER_URL: "https://splunk-cm:8089"
+    SPLUNK_INDEXER_URL: "https://splunk-idx{{INSTANCE_NUM}}:8089"
+    SPLUNK_PASSWORD: "${SPLUNK_PASSWORD}"
+    SPLUNK_SECRET: "${SPLUNK_SECRET}"
+    SPLUNK_REPLICATION_FACTOR: "{{SPLUNK_REPLICATION_FACTOR}}"
+    SPLUNK_SEARCH_FACTOR: "{{SPLUNK_SEARCH_FACTOR}}"
+  networks:
+    - splunk-net
+  volumes:
+    - splunk-idx{{INSTANCE_NUM}}-etc:/opt/splunk/etc
+    - splunk-idx{{INSTANCE_NUM}}-var:/opt/splunk/var
+  profiles: ["splunk"]
+  {{#ENABLE_HEALTHCHECKS}}
+  healthcheck:
+    test: ["CMD-SHELL", "$SPLUNK_HOME/bin/splunk status || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 10
+    start_period: 120s
+  {{/ENABLE_HEALTHCHECKS}}
+  deploy:
+    resources:
+      limits:
+        cpus: '${SPLUNK_INDEXER_CPU_LIMIT:-2.0}'
+        memory: '${SPLUNK_INDEXER_MEM_LIMIT:-4G}'
+      reservations:
+        cpus: '${SPLUNK_INDEXER_CPU_RESERVE:-1.0}'
+        memory: '${SPLUNK_INDEXER_MEM_RESERVE:-2G}'
+  depends_on:
+    splunk-cm:
+      condition: service_healthy
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "5"
+  {{#ENABLE_SECRETS}}
+  secrets:
+    - splunk_password
+    - splunk_secret
+  {{/ENABLE_SECRETS}}

@@ -1,0 +1,31 @@
+volumes:
+  app-data:
+    name: "${COMPOSE_PROJECT_NAME:-myapp}_app_data"
+  app-logs:
+    name: "${COMPOSE_PROJECT_NAME:-myapp}_app_logs"
+  redis-data:
+    name: "${COMPOSE_PROJECT_NAME:-myapp}_redis_data"
+  {{#ENABLE_MONITORING}}
+  prometheus-data:
+    name: "${COMPOSE_PROJECT_NAME:-myapp}_prometheus_data"
+  grafana-data:
+    name: "${COMPOSE_PROJECT_NAME:-myapp}_grafana_data"
+  {{/ENABLE_MONITORING}}
+  {{#ENABLE_SPLUNK}}
+  splunk-cm-etc:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_cm_etc"
+  splunk-cm-var:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_cm_var"
+  {{#SPLUNK_INDEXER_VOLUMES}}
+  splunk-idx{{INDEX}}-etc:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_idx{{INDEX}}_etc"
+  splunk-idx{{INDEX}}-var:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_idx{{INDEX}}_var"
+  {{/SPLUNK_INDEXER_VOLUMES}}
+  {{#SPLUNK_SEARCH_HEAD_VOLUMES}}
+  splunk-sh{{INDEX}}-etc:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_sh{{INDEX}}_etc"
+  splunk-sh{{INDEX}}-var:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_sh{{INDEX}}_var"
+  {{/SPLUNK_SEARCH_HEAD_VOLUMES}}
+  {{/ENABLE_SPLUNK}}

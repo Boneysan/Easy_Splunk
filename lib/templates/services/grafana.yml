@@ -1,0 +1,45 @@
+# Grafana dashboard service
+grafana:
+  image: "${GRAFANA_IMAGE}"
+  container_name: "${COMPOSE_PROJECT_NAME:-myapp}_grafana"
+  restart: unless-stopped
+  ports:
+    - "3000:3000"
+  environment:
+    GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+    GF_INSTALL_PLUGINS: "grafana-piechart-panel"
+  networks:
+    - app-net
+    - splunk-net
+  volumes:
+    - grafana-data:/var/lib/grafana
+    - ./config/grafana-provisioning/:/etc/grafana/provisioning/:ro
+  profiles: ["monitoring"]
+  {{#ENABLE_HEALTHCHECKS}}
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q 'database.*ok'"]
+    interval: 20s
+    timeout: 5s
+    retries: 10
+    start_period: 30s
+  {{/ENABLE_HEALTHCHECKS}}
+  deploy:
+    resources:
+      limits:
+        cpus: '${GRAFANA_CPU_LIMIT:-0.5}'
+        memory: '${GRAFANA_MEM_LIMIT:-512M}'
+      reservations:
+        cpus: '${GRAFANA_CPU_RESERVE:-0.2}'
+        memory: '${GRAFANA_MEM_RESERVE:-256M}'
+  depends_on:
+    prometheus:
+      condition: service_healthy
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+  {{#ENABLE_SECRETS}}
+  secrets:
+    - grafana_admin_password
+  {{/ENABLE_SECRETS}}

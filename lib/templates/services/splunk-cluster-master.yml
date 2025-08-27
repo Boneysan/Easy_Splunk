@@ -1,0 +1,48 @@
+# Splunk Cluster Master
+splunk-cm:
+  image: "{{SPLUNK_IMAGE}}"
+  container_name: "${COMPOSE_PROJECT_NAME:-splunk}_cluster_master"
+  hostname: "splunk-cm"
+  restart: unless-stopped
+  ports:
+    - "8089:8089"  # Management port
+  environment:
+    SPLUNK_START_ARGS: "--accept-license --answer-yes"
+    SPLUNK_ROLE: "splunk_cluster_master"
+    SPLUNK_CLUSTER_MASTER_URL: "https://splunk-cm:8089"
+    SPLUNK_PASSWORD: "${SPLUNK_PASSWORD}"
+    SPLUNK_SECRET: "${SPLUNK_SECRET}"
+    SPLUNK_REPLICATION_FACTOR: "{{SPLUNK_REPLICATION_FACTOR}}"
+    SPLUNK_SEARCH_FACTOR: "{{SPLUNK_SEARCH_FACTOR}}"
+  networks:
+    - splunk-net
+  volumes:
+    - splunk-cm-etc:/opt/splunk/etc
+    - splunk-cm-var:/opt/splunk/var
+  profiles: ["splunk"]
+  {{#ENABLE_HEALTHCHECKS}}
+  healthcheck:
+    test: ["CMD-SHELL", "$SPLUNK_HOME/bin/splunk status || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 10
+    start_period: 180s
+  {{/ENABLE_HEALTHCHECKS}}
+  deploy:
+    resources:
+      limits:
+        cpus: '${SPLUNK_CM_CPU_LIMIT:-1.0}'
+        memory: '${SPLUNK_CM_MEM_LIMIT:-1G}'
+      reservations:
+        cpus: '${SPLUNK_CM_CPU_RESERVE:-0.5}'
+        memory: '${SPLUNK_CM_MEM_RESERVE:-512M}'
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "5"
+  {{#ENABLE_SECRETS}}
+  secrets:
+    - splunk_password
+    - splunk_secret
+  {{/ENABLE_SECRETS}}
