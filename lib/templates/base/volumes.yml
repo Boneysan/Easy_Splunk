@@ -16,16 +16,16 @@ volumes:
     name: "${COMPOSE_PROJECT_NAME:-splunk}_cm_etc"
   splunk-cm-var:
     name: "${COMPOSE_PROJECT_NAME:-splunk}_cm_var"
-  {{#SPLUNK_INDEXER_VOLUMES}}
-  splunk-idx{{INDEX}}-etc:
-    name: "${COMPOSE_PROJECT_NAME:-splunk}_idx{{INDEX}}_etc"
-  splunk-idx{{INDEX}}-var:
-    name: "${COMPOSE_PROJECT_NAME:-splunk}_idx{{INDEX}}_var"
-  {{/SPLUNK_INDEXER_VOLUMES}}
-  {{#SPLUNK_SEARCH_HEAD_VOLUMES}}
-  splunk-sh{{INDEX}}-etc:
-    name: "${COMPOSE_PROJECT_NAME:-splunk}_sh{{INDEX}}_etc"
-  splunk-sh{{INDEX}}-var:
-    name: "${COMPOSE_PROJECT_NAME:-splunk}_sh{{INDEX}}_var"
-  {{/SPLUNK_SEARCH_HEAD_VOLUMES}}
+  splunk-idx1-etc:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_idx1_etc"
+  splunk-idx1-var:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_idx1_var"
+  splunk-idx2-etc:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_idx2_etc"
+  splunk-idx2-var:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_idx2_var"
+  splunk-sh1-etc:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_sh1_etc"
+  splunk-sh1-var:
+    name: "${COMPOSE_PROJECT_NAME:-splunk}_sh1_var"
   {{/ENABLE_SPLUNK}}

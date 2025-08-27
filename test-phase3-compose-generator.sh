@@ -13,6 +13,7 @@ echo "=== Phase 3 Compose Generator Test ==="
 
 # Load dependencies
 source lib/core.sh
+source versions.env
 source lib/compose-config.sh
 source lib/compose-generator-v2.sh
 
@@ -101,7 +102,7 @@ echo ""
 echo "=== Test 5: Service Validation ==="
 required_services=("splunk-cm" "splunk-idx1" "splunk-idx2" "splunk-sh1" "prometheus" "grafana")
 for service in "${required_services[@]}"; do
-    if grep -q "^  ${service}:" "$output_file"; then
+    if grep -q "^${service}:" "$output_file"; then
         echo "✅ Found service: $service"
     else
         echo "❌ Missing service: $service"

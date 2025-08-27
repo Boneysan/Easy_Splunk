@@ -11,6 +11,14 @@
 #   generate_env_template .env
 # ==============================================================================
 
+# Fallback functions if core functions not available
+if ! type begin_step &>/dev/null; then
+    begin_step() { log_info "Starting: $1"; }
+fi
+if ! type complete_step &>/dev/null; then
+    complete_step() { log_info "Completed: $1"; }
+fi
+
 # Template engine functions
 
 # render_template <template_file> <config_vars>
@@ -53,23 +61,42 @@ process_conditionals() {
         config["$key"]="$value"
     done <<< "$config_vars"
     
-    # Process conditional blocks using sed
+    # Simple approach: process each conditional block one at a time
     local result="$content"
+    local max_iterations=10
+    local iteration=0
     
-    # Find all conditional blocks
-    while [[ "$result" =~ \{\{#([A-Z_]+)\}\}(.*)\{\{/\1\}\} ]]; do
-        local var_name="${BASH_REMATCH[1]}"
-        local block_content="${BASH_REMATCH[2]}"
-        local full_match="${BASH_REMATCH[0]}"
-        
-        # Check if variable is "true"
-        if is_true "${config[$var_name]:-false}"; then
-            # Keep the content, remove the conditional tags
-            result="${result//"$full_match"/"$block_content"}"
-        else
-            # Remove entire conditional block
-            result="${result//"$full_match"/}"
+    while [[ $iteration -lt $max_iterations ]]; do
+        # Look for the first conditional block
+        if [[ "$result" =~ \{\{#([A-Z_]+)\}\} ]]; then
+            local var_name="${BASH_REMATCH[1]}"
+            local start_tag="{{#${var_name}}}"
+            local end_tag="{{/${var_name}}}"
+            
+            # Find the matching end tag
+            local start_pos="${result%%$start_tag*}"
+            local start_len=${#start_pos}
+            local temp="${result:$start_len}"
+            temp="${temp#$start_tag}"
+            
+            if [[ "$temp" == *"$end_tag"* ]]; then
+                local content_part="${temp%%$end_tag*}"
+                local after_part="${temp#*$end_tag}"
+                
+                # Check if variable is true
+                if is_true "${config[$var_name]:-false}"; then
+                    # Keep content, remove tags
+                    result="${result:0:$start_len}${content_part}${after_part}"
+                else
+                    # Remove entire block
+                    result="${result:0:$start_len}${after_part}"
+                fi
+                
+                ((iteration++))
+                continue
+            fi
         fi
+        break
     done
     
     echo "$result"
