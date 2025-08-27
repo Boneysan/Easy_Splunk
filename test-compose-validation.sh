@@ -320,5 +320,4 @@ main() {
 }
 
 # Run main function
-main "$@"</content>
-<parameter name="filePath">/mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/test-compose-validation.sh
+main "$@"

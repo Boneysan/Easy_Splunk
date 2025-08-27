@@ -74,5 +74,4 @@ rm -f valid-compose.yml
 
 echo ""
 echo "Compose validation system is working!"
-echo "This will help prevent 'works on my box' issues."</content>
-<parameter name="filePath">/mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/simple-compose-test.sh
+echo "This will help prevent 'works on my box' issues."
