@@ -1,6 +1,6 @@
 # Grafana dashboard service
 grafana:
-  image: "${GRAFANA_IMAGE}"
+  image: "{{GRAFANA_IMAGE}}"
   container_name: "${COMPOSE_PROJECT_NAME:-myapp}_grafana"
   restart: unless-stopped
   ports:

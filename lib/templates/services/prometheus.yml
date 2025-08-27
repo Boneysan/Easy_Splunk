@@ -1,6 +1,6 @@
 # Prometheus monitoring service
 prometheus:
-  image: "${PROMETHEUS_IMAGE}"
+  image: "{{PROMETHEUS_IMAGE}}"
   container_name: "${COMPOSE_PROJECT_NAME:-myapp}_prometheus"
   restart: unless-stopped
   command:

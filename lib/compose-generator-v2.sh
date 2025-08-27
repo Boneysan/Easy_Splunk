@@ -3,13 +3,20 @@
 # lib/compose-generator-v2.sh
 # Template-based compose file generator (Phase 3 rewrite)
 #
-# Dependencies: lib/core.sh, lib/compose-config.sh, versions.env
+# Dependencies: lib/core.sh, lib/compose-config.sh, lib/image-validator.sh, versions.env
 # Version: 2.0.0
 #
 # Usage Examples:
 #   generate_compose_file docker-compose.yml
 #   generate_env_template .env
 # ==============================================================================
+
+# Load image validation library
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${LIB_DIR}/image-validator.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${LIB_DIR}/image-validator.sh"
+fi
 
 # Fallback functions if core functions not available
 if ! type begin_step &>/dev/null; then
@@ -207,6 +214,16 @@ generate_compose_file() {
     
     log_success "✅ Compose file v2.0 generated: ${output_file}"
     complete_step "compose-generation-v2"
+    
+    # Validate image references in generated file
+    log_info "🔍 Validating image references..."
+    if validate_image_references "$output_file"; then
+        log_success "✅ Image reference validation passed"
+    else
+        log_error "❌ Image reference validation failed"
+        log_info "Run 'audit_image_references $output_file' for details"
+        return 1
+    fi
     
     # Report what was generated
     log_info "Generated services:"

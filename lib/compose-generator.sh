@@ -230,6 +230,12 @@ if [[ -f "${LIB_DIR}/validation.sh" ]]; then
   source "${LIB_DIR}/validation.sh"
 fi
 
+# Load image validation library
+if [[ -f "${LIB_DIR}/image-validator.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${LIB_DIR}/image-validator.sh"
+fi
+
 # Fallback validate_rf_sf function for validation library compatibility
 if ! type validate_rf_sf &>/dev/null; then
   validate_rf_sf() {
@@ -917,6 +923,16 @@ generate_compose_file() {
   atomic_write_file "${tmp}" "${out}"
   log_success "✅ Compose file generated: ${out}"
   complete_step "compose-generation"
+
+  # Validate image references in generated file
+  log_info "🔍 Validating image references..."
+  if validate_image_references "${out}"; then
+    log_success "✅ Image reference validation passed"
+  else
+    log_error "❌ Image reference validation failed" 
+    log_info "Run 'audit_image_references ${out}' for details"
+    return 1
+  fi
 
   # Report what was generated
   log_info "Generated services:"
