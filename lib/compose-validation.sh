@@ -124,13 +124,32 @@ validate_compose_schema() {
     case "$compose_cmd" in
         "docker compose"|"docker-compose")
             # Docker Compose has built-in validation
-            if ! validation_output=$("$compose_cmd" config --quiet 2>&1); then
-                validation_exit_code=$?
+            # Handle different Docker Compose versions
+            if [[ "$compose_cmd" == "docker-compose" ]]; then
+                # Standalone docker-compose binary expects docker-compose.yml
+                local temp_file=""
+                if [[ "$compose_file" != "docker-compose.yml" ]]; then
+                    temp_file="$compose_file"
+                    cp "$compose_file" "docker-compose.yml"
+                    compose_file="docker-compose.yml"
+                fi
+                if ! validation_output=$("$compose_cmd" config --quiet 2>&1); then
+                    validation_exit_code=$?
+                fi
+                # Clean up temp file
+                if [[ -n "$temp_file" ]]; then
+                    rm -f "docker-compose.yml"
+                fi
+            else
+                # Docker Compose plugin supports -f flag
+                if ! validation_output=$("$compose_cmd" -f "$compose_file" config --quiet 2>&1); then
+                    validation_exit_code=$?
+                fi
             fi
             ;;
         "podman compose"|"podman-compose")
             # Podman compose validation
-            if ! validation_output=$("$compose_cmd" config --quiet 2>&1); then
+            if ! validation_output=$("$compose_cmd" -f "$compose_file" config --quiet 2>&1); then
                 validation_exit_code=$?
             fi
             ;;
@@ -298,11 +317,6 @@ get_compose_info() {
     echo "Validation Status: $( [[ $VALIDATION_PASSED == true ]] && echo 'PASSED' || echo 'NOT RUN' )"
 }
 
-# Export functions for use in other scripts
-export -f detect_compose_engine
-export -f validate_compose_schema
-export -f add_compose_metadata
-export -f check_compose_compatibility
 # Export functions for use in other scripts
 export -f detect_compose_engine
 export -f validate_compose_schema

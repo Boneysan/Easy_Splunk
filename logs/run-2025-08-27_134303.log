@@ -1,0 +1,9 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 13:43:03 MDT 2025
+PID: 68945
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 13:43:03] [ERROR] Failed to load compose validation library
