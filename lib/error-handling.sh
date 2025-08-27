@@ -23,31 +23,61 @@ if ! type log_message &>/dev/null; then
   }
 fi
 
-# Fallback error_exit function for error handling library compatibility
-if ! type error_exit &>/dev/null; then
-  error_exit() {
+# Enhanced error_exit with step-by-step guidance
+error_exit() {
     local error_code=1
-    local error_message=""
+    local error_message="Unknown error"
+    local error_type="GENERAL_ERROR"
     
-    if [[ $# -eq 1 ]]; then
-      if [[ "$1" =~ ^[0-9]+$ ]]; then
-        error_code="$1"
-        error_message="Script failed with exit code $error_code"
-      else
-        error_message="$1"
-      fi
-    elif [[ $# -eq 2 ]]; then
-      error_message="$1"
-      error_code="$2"
-    fi
+    case $# in
+        1)
+            if [[ "$1" =~ ^[0-9]+$ ]]; then
+                error_code="$1"
+                error_message="Script failed with exit code $error_code"
+            else
+                error_message="$1"
+            fi
+            ;;
+        2)
+            if [[ "$1" =~ ^[0-9]+$ ]]; then
+                error_code="$1"
+                error_message="$2"
+            else
+                error_message="$1"
+                error_type="$2"
+            fi
+            ;;
+        3)
+            error_message="$1"
+            error_code="$2"
+            error_type="$3"
+            ;;
+    esac
     
-    if [[ -n "$error_message" ]]; then
-      log_message ERROR "${error_message:-Unknown error}"
-    fi
+    # Use enhanced error reporting based on error type
+    case "$error_type" in
+        COMPOSE_FAILED)
+            enhanced_compose_error "${COMPOSE_IMPL:-compose}" "$error_message"
+            ;;
+        RUNTIME_FAILED)
+            enhanced_runtime_error "${CONTAINER_RUNTIME:-runtime}" "$error_message"
+            ;;
+        INSTALLATION_FAILED)
+            enhanced_installation_error "unknown" "system" "$error_message"
+            ;;
+        NETWORK_FAILED)
+            enhanced_network_error "$error_message"
+            ;;
+        PERMISSION_FAILED)
+            enhanced_permission_error "$error_message"
+            ;;
+        *)
+            enhanced_error "$error_type" "$error_message" "$LOG_FILE"
+            ;;
+    esac
     
     exit "$error_code"
-  }
-fi
+}
 
 # Fallback init_error_handling function for error handling library compatibility
 if ! type init_error_handling &>/dev/null; then
@@ -133,14 +163,14 @@ declare -a CLEANUP_FUNCTIONS
 
 # Initialize logging
 init_logging() {
-    local log_dir="${LOG_DIR:-/tmp}"
+    local log_dir="${LOG_DIR:-${SCRIPT_DIR:-.}/logs}"
     
     # Ensure log directory exists
     if [[ ! -d "$log_dir" ]]; then
         mkdir -p "$log_dir" 2>/dev/null || log_dir="/tmp"
     fi
     
-    LOG_FILE="${log_dir}/easy_splunk_$(date +%Y%m%d_%H%M%S).log"
+    LOG_FILE="${log_dir}/run-$(date +%F_%H%M%S).log"
     
     # Create log file with header
     {
@@ -150,8 +180,57 @@ init_logging() {
         echo "Started: $(date)"
         echo "PID: $$"
         echo "User: $(whoami)"
+        echo "Working Directory: $(pwd)"
         echo "==============================================="
     } >> "$LOG_FILE"
+}
+
+# Enhanced logging function that tees to both console and log
+run_with_log() {
+    local log_file="${LOG_FILE:-${LOG_DIR:-${SCRIPT_DIR:-.}/logs}/run-$(date +%F_%H%M%S).log}"
+    local log_dir="$(dirname "$log_file")"
+    
+    # Ensure log directory exists
+    mkdir -p "$log_dir" 2>/dev/null || log_dir="/tmp"
+    
+    # If log file doesn't exist, create it with header
+    if [[ ! -f "$log_file" ]]; then
+        {
+            echo "==============================================="
+            echo "Easy_Splunk Execution Log"
+            echo "Script: ${SCRIPT_NAME:-unknown}"
+            echo "Started: $(date)"
+            echo "PID: $$"
+            echo "User: $(whoami)"
+            echo "Working Directory: $(pwd)"
+            echo "==============================================="
+        } >> "$log_file"
+    fi
+    
+    # Execute command and tee output to both console and log
+    "$@" 2>&1 | tee -a "$log_file"
+    return ${PIPESTATUS[0]}
+}
+
+# Setup standardized logging for all scripts
+setup_standard_logging() {
+    local script_name="${1:-${0##*/}}"
+    local script_dir="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    
+    # Set up standardized log directory
+    LOG_DIR="${script_dir}/logs"
+    mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR="/tmp"
+    
+    # Set script name for logging
+    SCRIPT_NAME="$script_name"
+    
+    # Initialize logging
+    init_logging
+    
+    # Export log file location for other scripts
+    export LOG_FILE LOG_DIR SCRIPT_NAME
+    
+    log_message INFO "Logging initialized - logs available at: $LOG_FILE"
 }
 
 # Logging function
@@ -475,4 +554,4 @@ init_logging
 export -f log_message enhanced_error enhanced_compose_error enhanced_installation_error
 export -f enhanced_runtime_error enhanced_network_error enhanced_permission_error
 export -f validate_container_runtime validate_compose_tool validate_python_environment
-export -f with_retry init_logging
+export -f with_retry init_logging setup_standard_logging run_with_log error_exit

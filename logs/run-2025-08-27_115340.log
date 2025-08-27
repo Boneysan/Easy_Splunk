@@ -1,0 +1,10 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test-script
+Started: Wed Aug 27 11:53:40 MDT 2025
+PID: 34340
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 11:53:40] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/logs/run-2025-08-27_115340.log
+Hello from run_with_log

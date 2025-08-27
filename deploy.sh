@@ -10,20 +10,29 @@
 # - Persisted state marker (config/active.conf)
 # - Cleanup/rollback on failure
 
-set -euo pipefail
-
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "deploy.sh"
+
+# Set error handling
+set -euo pipefail
 
 # Load versions.env to get image references
 if [[ -f "${SCRIPT_DIR}/versions.env" ]]; then
     # Basic variables needed for logging
     DEBUG_MODE=0
     QUIET=0
-    source "${SCRIPT_DIR}/versions.env" || { echo "ERROR: Failed to load versions.env" >&2; exit 1; }
+    source "${SCRIPT_DIR}/versions.env" || error_exit "Failed to load versions.env"
 else
-    echo "ERROR: versions.env not found - required for image references" >&2
-    exit 1
+    error_exit "versions.env not found - required for image references"
 fi
 
 # Defaults / Flags
@@ -68,8 +77,6 @@ log_message() {
             ;;
     esac
 }
-
-error_exit() { log_message ERROR "$1"; exit "${2:-1}"; }
 
 # Runtime detection
 RUNTIME=""

@@ -2,52 +2,20 @@
 # orchestrator.sh - Complete cluster orchestration with comprehensive error handling
 # Manages Docker/Podman compose operations for Splunk cluster
 
-# Fallback functions for error handling library compatibility
-if ! type log_message &>/dev/null; then
-  log_message() {
-    local level="${1:-INFO}"
-    local message="${2:-}"
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-    
-    case "$level" in
-      ERROR)   echo -e "\033[31m[$timestamp] ERROR: $message\033[0m" >&2 ;;
-      WARN)    echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
-      WARNING) echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
-      SUCCESS) echo -e "\033[32m[$timestamp] SUCCESS: $message\033[0m" ;;
-      DEBUG)   [[ "${VERBOSE:-false}" == "true" ]] && echo -e "\033[36m[$timestamp] DEBUG: $message\033[0m" ;;
-      *)       echo -e "[$timestamp] INFO: $message" ;;
-    esac
-  }
-fi
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if ! type error_exit &>/dev/null; then
-  error_exit() {
-    local error_code=1
-    local message="Unknown error"
-    
-    case $# in
-      1) 
-        if [[ "$1" =~ ^[0-9]+$ ]]; then
-          error_code="$1"
-        else
-          message="$1"
-        fi
-        ;;
-      2) 
-        error_code="$1"
-        message="$2"
-        ;;
-    esac
-    
-    log_message ERROR "$message"
-    exit "$error_code"
-  }
-fi
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
 
-if ! type error_exit &>/dev/null; then
-  error_exit() {
-    local error_code=1
-    local message="Unknown error"
+# Setup standardized logging
+setup_standard_logging "orchestrator.sh"
+
+# Set error handling
+set -euo pipefail
     
     case $# in
       1) 
@@ -102,23 +70,14 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source core library first
-source "${SCRIPT_DIR}/lib/core.sh" || {
-    log_message WARN "Cannot load core library from lib/core.sh - using fallback functions"
-}
+source "${SCRIPT_DIR}/lib/core.sh" || error_exit "Cannot load core library from lib/core.sh"
 
 # Source compose initialization library
-source "${SCRIPT_DIR}/lib/compose-init.sh" || {
-    log_message WARN "Cannot load compose initialization from lib/compose-init.sh"
-}
+source "${SCRIPT_DIR}/lib/compose-init.sh" || error_exit "Cannot load compose initialization from lib/compose-init.sh"
 
-# Source error handling module
-source "${SCRIPT_DIR}/lib/error-handling.sh" || {
-    log_message WARN "Cannot load error handling module from lib/error-handling.sh - using fallback functions"
-}
-
-# Initialize error handling if function exists
-if type init_error_handling &>/dev/null; then
-    init_error_handling
+# Source error handling module (already loaded above, but ensure it's available)
+if ! type log_message &>/dev/null; then
+    error_exit "Error handling module not properly loaded"
 fi
 
 # Configuration
