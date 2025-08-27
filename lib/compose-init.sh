@@ -1,30 +1,21 @@
 #!/bin/bash
-# lib/compose-init.sh - Shared compose command initialization with fallback system
-# This library provides compose command detection and fallback for all scripts
+# lib/compose-init.sh - Shared compose command initialization with standardized error handling
+# This library provides compose command detection and initialization for all scripts
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
 
 # Version and guard
 if [[ -n "${COMPOSE_INIT_VERSION:-}" ]]; then
     return 0 2>/dev/null || true
 fi
 readonly COMPOSE_INIT_VERSION="1.0.0"
-
-# Fallback log_message function for standalone operation
-if ! type log_message &>/dev/null; then
-  log_message() {
-    local level="${1:-INFO}"
-    local message="${2:-}"
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-    
-    case "$level" in
-      ERROR)   echo -e "\033[31m[$timestamp] ERROR: $message\033[0m" >&2 ;;
-      WARN)    echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
-      WARNING) echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
-      SUCCESS) echo -e "\033[32m[$timestamp] SUCCESS: $message\033[0m" ;;
-      DEBUG)   [[ "${VERBOSE:-false}" == "true" ]] && echo -e "\033[36m[$timestamp] DEBUG: $message\033[0m" ;;
-      *)       echo -e "[$timestamp] INFO: $message" ;;
-    esac
-  }
-fi
 
 # Global variables
 COMPOSE_CMD=""
@@ -255,20 +246,3 @@ export -f install_docker_compose_fallback
 export -f init_compose_command  
 export -f setup_compose_command_array
 export -f initialize_compose_system
-
-# ============================= Script Configuration ===========================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Load standardized error handling first
-source "${SCRIPT_DIR}/lib/error-handling.sh" || {
-    echo "ERROR: Failed to load error handling library" >&2
-    exit 1
-}
-
-# Setup standardized logging
-setup_standard_logging "compose-init"
-
-# Set error handling
-set -euo pipefail
-
-

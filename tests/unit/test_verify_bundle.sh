@@ -1,3 +1,19 @@
+
+
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load standardized error handling first
+source "${SCRIPT_DIR}/lib/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
+
+# Setup standardized logging
+setup_standard_logging "test_verify_bundle"
+
+# Set error handling
+set -euo pipefail
 ```bash
 #!/usr/bin/env bash
 # ==============================================================================
@@ -7,7 +23,6 @@
 # Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, lib/runtime-detection.sh, verify-bundle.sh
 # Version: 1.0.0
 # ==============================================================================
-set -euo pipefail
 IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
@@ -123,3 +138,4 @@ run_test "Compose validation" test_compose_validation
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
 ```
+

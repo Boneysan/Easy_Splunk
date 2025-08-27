@@ -14,204 +14,28 @@
 #   ENABLE_SPLUNK=true generate_compose_file splunk-compose.yml
 # ==============================================================================
 
+# ============================= Script Configuration ===========================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# BEGIN: Fallback functions for error handling library compatibility
-# These functions provide basic functionality when lib/error-handling.sh fails to load
-
-# Fallback is_true function for core library compatibility
-if ! type is_true &>/dev/null; then
-  is_true() {
-    local v="${1:-}"
-    v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
-    [[ "$v" == "true" || "$v" == "yes" || "$v" == "1" ]]
-  }
-fi
-
-# Fallback log_message function for error handling library compatibility
-if ! type log_message &>/dev/null; then
-  log_message() {
-    local level="${1:-INFO}"
-    local message="${2:-}"
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-    
-    case "$level" in
-      ERROR)   echo -e "\033[31m[$timestamp] ERROR: $message\033[0m" >&2 ;;
-      WARNING) echo -e "\033[33m[$timestamp] WARNING: $message\033[0m" >&2 ;;
-      SUCCESS) echo -e "\033[32m[$timestamp] SUCCESS: $message\033[0m" ;;
-      DEBUG)   [[ "${VERBOSE:-false}" == "true" ]] && echo -e "\033[36m[$timestamp] DEBUG: $message\033[0m" ;;
-      *)       echo -e "[$timestamp] INFO: $message" ;;
-    esac
-  }
-fi
-
-# Fallback error_exit function for error handling library compatibility
-if ! type error_exit &>/dev/null; then
-  error_exit() {
-    local error_code=1
-    local error_message=""
-    
-    if [[ $# -eq 1 ]]; then
-      if [[ "$1" =~ ^[0-9]+$ ]]; then
-        error_code="$1"
-        error_message="Script failed with exit code $error_code"
-      else
-        error_message="$1"
-      fi
-    elif [[ $# -eq 2 ]]; then
-      error_message="$1"
-      error_code="$2"
-    fi
-    
-    if [[ -n "$error_message" ]]; then
-      log_message ERROR "${error_message:-Unknown error}"
-    fi
-    
-    exit "$error_code"
-  }
-fi
-
-# Fallback log_warning function for error handling library compatibility
-if ! type log_warning &>/dev/null; then
-  log_warning() {
-    log_message WARNING "$@"
-  }
-fi
-
-# Fallback begin_step function for error handling library compatibility
-if ! type begin_step &>/dev/null; then
-  begin_step() {
-    log_message INFO "Starting: $1"
-  }
-fi
-if ! type begin_step &>/dev/null; then
-  begin_step() {
-    local step_name="${1:-Unknown Step}"
-    log_message INFO "Starting: $step_name"
-  }
-fi
-
-# Fallback complete_step function for error handling library compatibility
-if ! type complete_step &>/dev/null; then
-  complete_step() {
-    local step_name="${1:-Step}"
-    log_message INFO "Completed: $step_name"
-  }
-fi
-
-# Fallback validate_environment_vars function for error handling library compatibility
-if ! type validate_environment_vars &>/dev/null; then
-  validate_environment_vars() {
-    local required_vars=("$@")
-    local missing_vars=()
-    
-    for var in "${required_vars[@]}"; do
-      if [[ -z "${!var:-}" ]]; then
-        missing_vars+=("$var")
-      fi
-    done
-    
-    if [[ ${#missing_vars[@]} -gt 0 ]]; then
-      log_message ERROR "Missing required environment variables: ${missing_vars[*]}"
-      return 1
-    fi
-    
-    log_message DEBUG "All required environment variables are set"
-    return 0
-  }
-fi
-
-# Fallback atomic_write_file function for error handling library compatibility
-if ! type atomic_write_file &>/dev/null; then
-  atomic_write_file() {
-    local target_file="$1"
-    local temp_file="${target_file}.tmp.$$"
-    
-    # Read from stdin and write to temp file
-    cat > "$temp_file" || {
-      log_message ERROR "Failed to write to temporary file: $temp_file"
-      rm -f "$temp_file"
-      return 1
-    }
-    
-    # Atomically move temp file to target
-    mv "$temp_file" "$target_file" || {
-      log_message ERROR "Failed to move temporary file to target: $target_file"
-      rm -f "$temp_file"
-      return 1
-    }
-    
-    log_message DEBUG "Atomically wrote file: $target_file"
-    return 0
-  }
-fi
-
-# Fallback init_error_handling function for error handling library compatibility
-if ! type init_error_handling &>/dev/null; then
-  init_error_handling() {
-    # Basic error handling setup - no-op fallback
-    set -euo pipefail
-  }
-fi
-
-# Fallback register_cleanup function for error handling library compatibility
-if ! type register_cleanup &>/dev/null; then
-  register_cleanup() {
-    # Basic cleanup registration - no-op fallback
-    # Production systems should use proper cleanup handling
-    return 0
-  }
-fi
-
-# Fallback validate_safe_path function for error handling library compatibility
-if ! type validate_safe_path &>/dev/null; then
-  validate_safe_path() {
-    local path="$1"
-    local description="${2:-path}"
-    
-    # Basic path validation
-    if [[ -z "$path" ]]; then
-      log_message ERROR "$description cannot be empty"
-      return 1
-    fi
-    
-    if [[ "$path" == *".."* ]]; then
-      log_message ERROR "$description contains invalid characters (..)"
-      return 1
-    fi
-    
-    return 0
-  }
-fi
-
-# Fallback with_retry function for error handling library compatibility
-if ! type with_retry &>/dev/null; then
-  with_retry() {
-    local max_attempts=3
-    local delay=2
-    local attempt=1
-    local cmd=("$@")
-    
-    while [[ $attempt -le $max_attempts ]]; do
-      if "${cmd[@]}"; then
-        return 0
-      fi
-      
-      local rc=$?
-      if [[ $attempt -eq $max_attempts ]]; then
-        log_message ERROR "with_retry: command failed after ${attempt} attempts (rc=${rc}): ${cmd[*]}" 2>/dev/null || echo "ERROR: with_retry failed after ${attempt} attempts" >&2
-        return $rc
-      fi
-      
-      log_message WARNING "Attempt ${attempt} failed (rc=${rc}); retrying in ${delay}s..." 2>/dev/null || echo "WARNING: Attempt ${attempt} failed, retrying in ${delay}s..." >&2
-      sleep $delay
-      ((attempt++))
-      ((delay *= 2))
-    done
-  }
-fi
-# END: Fallback functions for error handling library compatibility
+# Load standardized error handling first
+source "${SCRIPT_DIR}/error-handling.sh" || {
+    echo "ERROR: Failed to load error handling library" >&2
+    exit 1
+}
 
 # ---- Dependency guard ----------------------------------------------------------
+if ! command -v log_info >/dev/null 2>&1; then
+  echo "FATAL: core libs must be sourced before lib/compose-generator.sh" >&2
+  exit 1
+fi
+if [[ "${CORE_VERSION:-0.0.0}" < "1.0.0" ]]; then
+  die "${E_GENERAL}" "compose-generator.sh requires core.sh version >= 1.0.0"
+fi
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${LIB_DIR}/error-handling.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${LIB_DIR}/error-handling.sh"
+fi
 if ! command -v log_info >/dev/null 2>&1; then
   echo "FATAL: core libs must be sourced before lib/compose-generator.sh" >&2
   exit 1
@@ -1012,20 +836,3 @@ EOF
 # ==============================================================================
 # End of lib/compose-generator.sh
 # ==============================================================================
-
-# ============================= Script Configuration ===========================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Load standardized error handling first
-source "${SCRIPT_DIR}/lib/error-handling.sh" || {
-    echo "ERROR: Failed to load error handling library" >&2
-    exit 1
-}
-
-# Setup standardized logging
-setup_standard_logging "compose-generator"
-
-# Set error handling
-set -euo pipefail
-
-
