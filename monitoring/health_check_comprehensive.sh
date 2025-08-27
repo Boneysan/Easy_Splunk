@@ -10,6 +10,7 @@ IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/../lib/core.sh"
 source "${SCRIPT_DIR}/../lib/error-handling.sh"
+source "${SCRIPT_DIR}/../lib/run-with-log.sh"
 
 check_realtime_monitoring() {
     log_info "Checking real-time cluster health monitoring..."
@@ -249,7 +250,7 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+    run_entrypoint main "$@"
 fi
 
 # ============================= Script Configuration ===========================

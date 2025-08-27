@@ -9,6 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/core.sh"
 source "${SCRIPT_DIR}/../lib/error-handling.sh"
+source "${SCRIPT_DIR}/../lib/run-with-log.sh"
 
 # Colors for output
 readonly GREEN='\033[0;32m'
@@ -337,7 +338,7 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+    run_entrypoint main "$@"
 fi
 
 # ============================= Script Configuration ===========================

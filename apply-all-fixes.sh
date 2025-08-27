@@ -296,5 +296,8 @@ main() {
     return 0
 }
 
-# Run main function
-main "$@"
+# Run main function under standardized logging
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    source "${SCRIPT_DIR}/lib/run-with-log.sh" || true
+    run_entrypoint main "$@"
+fi

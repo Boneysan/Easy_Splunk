@@ -124,6 +124,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/../../lib/core.sh"
 source "${SCRIPT_DIR}/../../lib/error-handling.sh"
 source "${SCRIPT_DIR}/backup_utils.sh"
+source "${SCRIPT_DIR}/../../lib/run-with-log.sh"
 
 # Configuration
 readonly DR_CONFIG_FILE="${SCRIPT_DIR}/disaster_recovery.conf"
@@ -514,7 +515,7 @@ EOF
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+    run_entrypoint main "$@"
 fi
 
 # ============================= Script Configuration ===========================

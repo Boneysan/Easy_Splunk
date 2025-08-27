@@ -29,6 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
+source "${SCRIPT_DIR}/lib/run-with-log.sh"
 # shellcheck source=lib/security.sh
 source "${SCRIPT_DIR}/lib/security.sh"
 
@@ -301,7 +302,9 @@ main() {
 }
 
 VERIFY_BUNDLE_VERSION="1.0.0"
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  run_entrypoint main "$@"
+fi
 
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -182,10 +182,11 @@ main() {
     
     log_info "Starting real-time cluster health monitoring for: $*"
     monitor_cluster_health "$@"
-}
+    }
+    source "${SCRIPT_DIR}/../lib/run-with-log.sh"
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+    run_entrypoint main "$@"
 fi
 
 # ============================= Script Configuration ===========================

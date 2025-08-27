@@ -997,8 +997,11 @@ main() {
     log_message SUCCESS "Credential generation completed successfully"
 }
 
-# Execute main function
-main "$@"
+# Execute main function under standardized logging
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    source "${SCRIPT_DIR}/lib/run-with-log.sh" || true
+    run_entrypoint main "$@"
+fi
 
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

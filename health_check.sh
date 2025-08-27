@@ -543,11 +543,9 @@ main() {
     exit $exit_code
 }
 
-# Run main function if script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+    run_entrypoint main "$@"
 fi
-    
 
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -557,6 +555,9 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
     echo "ERROR: Failed to load error handling library" >&2
     exit 1
 }
+
+# Ensure run-with-log is available
+source "${SCRIPT_DIR}/lib/run-with-log.sh" || true
 
 # Setup standardized logging
 setup_standard_logging "health_check"

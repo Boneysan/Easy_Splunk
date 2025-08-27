@@ -6,6 +6,8 @@ AUTO_YES="${AUTO_YES:-0}"
 AUTO_CONTINUE="${AUTO_CONTINUE:-0}"   # try sg/newgrp to resume in same terminal
 PREFER_DOCKER="${PREFER_DOCKER:-1}"   # prefer Docker on Ubuntu/Debian/RHEL-like
 
+source "${SCRIPT_DIR}/lib/run-with-log.sh"
+
 # parse args
 for a in "$@"; do
   case "$a" in
@@ -150,4 +152,4 @@ main() {
   log OK "Phase-1 complete. Proceed with: ./verify-installation.sh"
 }
 
-main "$@"
+run_entrypoint main "$@"

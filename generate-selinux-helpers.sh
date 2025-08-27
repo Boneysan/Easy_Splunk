@@ -33,6 +33,11 @@ source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/security.sh"
 # shellcheck source=lib/platform-helpers.sh
 source "${SCRIPT_DIR}/lib/platform-helpers.sh"
+source "${SCRIPT_DIR}/lib/run-with-log.sh"
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  run_entrypoint main "$@"
+fi
 
 # --- Version Checks ------------------------------------------------------------
 if [[ "${PLATFORM_HELPERS_VERSION:-0.0.0}" < "1.0.0" ]]; then

@@ -361,6 +361,10 @@ main() {
   log_info "Checksum:   ${archive}.sha256"
   log_info "Transfer BOTH files to the target machine."
 }
+  if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    source "${SCRIPT_DIR}/lib/run-with-log.sh" || true
+    run_entrypoint main "$@"
+  fi
 
 main "$@"
 ```

@@ -150,4 +150,7 @@ main() {
   log OK "Phase-1 complete. Proceed with: ./verify-installation.sh"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  source "${SCRIPT_DIR}/lib/run-with-log.sh" || true
+  run_entrypoint main "$@"
+fi

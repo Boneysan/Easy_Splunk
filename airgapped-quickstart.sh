@@ -304,7 +304,10 @@ main() {
   log_info "Stop stack:  compose -f '${COMPOSE_FILE}' down"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  source "${SCRIPT_DIR}/lib/run-with-log.sh" || true
+  run_entrypoint main "$@"
+fi
 
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

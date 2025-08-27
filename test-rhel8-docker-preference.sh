@@ -75,6 +75,7 @@ test_compose_init_rhel8() {
     
     # Source the compose init library
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "${SCRIPT_DIR}/lib/run-with-log.sh"
     
     if source "${SCRIPT_DIR}/lib/compose-init.sh" 2>/dev/null; then
         echo "✅ lib/compose-init.sh loaded successfully"
@@ -168,4 +169,6 @@ main() {
     echo "   ./install-prerequisites.sh --runtime docker  # Explicit Docker choice"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    run_entrypoint main "$@"
+fi

@@ -41,6 +41,7 @@ source "${SCRIPT_DIR}/lib/error-handling.sh"
 source "${SCRIPT_DIR}/lib/security.sh"
 # shellcheck source=lib/monitoring.sh
 source "${SCRIPT_DIR}/lib/monitoring.sh"
+source "${SCRIPT_DIR}/lib/run-with-log.sh"
 
 # --- Version Checks ------------------------------------------------------------
 if [[ "${MONITORING_VERSION:-0.0.0}" < "1.0.0" ]]; then
@@ -260,7 +261,7 @@ EOF
   log_info "Secrets:    ${SECRETS_DIR}/grafana_admin_password.txt"
 }
 
-main "$@"
+run_entrypoint main "$@"
 
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

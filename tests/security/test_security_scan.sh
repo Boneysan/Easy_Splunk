@@ -181,5 +181,6 @@ main() {
 
 # Run tests if script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+    source "${SCRIPT_DIR}/../../lib/run-with-log.sh" || true
+    run_entrypoint main "$@"
 fi
