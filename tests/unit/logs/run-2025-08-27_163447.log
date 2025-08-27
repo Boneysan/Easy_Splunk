@@ -1,0 +1,17 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test_validation.sh
+Started: Wed Aug 27 16:34:47 MDT 2025
+PID: 100056
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+===============================================
+Easy_Splunk Execution Log
+Script: test_validation
+Started: Wed Aug 27 16:34:47 MDT 2025
+PID: 100056
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 16:34:47] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/tests/unit/logs/run-2025-08-27_163447.log

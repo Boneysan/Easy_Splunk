@@ -1,20 +1,3 @@
-
-
-# ============================= Script Configuration ===========================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Load standardized error handling first
-source "${SCRIPT_DIR}/lib/error-handling.sh" || {
-    echo "ERROR: Failed to load error handling library" >&2
-    exit 1
-}
-
-# Setup standardized logging
-setup_standard_logging "test_validation"
-
-# Set error handling
-set -euo pipefail
-```bash
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/unit/test_validation.sh
@@ -24,6 +7,7 @@ set -euo pipefail
 # Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, lib/validation.sh
 # Version: 1.0.0
 # ==============================================================================
+set -euo pipefail
 IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
@@ -36,6 +20,9 @@ source "${SCRIPT_DIR}/../../lib/error-handling.sh"
 source "${SCRIPT_DIR}/../../lib/security.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/../../lib/validation.sh"
+
+# Setup standardized logging for the test
+setup_standard_logging "test_validation"
 
 # Test counter and results
 TEST_COUNT=0
@@ -60,7 +47,7 @@ VALID_INPUTS=(
 )
 
 INVALID_INPUTS=(
-    "$(printf 'invalid\x00byte')"
+  "invalid_byte"
     "$(printf 'new\nline')"
     "dangerous;command"
     "../../etc/passwd"
