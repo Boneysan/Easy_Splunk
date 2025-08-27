@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  test-app:
+    ports:
+      - "8080:80"
+    networks:
+      - test-net
+
+networks:
+  test-net:
+    driver: bridge

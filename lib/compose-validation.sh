@@ -96,10 +96,13 @@ validate_compose_schema() {
     # Build compose command
     case "$COMPOSE_ENGINE" in
         "docker")
-            if [[ "$COMPOSE_ENGINE_VERSION" == *"v2"* ]] || [[ "$COMPOSE_ENGINE_VERSION" == *"Docker Compose version"* ]]; then
+            # Check if docker compose plugin is available
+            if command -v docker &>/dev/null && docker compose version &>/dev/null; then
                 compose_cmd="docker compose"
-            else
+            elif command -v docker-compose &>/dev/null; then
                 compose_cmd="docker-compose"
+            else
+                error_exit "No Docker Compose command found"
             fi
             ;;
         "podman")
