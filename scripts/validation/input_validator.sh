@@ -266,15 +266,12 @@ validate_hostname() {
 sanitize_config_value() {
     local value="$1"
     local sanitized
-    
-    # Remove dangerous shell metacharacters and control chars
-    sanitized=$(echo "$value" | sed -e 's/[;&|`$(){}]//g' \
-                                  -e 's/[\x00-\x1F\x7F]//g' \
-                                  -e 's/\\/\\\\/g' \
-                                  -e 's/"/\\"/g')
-    
+    # Portable removal of control characters and dangerous shell metacharacters.
+    # Use tr to strip control chars ([:cntrl:]) which is more portable than \x escapes
+    sanitized=$(printf '%s' "$value" | tr -d '[:cntrl:]' | sed -e 's/[;&|`$(){}]//g' -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+
     # Return sanitized value
-    echo "$sanitized"
+    printf '%s' "$sanitized"
 }
 
 # Validate port number
@@ -382,10 +379,8 @@ validate_input() {
 # Sanitize general input
 sanitize_input() {
     local input="$1"
-    echo "$input" | sed -e 's/[;&|`$(){}]//g' \
-                       -e 's/[\x00-\x1F\x7F]//g' \
-                       -e 's/\\/\\\\/g' \
-                       -e 's/"/\\"/g'
+    # Portable sanitization: strip control chars and remove/escape shell metacharacters
+    printf '%s' "$input" | tr -d '[:cntrl:]' | sed -e 's/[;&|`$(){}]//g' -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
 # SQL Injection Prevention

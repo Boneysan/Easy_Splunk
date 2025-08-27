@@ -24,6 +24,10 @@ source "${SCRIPT_DIR}/../../lib/validation.sh"
 # Setup standardized logging for the test
 setup_standard_logging "test_validation"
 
+# Ensure ERR trap runs in functions and subshells and log any failing command
+set -o errtrace
+trap 'echo "[ERR TRAP] rc=$? cmd=$BASH_COMMAND" >> "${LOG_FILE:-/tmp/test_validation_err.log}" 2>/dev/null || true' ERR
+
 # Test counter and results
 TEST_COUNT=0
 TEST_PASSED=0
@@ -70,14 +74,26 @@ PATH_TRAVERSAL_ATTEMPTS=(
 # Helper to run a test
 run_test() {
   local test_name="$1"; shift
-  ((TEST_COUNT++))
+  TEST_COUNT=$((TEST_COUNT + 1))
   log_info "Running test: ${test_name}"
-  if "$@"; then
-    log_success "Test passed: ${test_name}"
-    ((TEST_PASSED++))
+    # Debug: show the command we are about to invoke to help diagnose failures
+  log_debug "run_test: invoking command -> $*" || true
+    # Also write a low-level marker to the log file to help isolate early exits
+    if [[ -n "${LOG_FILE:-}" ]]; then
+      echo "DBG: run_test entering for '${test_name}' at $(date '+%s')" >> "${LOG_FILE}" 2>/dev/null || true
+    fi
+  # Disable errexit to capture the command's exit code without aborting the whole test run
+  set +e
+    # Execute the test command; capture its stdout/stderr to the log as well
+    ("$@") >> "${LOG_FILE}" 2>&1
+  local rc=$?
+  set -e
+  if [[ $rc -eq 0 ]]; then
+    log_success "Test passed: ${test_name} (rc=${rc})"
+  TEST_PASSED=$((TEST_PASSED + 1))
   else
-    log_error "Test failed: ${test_name}"
-    ((TEST_FAILED++))
+    log_error "Test failed: ${test_name} (rc=${rc})"
+  TEST_FAILED=$((TEST_FAILED + 1))
   fi
 }
 
@@ -137,9 +153,11 @@ test_input_validation() {
         local type="${test_cases[$input]}"
         if sanitized=$(validate_input "$input" "$type" "test_$type" 2>/dev/null); then
             ((test_passed++))
+      test_passed=$((test_passed + 1))
             log_success "Valid $type input test passed: $input -> $sanitized"
         else
             ((test_failed++))
+      test_failed=$((test_failed + 1))
             log_error "Valid $type input test failed: $input"
         fi
     done
@@ -148,9 +166,11 @@ test_input_validation() {
   for input in "${INVALID_INPUTS[@]}"; do
     if ! validate_input "$input" "raw" 2>/dev/null; then
       ((test_passed++))
+      test_passed=$((test_passed + 1))
       log_success "Invalid input test passed: blocked $input"
     else
       ((test_failed++))
+      test_failed=$((test_failed + 1))
       log_error "Invalid input test failed: accepted $input"
     fi
   done
@@ -167,9 +187,11 @@ test_sql_injection() {
   for attempt in "${SQL_INJECTION_ATTEMPTS[@]}"; do
     if ! validate_sql_input "$attempt" 2>/dev/null; then
       ((test_passed++))
+      test_passed=$((test_passed + 1))
       log_success "SQL injection test passed: blocked $attempt"
     else
       ((test_failed++))
+      test_failed=$((test_failed + 1))
       log_error "SQL injection test failed: accepted $attempt"
     fi
   done
@@ -179,9 +201,11 @@ test_sql_injection() {
   for input in "${valid_sql[@]}"; do
     if validate_sql_input "$input" 2>/dev/null; then
       ((test_passed++))
+      test_passed=$((test_passed + 1))
       log_success "Valid SQL input test passed: $input"
     else
       ((test_failed++))
+      test_failed=$((test_failed + 1))
       log_error "Valid SQL input test failed: $input"
     fi
   done
@@ -200,9 +224,11 @@ test_path_traversal() {
   for attempt in "${PATH_TRAVERSAL_ATTEMPTS[@]}"; do
     if ! validate_safe_path "$tmp/$attempt" "$tmp" 2>/dev/null; then
       ((test_passed++))
+      test_passed=$((test_passed + 1))
       log_success "Path traversal test passed: blocked $attempt"
     else
       ((test_failed++))
+      test_failed=$((test_failed + 1))
       log_error "Path traversal test failed: accepted $attempt"
     fi
   done
@@ -214,9 +240,11 @@ test_path_traversal() {
     touch "$tmp/$path"
     if validate_safe_path "$tmp/$path" "$tmp" 2>/dev/null; then
       ((test_passed++))
+      test_passed=$((test_passed + 1))
       log_success "Valid path test passed: $path"
     else
       ((test_failed++))
+      test_failed=$((test_failed + 1))
       log_error "Valid path test failed: $path"
     fi
   done
@@ -244,9 +272,11 @@ test_config_sanitization() {
     local result
     if result=$(sanitize_config_value "$input" 2>/dev/null) && [[ "$result" == "$expected" ]]; then
       ((test_passed++))
+      test_passed=$((test_passed + 1))
       log_success "Config sanitization test passed: $input -> $result"
     else
       ((test_failed++))
+      test_failed=$((test_failed + 1))
       log_error "Config sanitization test failed: $input -> $result (expected $expected)"
     fi
   done
@@ -267,6 +297,11 @@ run_test "Config sanitization" test_config_sanitization
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
-[[ ${TEST_FAILED} -eq 0 ]]
+# Explicit exit: return 0 if no failures, otherwise exit 1
+if [[ ${TEST_FAILED} -eq 0 ]]; then
+  exit 0
+else
+  exit 1
+fi
 ```
 

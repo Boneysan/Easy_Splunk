@@ -1,0 +1,95 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test_validation.sh
+Started: Wed Aug 27 16:52:01 MDT 2025
+PID: 104820
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+===============================================
+Easy_Splunk Execution Log
+Script: test_validation
+Started: Wed Aug 27 16:52:01 MDT 2025
+PID: 104820
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 16:52:01] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/tests/unit/logs/run-2025-08-27_165201.log
+DBG: run_test entering for 'System resources' at 2025-08-13 12:00:00 UTC
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] ✔ Memory check: 8192MB (>= 4096MB)[0m
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] ✔ CPU check: 4 cores (>= 2)[0m
+DBG: run_test entering for 'Disk space' at 2025-08-13 12:00:00 UTC
+[0;33m[2025-08-13 12:00:00 UTC] [WARN ] Cannot set permissions; test directory not found: /tmp/tmp.P8vCSGyUIU[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Insufficient disk space at /tmp/tmp.P8vCSGyUIU: have unknownGB, need 10GB[0m
+[ERR TRAP] rc=1 cmd=return 1
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] Performing security configuration audit...[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] PASS: Private key permissions secure[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] PASS: No certificates expiring within 30 days[0m
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] Security audit report written: /tmp/tmp.P8vCSGyUIU/security-audit.txt[0m
+DBG: run_test entering for 'Port free' at 2025-08-13 12:00:00 UTC
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] ✔ Port 8080 is available.[0m
+DBG: run_test entering for 'RF/SF validation' at 2025-08-13 12:00:00 UTC
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] ✔ RF/SF constraints satisfied (rf=2, sf=1, indexers=3)[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Replication factor (rf=4) cannot exceed indexer count (indexers=3).[0m
+DBG: run_test entering for 'Directory validation' at 2025-08-13 12:00:00 UTC
+[0;33m[2025-08-13 12:00:00 UTC] [WARN ] Cannot set permissions; test directory not found: /tmp/tmp.p7MKbBc9sO[0m
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] ✔ test dir directory: /tmp/tmp.p7MKbBc9sO[0m
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] Performing security configuration audit...[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] PASS: Private key permissions secure[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] PASS: No certificates expiring within 30 days[0m
+[0;34m[2025-08-13 12:00:00 UTC] [INFO ] Security audit report written: /tmp/tmp.p7MKbBc9sO/security-audit.txt[0m
+DBG: run_test entering for 'Input validation' at 2025-08-13 12:00:00 UTC
+[ERR TRAP] rc=1 cmd=((test_failed++))
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid bool input test failed: true[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid size input test failed: 10GB[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid bool input test failed: 1[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid uint input test failed: 0[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid raw input test failed: test123[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid float input test failed: 3.14[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid bool input test failed: false[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid int input test failed: 123[0m
+[ERR TRAP] rc=1 cmd=((test_passed++))
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Invalid input test passed: blocked invalid_byte[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Invalid input test passed: blocked new
+line[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Invalid input test passed: blocked dangerous;command[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Invalid input test passed: blocked ../../etc/passwd[0m
+[ERR TRAP] rc=1 cmd=return $((test_failed > 0))
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'SQL injection prevention' at 2025-08-13 12:00:00 UTC
+[ERR TRAP] rc=1 cmd=((test_passed++))
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] SQL injection test passed: blocked ' OR '1'='1[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] SQL injection test passed: blocked '; DROP TABLE users; --[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] SQL injection test passed: blocked UNION SELECT * FROM passwords[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] SQL injection test passed: blocked /**/UNION/**/SELECT/**/[0m
+[ERR TRAP] rc=1 cmd=((test_failed++))
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid SQL input test failed: username[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid SQL input test failed: email[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid SQL input test failed: first_name[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Valid SQL input test failed: last_name[0m
+[ERR TRAP] rc=1 cmd=return $((test_failed > 0))
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'Path traversal protection' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [ERROR] /tmp/tmp.d0WZx6xrr3 contains invalid characters (..)
+[ERR TRAP] rc=1 cmd=((test_passed++))
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Path traversal test passed: blocked ../../../etc/passwd[0m
+[2025-08-13 12:00:00 UTC] [ERROR] /tmp/tmp.d0WZx6xrr3 contains invalid characters (..)
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Path traversal test passed: blocked test/../../../../etc/shadow[0m
+[ERR TRAP] rc=1 cmd=((test_failed++))
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Path traversal test failed: accepted /dev/null[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Path traversal test failed: accepted file://localhost/etc/hosts[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Valid path test passed: file.txt[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Valid path test passed: dir/file.txt[0m
+[0;32m[2025-08-13 12:00:00 UTC] [OK   ] Valid path test passed: dir/subdir/file.txt[0m
+[ERR TRAP] rc=1 cmd=return $((test_failed > 0))
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'Config sanitization' at 2025-08-13 12:00:00 UTC
+[ERR TRAP] rc=1 cmd=((test_failed++))
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has`backtick ->  (expected hasbacktick)[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has space ->  (expected has space)[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has;semicolon ->  (expected hassemicolon)[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has"quote ->  (expected has\"quote)[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has$dollar ->  (expected hasdollar)[0m
+[0;31m[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: normal_value ->  (expected normal_value)[0m
+[ERR TRAP] rc=1 cmd=return $((test_failed > 0))
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1

@@ -84,19 +84,56 @@ fi
 if ! type validate_safe_path &>/dev/null; then
   validate_safe_path() {
     local path="$1"
-    local description="${2:-path}"
-    
-    # Basic path validation
+    local base_dir="${2:-${SCRIPT_DIR:-.}}"
+
     if [[ -z "$path" ]]; then
-      log_message ERROR "$description cannot be empty"
+      log_error "Path cannot be empty"
       return 1
     fi
-    
-    if [[ "$path" == *".."* ]]; then
-      log_message ERROR "$description contains invalid characters (..)"
+
+    # Reject obvious URI schemes (file://, http://, etc.)
+    if [[ "$path" == *://* ]]; then
+      log_error "Path appears to be a URI and is not allowed: $path"
       return 1
     fi
-    
+
+    # Normalize path using realpath if available for robustness
+    local normalized
+    if command -v realpath >/dev/null 2>&1; then
+      normalized="$(realpath -m "$path" 2>/dev/null)" || {
+        log_error "Invalid path: $path"
+        return 1
+      }
+    else
+      normalized="$(cd "$(dirname "$path" 2>/dev/null)" && pwd)/$(basename "$path")" || {
+        log_error "Invalid path: $path"
+        return 1
+      }
+    fi
+
+    # Ensure the path is within the allowed base directory
+    if [[ "$normalized" != "$base_dir"* ]]; then
+      log_error "Path is outside allowed directory: $path"
+      return 1
+    fi
+
+    # Reject whitespace or shell metacharacters
+    case "$path" in
+      *[[:space:]]*)
+        log_error "Path contains whitespace: $path"
+        return 1
+        ;;
+      *[\\\$\'\"]*)
+        log_error "Path contains shell metacharacters: $path"
+        return 1
+        ;;
+      /dev/*|/proc/*|/sys/*)
+        log_error "Path points to system directory: $path"
+        return 1
+        ;;
+    esac
+
+    echo "$normalized"
     return 0
   }
 fi
@@ -133,6 +170,13 @@ fi
 if ! command -v log_info >/dev/null 2>&1 || ! command -v die >/dev/null 2>&1; then
   echo "FATAL: lib/core.sh must be sourced before lib/validation.sh" >&2
   exit 1
+fi
+
+# Make helper validation scripts available (input_validator contains
+# validate_input, sanitize_input, sanitize_config_value implementations)
+if [[ -f "$(dirname "${BASH_SOURCE[0]}")/../scripts/validation/input_validator.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "$(dirname "${BASH_SOURCE[0]}")/../scripts/validation/input_validator.sh" || true
 fi
 
 # ---- Tunables ------------------------------------------------------------------
@@ -327,6 +371,27 @@ validate_container_network() {
 # ==============================================================================
 # Input / path validation
 # ==============================================================================
+
+# If sanitize_config_value is not defined elsewhere, delegate to scripts/validation/input_validator.sh
+if ! type sanitize_config_value &>/dev/null; then
+  sanitize_config_value() {
+    local val="$1"
+    # Prefer internal implementation if available
+    if [[ -f "${SCRIPT_DIR:-$(pwd)}/scripts/validation/input_validator.sh" ]]; then
+      # shellcheck disable=SC2086
+      source "${SCRIPT_DIR:-$(pwd)}/scripts/validation/input_validator.sh" >/dev/null 2>&1 || true
+    fi
+    if type sanitize_config_value &>/dev/null; then
+      # Call the now-available implementation
+      sanitize_config_value "$val"
+      return 0
+    else
+      # Fallback: basic passthrough
+      printf '%s' "$val"
+      return 0
+    fi
+  }
+fi
 
 # is_dir <path>
 is_dir() { [[ -n "${1-}" && -d "$1" ]]; }

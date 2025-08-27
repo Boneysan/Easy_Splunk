@@ -1,0 +1,1155 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test_validation.sh
+Started: Wed Aug 27 16:47:00 MDT 2025
+PID: 103150
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+===============================================
+Easy_Splunk Execution Log
+Script: test_validation
+Started: Wed Aug 27 16:47:00 MDT 2025
+PID: 103150
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 16:47:00] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/tests/unit/logs/run-2025-08-27_164700.log
+DBG: run_test entering for 'System resources' at 2025-08-13 12:00:00 UTC
++ test_system_resources
++ validate_system_resources 4096 2
++ local min_ram_mb=4096
++ local min_cpu=2
++ local mem cpu ok=0
+++ get_total_memory
+++ echo 8192
++ mem=8192
+++ get_cpu_cores
+++ echo 4
++ cpu=4
++ is_number 8192
++ [[ 8192 =~ ^[+-]?[0-9]+$ ]]
++ ((  mem <= 0  ))
++ ((  mem < min_ram_mb  ))
++ log_info '✔ Memory check: 8192MB (>= 4096MB)'
++ _log '' INFO '✔ Memory check: 8192MB (>= 4096MB)'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=✔ Memory check: 8192MB (>= 4096MB)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO '✔ Memory check: 8192MB (>= 4096MB)'
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ Memory check: 8192MB (>= 4096MB)
++ is_number 4
++ [[ 4 =~ ^[+-]?[0-9]+$ ]]
++ ((  cpu <= 0  ))
++ ((  cpu < min_cpu  ))
++ log_info '✔ CPU check: 4 cores (>= 2)'
++ _log '' INFO '✔ CPU check: 4 cores (>= 2)'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=✔ CPU check: 4 cores (>= 2)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO '✔ CPU check: 4 cores (>= 2)'
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ CPU check: 4 cores (>= 2)
++ ((  ok == 0  ))
+DBG: run_test entering for 'Disk space' at 2025-08-13 12:00:00 UTC
++ test_disk_space
+++ mktemp -d
++ local tmp=/tmp/tmp.Aq3V6ioBHX
++ register_cleanup 'rm -rf '\''/tmp/tmp.Aq3V6ioBHX'\'''
++ local 'cmd=rm -rf '\''/tmp/tmp.Aq3V6ioBHX'\'''
++ [[ -z rm -rf '/tmp/tmp.Aq3V6ioBHX' ]]
++ CLEANUP_COMMANDS_STR+=("$cmd")
++ _register_trap_once
++ [[ false == \f\a\l\s\e ]]
++ add_trap _core_run_cleanup_once EXIT INT TERM
++ local handler=_core_run_cleanup_once
++ shift
++ local sig
++ for sig in "$@"
++ local current
+++ trap -p EXIT
+++ awk '-F'\''' '{print $2}'
++ current=cleanup
++ [[ -n cleanup ]]
++ [[ cleanup != \_\c\o\r\e\_\r\u\n\_\c\l\e\a\n\u\p\_\o\n\c\e ]]
++ trap -- 'cleanup; _core_run_cleanup_once' EXIT
++ for sig in "$@"
++ local current
+++ trap -p INT
+++ awk '-F'\''' '{print $2}'
++ current=
++ [[ -n '' ]]
++ trap -- _core_run_cleanup_once INT
++ for sig in "$@"
++ local current
+++ trap -p TERM
+++ awk '-F'\''' '{print $2}'
++ current=
++ [[ -n '' ]]
++ trap -- _core_run_cleanup_once TERM
++ CLEANUP_REGISTERED=true
++ harden_file_permissions /tmp/tmp.Aq3V6ioBHX 700 'test directory'
++ local file=/tmp/tmp.Aq3V6ioBHX
++ local mode=700
++ local 'description=test directory'
++ [[ ! -f /tmp/tmp.Aq3V6ioBHX ]]
++ log_warn 'Cannot set permissions; test directory not found: /tmp/tmp.Aq3V6ioBHX'
++ _log '' WARN 'Cannot set permissions; test directory not found: /tmp/tmp.Aq3V6ioBHX'
++ local color=
++ shift
++ local level=WARN
++ shift
++ local 'message=Cannot set permissions; test directory not found: /tmp/tmp.Aq3V6ioBHX'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' WARN 'Cannot set permissions; test directory not found: /tmp/tmp.Aq3V6ioBHX'
+[2025-08-13 12:00:00 UTC] [WARN ] Cannot set permissions; test directory not found: /tmp/tmp.Aq3V6ioBHX
++ return 1
++ true
++ validate_disk_space /tmp/tmp.Aq3V6ioBHX 10
++ local path=/tmp/tmp.Aq3V6ioBHX min_gb=10
++ [[ ! -d /tmp/tmp.Aq3V6ioBHX ]]
++ local available_gb=
++ have_cmd df
++ command -v df
++ df -P -k /tmp/tmp.Aq3V6ioBHX
+++ df -P -k /tmp/tmp.Aq3V6ioBHX
+++ awk 'NR==2 {printf "%d", $4/1024/1024}'
+++ echo 100GB
+++ return 0
++ available_gb=
++ is_number ''
++ [[ '' =~ ^[+-]?[0-9]+$ ]]
++ log_error 'Insufficient disk space at /tmp/tmp.Aq3V6ioBHX: have unknownGB, need 10GB'
++ _log '' ERROR 'Insufficient disk space at /tmp/tmp.Aq3V6ioBHX: have unknownGB, need 10GB'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Insufficient disk space at /tmp/tmp.Aq3V6ioBHX: have unknownGB, need 10GB'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Insufficient disk space at /tmp/tmp.Aq3V6ioBHX: have unknownGB, need 10GB'
+[2025-08-13 12:00:00 UTC] [ERROR] Insufficient disk space at /tmp/tmp.Aq3V6ioBHX: have unknownGB, need 10GB
++ return 1
+++ echo '[ERR TRAP] rc=1 cmd=return 1'
+[ERR TRAP] rc=1 cmd=return 1
++ audit_security_configuration /tmp/tmp.Aq3V6ioBHX/security-audit.txt
++ local output_file=/tmp/tmp.Aq3V6ioBHX/security-audit.txt
++ audit_results=()
++ local audit_results
++ log_info 'Performing security configuration audit...'
++ _log '' INFO 'Performing security configuration audit...'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=Performing security configuration audit...'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO 'Performing security configuration audit...'
+[2025-08-13 12:00:00 UTC] [INFO ] Performing security configuration audit...
++ insecure_files=()
++ local insecure_files
++ [[ -d secrets/tls ]]
++ [[ 0 -gt 0 ]]
++ audit_results+=("PASS: Private key permissions secure")
++ expiring_certs=()
++ local expiring_certs
++ [[ -d secrets/tls ]]
++ [[ 0 -gt 0 ]]
++ audit_results+=("PASS: No certificates expiring within 30 days")
++ [[ -d secrets/splunk ]]
++ [[ -n '' ]]
++ [[ -f /home/boneysan/.netrc ]]
++ local line
++ for line in "${audit_results[@]}"
++ case "${line}" in
++ log_success 'PASS: Private key permissions secure'
++ _log '' OK 'PASS: Private key permissions secure'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=PASS: Private key permissions secure'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'PASS: Private key permissions secure'
+[2025-08-13 12:00:00 UTC] [OK   ] PASS: Private key permissions secure
++ for line in "${audit_results[@]}"
++ case "${line}" in
++ log_success 'PASS: No certificates expiring within 30 days'
++ _log '' OK 'PASS: No certificates expiring within 30 days'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=PASS: No certificates expiring within 30 days'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'PASS: No certificates expiring within 30 days'
+[2025-08-13 12:00:00 UTC] [OK   ] PASS: No certificates expiring within 30 days
++ [[ -n /tmp/tmp.Aq3V6ioBHX/security-audit.txt ]]
+++ date
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ echo '# Security Audit Report - 2025-08-13 12:00:00 UTC'
++ echo '# Generated by lib/security.sh'
++ echo
++ for line in "${audit_results[@]}"
++ echo 'PASS: Private key permissions secure'
++ for line in "${audit_results[@]}"
++ echo 'PASS: No certificates expiring within 30 days'
++ log_info 'Security audit report written: /tmp/tmp.Aq3V6ioBHX/security-audit.txt'
++ _log '' INFO 'Security audit report written: /tmp/tmp.Aq3V6ioBHX/security-audit.txt'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=Security audit report written: /tmp/tmp.Aq3V6ioBHX/security-audit.txt'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO 'Security audit report written: /tmp/tmp.Aq3V6ioBHX/security-audit.txt'
+[2025-08-13 12:00:00 UTC] [INFO ] Security audit report written: /tmp/tmp.Aq3V6ioBHX/security-audit.txt
++ for line in "${audit_results[@]}"
++ [[ PASS: Private key permissions secure == FAIL:* ]]
++ for line in "${audit_results[@]}"
++ [[ PASS: No certificates expiring within 30 days == FAIL:* ]]
++ return 0
+++ cleanup
+++ local exit_code=0
+++ exit 0
+DBG: run_test entering for 'Port free' at 2025-08-13 12:00:00 UTC
++ test_port_free
++ validate_port_free 8080
++ local port=8080 host=0.0.0.0
++ is_number 8080
++ [[ 8080 =~ ^[+-]?[0-9]+$ ]]
++ ((  port < 1 || port > 65535  ))
++ have_cmd ss
++ command -v ss
++ ss -ltnH
++ awk -v 'p=:8080$' '$4 ~ p {found=1} END{exit !found}'
++ log_info '✔ Port 8080 is available.'
++ _log '' INFO '✔ Port 8080 is available.'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=✔ Port 8080 is available.'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO '✔ Port 8080 is available.'
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ Port 8080 is available.
++ return 0
+DBG: run_test entering for 'RF/SF validation' at 2025-08-13 12:00:00 UTC
++ test_rf_sf
++ validate_rf_sf 2 1 3
++ local rf=2 sf=1 ix=3
++ for n in "${rf}" "${sf}" "${ix}"
++ is_number 2
++ [[ 2 =~ ^[+-]?[0-9]+$ ]]
++ ((  n < 1  ))
++ for n in "${rf}" "${sf}" "${ix}"
++ is_number 1
++ [[ 1 =~ ^[+-]?[0-9]+$ ]]
++ ((  n < 1  ))
++ for n in "${rf}" "${sf}" "${ix}"
++ is_number 3
++ [[ 3 =~ ^[+-]?[0-9]+$ ]]
++ ((  n < 1  ))
++ ((  rf > ix  ))
++ ((  sf > rf  ))
++ log_info '✔ RF/SF constraints satisfied (rf=2, sf=1, indexers=3)'
++ _log '' INFO '✔ RF/SF constraints satisfied (rf=2, sf=1, indexers=3)'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=✔ RF/SF constraints satisfied (rf=2, sf=1, indexers=3)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO '✔ RF/SF constraints satisfied (rf=2, sf=1, indexers=3)'
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ RF/SF constraints satisfied (rf=2, sf=1, indexers=3)
++ return 0
++ validate_rf_sf 4 1 3
++ local rf=4 sf=1 ix=3
++ for n in "${rf}" "${sf}" "${ix}"
++ is_number 4
++ [[ 4 =~ ^[+-]?[0-9]+$ ]]
++ ((  n < 1  ))
++ for n in "${rf}" "${sf}" "${ix}"
++ is_number 1
++ [[ 1 =~ ^[+-]?[0-9]+$ ]]
++ ((  n < 1  ))
++ for n in "${rf}" "${sf}" "${ix}"
++ is_number 3
++ [[ 3 =~ ^[+-]?[0-9]+$ ]]
++ ((  n < 1  ))
++ ((  rf > ix  ))
++ log_error 'Replication factor (rf=4) cannot exceed indexer count (indexers=3).'
++ _log '' ERROR 'Replication factor (rf=4) cannot exceed indexer count (indexers=3).'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Replication factor (rf=4) cannot exceed indexer count (indexers=3).'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Replication factor (rf=4) cannot exceed indexer count (indexers=3).'
+[2025-08-13 12:00:00 UTC] [ERROR] Replication factor (rf=4) cannot exceed indexer count (indexers=3).
++ return 1
++ return 0
+DBG: run_test entering for 'Directory validation' at 2025-08-13 12:00:00 UTC
++ test_dir_validation
+++ mktemp -d
++ local tmp=/tmp/tmp.X1uWjZGWmV
++ register_cleanup 'rm -rf '\''/tmp/tmp.X1uWjZGWmV'\'''
++ local 'cmd=rm -rf '\''/tmp/tmp.X1uWjZGWmV'\'''
++ [[ -z rm -rf '/tmp/tmp.X1uWjZGWmV' ]]
++ CLEANUP_COMMANDS_STR+=("$cmd")
++ _register_trap_once
++ [[ false == \f\a\l\s\e ]]
++ add_trap _core_run_cleanup_once EXIT INT TERM
++ local handler=_core_run_cleanup_once
++ shift
++ local sig
++ for sig in "$@"
++ local current
+++ trap -p EXIT
+++ awk '-F'\''' '{print $2}'
++ current=cleanup
++ [[ -n cleanup ]]
++ [[ cleanup != \_\c\o\r\e\_\r\u\n\_\c\l\e\a\n\u\p\_\o\n\c\e ]]
++ trap -- 'cleanup; _core_run_cleanup_once' EXIT
++ for sig in "$@"
++ local current
+++ trap -p INT
+++ awk '-F'\''' '{print $2}'
++ current=
++ [[ -n '' ]]
++ trap -- _core_run_cleanup_once INT
++ for sig in "$@"
++ local current
+++ trap -p TERM
+++ awk '-F'\''' '{print $2}'
++ current=
++ [[ -n '' ]]
++ trap -- _core_run_cleanup_once TERM
++ CLEANUP_REGISTERED=true
++ harden_file_permissions /tmp/tmp.X1uWjZGWmV 700 'test directory'
++ local file=/tmp/tmp.X1uWjZGWmV
++ local mode=700
++ local 'description=test directory'
++ [[ ! -f /tmp/tmp.X1uWjZGWmV ]]
++ log_warn 'Cannot set permissions; test directory not found: /tmp/tmp.X1uWjZGWmV'
++ _log '' WARN 'Cannot set permissions; test directory not found: /tmp/tmp.X1uWjZGWmV'
++ local color=
++ shift
++ local level=WARN
++ shift
++ local 'message=Cannot set permissions; test directory not found: /tmp/tmp.X1uWjZGWmV'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' WARN 'Cannot set permissions; test directory not found: /tmp/tmp.X1uWjZGWmV'
+[2025-08-13 12:00:00 UTC] [WARN ] Cannot set permissions; test directory not found: /tmp/tmp.X1uWjZGWmV
++ return 1
++ true
++ validate_dir_var_set /tmp/tmp.X1uWjZGWmV 'test dir'
++ local value=/tmp/tmp.X1uWjZGWmV 'purpose=test dir'
++ is_empty /tmp/tmp.X1uWjZGWmV
++ [[ -z /tmp/tmp.X1uWjZGWmV ]]
++ [[ ! -d /tmp/tmp.X1uWjZGWmV ]]
++ log_info '✔ test dir directory: /tmp/tmp.X1uWjZGWmV'
++ _log '' INFO '✔ test dir directory: /tmp/tmp.X1uWjZGWmV'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=✔ test dir directory: /tmp/tmp.X1uWjZGWmV'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO '✔ test dir directory: /tmp/tmp.X1uWjZGWmV'
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ test dir directory: /tmp/tmp.X1uWjZGWmV
++ return 0
++ audit_security_configuration /tmp/tmp.X1uWjZGWmV/security-audit.txt
++ local output_file=/tmp/tmp.X1uWjZGWmV/security-audit.txt
++ audit_results=()
++ local audit_results
++ log_info 'Performing security configuration audit...'
++ _log '' INFO 'Performing security configuration audit...'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=Performing security configuration audit...'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO 'Performing security configuration audit...'
+[2025-08-13 12:00:00 UTC] [INFO ] Performing security configuration audit...
++ insecure_files=()
++ local insecure_files
++ [[ -d secrets/tls ]]
++ [[ 0 -gt 0 ]]
++ audit_results+=("PASS: Private key permissions secure")
++ expiring_certs=()
++ local expiring_certs
++ [[ -d secrets/tls ]]
++ [[ 0 -gt 0 ]]
++ audit_results+=("PASS: No certificates expiring within 30 days")
++ [[ -d secrets/splunk ]]
++ [[ -n '' ]]
++ [[ -f /home/boneysan/.netrc ]]
++ local line
++ for line in "${audit_results[@]}"
++ case "${line}" in
++ log_success 'PASS: Private key permissions secure'
++ _log '' OK 'PASS: Private key permissions secure'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=PASS: Private key permissions secure'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'PASS: Private key permissions secure'
+[2025-08-13 12:00:00 UTC] [OK   ] PASS: Private key permissions secure
++ for line in "${audit_results[@]}"
++ case "${line}" in
++ log_success 'PASS: No certificates expiring within 30 days'
++ _log '' OK 'PASS: No certificates expiring within 30 days'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=PASS: No certificates expiring within 30 days'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'PASS: No certificates expiring within 30 days'
+[2025-08-13 12:00:00 UTC] [OK   ] PASS: No certificates expiring within 30 days
++ [[ -n /tmp/tmp.X1uWjZGWmV/security-audit.txt ]]
+++ date
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ echo '# Security Audit Report - 2025-08-13 12:00:00 UTC'
++ echo '# Generated by lib/security.sh'
++ echo
++ for line in "${audit_results[@]}"
++ echo 'PASS: Private key permissions secure'
++ for line in "${audit_results[@]}"
++ echo 'PASS: No certificates expiring within 30 days'
++ log_info 'Security audit report written: /tmp/tmp.X1uWjZGWmV/security-audit.txt'
++ _log '' INFO 'Security audit report written: /tmp/tmp.X1uWjZGWmV/security-audit.txt'
++ local color=
++ shift
++ local level=INFO
++ shift
++ local 'message=Security audit report written: /tmp/tmp.X1uWjZGWmV/security-audit.txt'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' INFO 'Security audit report written: /tmp/tmp.X1uWjZGWmV/security-audit.txt'
+[2025-08-13 12:00:00 UTC] [INFO ] Security audit report written: /tmp/tmp.X1uWjZGWmV/security-audit.txt
++ for line in "${audit_results[@]}"
++ [[ PASS: Private key permissions secure == FAIL:* ]]
++ for line in "${audit_results[@]}"
++ [[ PASS: No certificates expiring within 30 days == FAIL:* ]]
++ return 0
+++ cleanup
+++ local exit_code=0
+++ exit 0
+DBG: run_test entering for 'Input validation' at 2025-08-13 12:00:00 UTC
++ test_input_validation
++ local test_passed=0
++ local test_failed=0
++ test_cases=(['123']='int' ['0']='uint' ['3.14']='float' ['true']='bool' ['false']='bool' ['1']='bool' ['10GB']='size' ['test123']='raw')
++ local -A test_cases
++ for input in "${!test_cases[@]}"
++ local type=bool
+++ validate_input true bool test_bool
++ sanitized=
++ (( test_failed++ ))
+++ echo '[ERR TRAP] rc=1 cmd=((test_failed++))'
+[ERR TRAP] rc=1 cmd=((test_failed++))
++ test_failed=2
++ log_error 'Valid bool input test failed: true'
++ _log '' ERROR 'Valid bool input test failed: true'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid bool input test failed: true'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid bool input test failed: true'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid bool input test failed: true
++ for input in "${!test_cases[@]}"
++ local type=size
+++ validate_input 10GB size test_size
++ sanitized=
++ (( test_failed++ ))
++ test_failed=4
++ log_error 'Valid size input test failed: 10GB'
++ _log '' ERROR 'Valid size input test failed: 10GB'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid size input test failed: 10GB'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid size input test failed: 10GB'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid size input test failed: 10GB
++ for input in "${!test_cases[@]}"
++ local type=bool
+++ validate_input 1 bool test_bool
++ sanitized=
++ (( test_failed++ ))
++ test_failed=6
++ log_error 'Valid bool input test failed: 1'
++ _log '' ERROR 'Valid bool input test failed: 1'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid bool input test failed: 1'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid bool input test failed: 1'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid bool input test failed: 1
++ for input in "${!test_cases[@]}"
++ local type=uint
+++ validate_input 0 uint test_uint
++ sanitized=
++ (( test_failed++ ))
++ test_failed=8
++ log_error 'Valid uint input test failed: 0'
++ _log '' ERROR 'Valid uint input test failed: 0'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid uint input test failed: 0'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid uint input test failed: 0'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid uint input test failed: 0
++ for input in "${!test_cases[@]}"
++ local type=raw
+++ validate_input test123 raw test_raw
++ sanitized=
++ (( test_failed++ ))
++ test_failed=10
++ log_error 'Valid raw input test failed: test123'
++ _log '' ERROR 'Valid raw input test failed: test123'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid raw input test failed: test123'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid raw input test failed: test123'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid raw input test failed: test123
++ for input in "${!test_cases[@]}"
++ local type=float
+++ validate_input 3.14 float test_float
++ sanitized=
++ (( test_failed++ ))
++ test_failed=12
++ log_error 'Valid float input test failed: 3.14'
++ _log '' ERROR 'Valid float input test failed: 3.14'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid float input test failed: 3.14'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid float input test failed: 3.14'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid float input test failed: 3.14
++ for input in "${!test_cases[@]}"
++ local type=bool
+++ validate_input false bool test_bool
++ sanitized=
++ (( test_failed++ ))
++ test_failed=14
++ log_error 'Valid bool input test failed: false'
++ _log '' ERROR 'Valid bool input test failed: false'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid bool input test failed: false'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid bool input test failed: false'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid bool input test failed: false
++ for input in "${!test_cases[@]}"
++ local type=int
+++ validate_input 123 int test_int
++ sanitized=
++ (( test_failed++ ))
++ test_failed=16
++ log_error 'Valid int input test failed: 123'
++ _log '' ERROR 'Valid int input test failed: 123'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid int input test failed: 123'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid int input test failed: 123'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid int input test failed: 123
++ for input in "${INVALID_INPUTS[@]}"
++ validate_input invalid_byte raw
++ (( test_passed++ ))
+++ echo '[ERR TRAP] rc=1 cmd=((test_passed++))'
+[ERR TRAP] rc=1 cmd=((test_passed++))
++ test_passed=2
++ log_success 'Invalid input test passed: blocked invalid_byte'
++ _log '' OK 'Invalid input test passed: blocked invalid_byte'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Invalid input test passed: blocked invalid_byte'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Invalid input test passed: blocked invalid_byte'
+[2025-08-13 12:00:00 UTC] [OK   ] Invalid input test passed: blocked invalid_byte
++ for input in "${INVALID_INPUTS[@]}"
++ validate_input 'new
+line' raw
++ (( test_passed++ ))
++ test_passed=4
++ log_success 'Invalid input test passed: blocked new
+line'
++ _log '' OK 'Invalid input test passed: blocked new
+line'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Invalid input test passed: blocked new
+line'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Invalid input test passed: blocked new
+line'
+[2025-08-13 12:00:00 UTC] [OK   ] Invalid input test passed: blocked new
+line
++ for input in "${INVALID_INPUTS[@]}"
++ validate_input 'dangerous;command' raw
++ (( test_passed++ ))
++ test_passed=6
++ log_success 'Invalid input test passed: blocked dangerous;command'
++ _log '' OK 'Invalid input test passed: blocked dangerous;command'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Invalid input test passed: blocked dangerous;command'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Invalid input test passed: blocked dangerous;command'
+[2025-08-13 12:00:00 UTC] [OK   ] Invalid input test passed: blocked dangerous;command
++ for input in "${INVALID_INPUTS[@]}"
++ validate_input ../../etc/passwd raw
++ (( test_passed++ ))
++ test_passed=8
++ log_success 'Invalid input test passed: blocked ../../etc/passwd'
++ _log '' OK 'Invalid input test passed: blocked ../../etc/passwd'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Invalid input test passed: blocked ../../etc/passwd'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Invalid input test passed: blocked ../../etc/passwd'
+[2025-08-13 12:00:00 UTC] [OK   ] Invalid input test passed: blocked ../../etc/passwd
++ return 1
+++ echo '[ERR TRAP] rc=1 cmd=return $((test_failed > 0))'
+[ERR TRAP] rc=1 cmd=return $((test_failed > 0))
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'SQL injection prevention' at 2025-08-13 12:00:00 UTC
++ test_sql_injection
++ local test_passed=0
++ local test_failed=0
++ for attempt in "${SQL_INJECTION_ATTEMPTS[@]}"
++ validate_sql_input ''\'' OR '\''1'\''='\''1'
++ (( test_passed++ ))
+++ echo '[ERR TRAP] rc=1 cmd=((test_passed++))'
+[ERR TRAP] rc=1 cmd=((test_passed++))
++ test_passed=2
++ log_success 'SQL injection test passed: blocked '\'' OR '\''1'\''='\''1'
++ _log '' OK 'SQL injection test passed: blocked '\'' OR '\''1'\''='\''1'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=SQL injection test passed: blocked '\'' OR '\''1'\''='\''1'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'SQL injection test passed: blocked '\'' OR '\''1'\''='\''1'
+[2025-08-13 12:00:00 UTC] [OK   ] SQL injection test passed: blocked ' OR '1'='1
++ for attempt in "${SQL_INJECTION_ATTEMPTS[@]}"
++ validate_sql_input ''\''; DROP TABLE users; --'
++ (( test_passed++ ))
++ test_passed=4
++ log_success 'SQL injection test passed: blocked '\''; DROP TABLE users; --'
++ _log '' OK 'SQL injection test passed: blocked '\''; DROP TABLE users; --'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=SQL injection test passed: blocked '\''; DROP TABLE users; --'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'SQL injection test passed: blocked '\''; DROP TABLE users; --'
+[2025-08-13 12:00:00 UTC] [OK   ] SQL injection test passed: blocked '; DROP TABLE users; --
++ for attempt in "${SQL_INJECTION_ATTEMPTS[@]}"
++ validate_sql_input 'UNION SELECT * FROM passwords'
++ (( test_passed++ ))
++ test_passed=6
++ log_success 'SQL injection test passed: blocked UNION SELECT * FROM passwords'
++ _log '' OK 'SQL injection test passed: blocked UNION SELECT * FROM passwords'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=SQL injection test passed: blocked UNION SELECT * FROM passwords'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'SQL injection test passed: blocked UNION SELECT * FROM passwords'
+[2025-08-13 12:00:00 UTC] [OK   ] SQL injection test passed: blocked UNION SELECT * FROM passwords
++ for attempt in "${SQL_INJECTION_ATTEMPTS[@]}"
++ validate_sql_input '/**/UNION/**/SELECT/**/'
++ (( test_passed++ ))
++ test_passed=8
++ log_success 'SQL injection test passed: blocked /**/UNION/**/SELECT/**/'
++ _log '' OK 'SQL injection test passed: blocked /**/UNION/**/SELECT/**/'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=SQL injection test passed: blocked /**/UNION/**/SELECT/**/'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'SQL injection test passed: blocked /**/UNION/**/SELECT/**/'
+[2025-08-13 12:00:00 UTC] [OK   ] SQL injection test passed: blocked /**/UNION/**/SELECT/**/
++ valid_sql=('username' 'email' 'first_name' 'last_name')
++ local valid_sql
++ for input in "${valid_sql[@]}"
++ validate_sql_input username
++ (( test_failed++ ))
+++ echo '[ERR TRAP] rc=1 cmd=((test_failed++))'
+[ERR TRAP] rc=1 cmd=((test_failed++))
++ test_failed=2
++ log_error 'Valid SQL input test failed: username'
++ _log '' ERROR 'Valid SQL input test failed: username'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid SQL input test failed: username'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid SQL input test failed: username'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid SQL input test failed: username
++ for input in "${valid_sql[@]}"
++ validate_sql_input email
++ (( test_failed++ ))
++ test_failed=4
++ log_error 'Valid SQL input test failed: email'
++ _log '' ERROR 'Valid SQL input test failed: email'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid SQL input test failed: email'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid SQL input test failed: email'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid SQL input test failed: email
++ for input in "${valid_sql[@]}"
++ validate_sql_input first_name
++ (( test_failed++ ))
++ test_failed=6
++ log_error 'Valid SQL input test failed: first_name'
++ _log '' ERROR 'Valid SQL input test failed: first_name'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid SQL input test failed: first_name'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid SQL input test failed: first_name'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid SQL input test failed: first_name
++ for input in "${valid_sql[@]}"
++ validate_sql_input last_name
++ (( test_failed++ ))
++ test_failed=8
++ log_error 'Valid SQL input test failed: last_name'
++ _log '' ERROR 'Valid SQL input test failed: last_name'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Valid SQL input test failed: last_name'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Valid SQL input test failed: last_name'
+[2025-08-13 12:00:00 UTC] [ERROR] Valid SQL input test failed: last_name
++ return 1
+++ echo '[ERR TRAP] rc=1 cmd=return $((test_failed > 0))'
+[ERR TRAP] rc=1 cmd=return $((test_failed > 0))
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'Path traversal protection' at 2025-08-13 12:00:00 UTC
++ test_path_traversal
++ local test_passed=0
++ local test_failed=0
+++ mktemp -d
++ local tmp=/tmp/tmp.74eb82xvuA
++ register_cleanup 'rm -rf '\''/tmp/tmp.74eb82xvuA'\'''
++ local 'cmd=rm -rf '\''/tmp/tmp.74eb82xvuA'\'''
++ [[ -z rm -rf '/tmp/tmp.74eb82xvuA' ]]
++ CLEANUP_COMMANDS_STR+=("$cmd")
++ _register_trap_once
++ [[ false == \f\a\l\s\e ]]
++ add_trap _core_run_cleanup_once EXIT INT TERM
++ local handler=_core_run_cleanup_once
++ shift
++ local sig
++ for sig in "$@"
++ local current
+++ awk '-F'\''' '{print $2}'
+++ trap -p EXIT
++ current=cleanup
++ [[ -n cleanup ]]
++ [[ cleanup != \_\c\o\r\e\_\r\u\n\_\c\l\e\a\n\u\p\_\o\n\c\e ]]
++ trap -- 'cleanup; _core_run_cleanup_once' EXIT
++ for sig in "$@"
++ local current
+++ trap -p INT
+++ awk '-F'\''' '{print $2}'
++ current=
++ [[ -n '' ]]
++ trap -- _core_run_cleanup_once INT
++ for sig in "$@"
++ local current
+++ trap -p TERM
+++ awk '-F'\''' '{print $2}'
++ current=
++ [[ -n '' ]]
++ trap -- _core_run_cleanup_once TERM
++ CLEANUP_REGISTERED=true
++ for attempt in "${PATH_TRAVERSAL_ATTEMPTS[@]}"
++ validate_safe_path /tmp/tmp.74eb82xvuA/../../../etc/passwd /tmp/tmp.74eb82xvuA
+[2025-08-13 12:00:00 UTC] [ERROR] /tmp/tmp.74eb82xvuA contains invalid characters (..)
++ (( test_passed++ ))
+++ echo '[ERR TRAP] rc=1 cmd=((test_passed++))'
+[ERR TRAP] rc=1 cmd=((test_passed++))
++ test_passed=2
++ log_success 'Path traversal test passed: blocked ../../../etc/passwd'
++ _log '' OK 'Path traversal test passed: blocked ../../../etc/passwd'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Path traversal test passed: blocked ../../../etc/passwd'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Path traversal test passed: blocked ../../../etc/passwd'
+[2025-08-13 12:00:00 UTC] [OK   ] Path traversal test passed: blocked ../../../etc/passwd
++ for attempt in "${PATH_TRAVERSAL_ATTEMPTS[@]}"
++ validate_safe_path /tmp/tmp.74eb82xvuA/test/../../../../etc/shadow /tmp/tmp.74eb82xvuA
+[2025-08-13 12:00:00 UTC] [ERROR] /tmp/tmp.74eb82xvuA contains invalid characters (..)
++ (( test_passed++ ))
++ test_passed=4
++ log_success 'Path traversal test passed: blocked test/../../../../etc/shadow'
++ _log '' OK 'Path traversal test passed: blocked test/../../../../etc/shadow'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Path traversal test passed: blocked test/../../../../etc/shadow'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Path traversal test passed: blocked test/../../../../etc/shadow'
+[2025-08-13 12:00:00 UTC] [OK   ] Path traversal test passed: blocked test/../../../../etc/shadow
++ for attempt in "${PATH_TRAVERSAL_ATTEMPTS[@]}"
++ validate_safe_path /tmp/tmp.74eb82xvuA//dev/null /tmp/tmp.74eb82xvuA
++ (( test_failed++ ))
+++ echo '[ERR TRAP] rc=1 cmd=((test_failed++))'
+[ERR TRAP] rc=1 cmd=((test_failed++))
++ test_failed=2
++ log_error 'Path traversal test failed: accepted /dev/null'
++ _log '' ERROR 'Path traversal test failed: accepted /dev/null'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Path traversal test failed: accepted /dev/null'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Path traversal test failed: accepted /dev/null'
+[2025-08-13 12:00:00 UTC] [ERROR] Path traversal test failed: accepted /dev/null
++ for attempt in "${PATH_TRAVERSAL_ATTEMPTS[@]}"
++ validate_safe_path /tmp/tmp.74eb82xvuA/file://localhost/etc/hosts /tmp/tmp.74eb82xvuA
++ (( test_failed++ ))
++ test_failed=4
++ log_error 'Path traversal test failed: accepted file://localhost/etc/hosts'
++ _log '' ERROR 'Path traversal test failed: accepted file://localhost/etc/hosts'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Path traversal test failed: accepted file://localhost/etc/hosts'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Path traversal test failed: accepted file://localhost/etc/hosts'
+[2025-08-13 12:00:00 UTC] [ERROR] Path traversal test failed: accepted file://localhost/etc/hosts
++ valid_paths=('file.txt' 'dir/file.txt' 'dir/subdir/file.txt')
++ local valid_paths
++ for path in "${valid_paths[@]}"
+++ dirname file.txt
++ mkdir -p /tmp/tmp.74eb82xvuA/.
++ touch /tmp/tmp.74eb82xvuA/file.txt
++ validate_safe_path /tmp/tmp.74eb82xvuA/file.txt /tmp/tmp.74eb82xvuA
++ (( test_passed++ ))
++ test_passed=6
++ log_success 'Valid path test passed: file.txt'
++ _log '' OK 'Valid path test passed: file.txt'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Valid path test passed: file.txt'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Valid path test passed: file.txt'
+[2025-08-13 12:00:00 UTC] [OK   ] Valid path test passed: file.txt
++ for path in "${valid_paths[@]}"
+++ dirname dir/file.txt
++ mkdir -p /tmp/tmp.74eb82xvuA/dir
++ touch /tmp/tmp.74eb82xvuA/dir/file.txt
++ validate_safe_path /tmp/tmp.74eb82xvuA/dir/file.txt /tmp/tmp.74eb82xvuA
++ (( test_passed++ ))
++ test_passed=8
++ log_success 'Valid path test passed: dir/file.txt'
++ _log '' OK 'Valid path test passed: dir/file.txt'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Valid path test passed: dir/file.txt'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Valid path test passed: dir/file.txt'
+[2025-08-13 12:00:00 UTC] [OK   ] Valid path test passed: dir/file.txt
++ for path in "${valid_paths[@]}"
+++ dirname dir/subdir/file.txt
++ mkdir -p /tmp/tmp.74eb82xvuA/dir/subdir
++ touch /tmp/tmp.74eb82xvuA/dir/subdir/file.txt
++ validate_safe_path /tmp/tmp.74eb82xvuA/dir/subdir/file.txt /tmp/tmp.74eb82xvuA
++ (( test_passed++ ))
++ test_passed=10
++ log_success 'Valid path test passed: dir/subdir/file.txt'
++ _log '' OK 'Valid path test passed: dir/subdir/file.txt'
++ local color=
++ shift
++ local level=OK
++ shift
++ local 'message=Valid path test passed: dir/subdir/file.txt'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' OK 'Valid path test passed: dir/subdir/file.txt'
+[2025-08-13 12:00:00 UTC] [OK   ] Valid path test passed: dir/subdir/file.txt
++ return 1
+++ echo '[ERR TRAP] rc=1 cmd=return $((test_failed > 0))'
+[ERR TRAP] rc=1 cmd=return $((test_failed > 0))
+++ cleanup
+++ local exit_code=1
+++ exit 1
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'Config sanitization' at 2025-08-13 12:00:00 UTC
++ test_config_sanitization
++ local test_passed=0
++ local test_failed=0
++ test_cases=(['normal_value']='normal_value' ['has space']='has space' ['has"quote']='has\"quote' ['has;semicolon']='hassemicolon' ['has`backtick']='hasbacktick' ['has$dollar']='hasdollar')
++ local -A test_cases
++ for input in "${!test_cases[@]}"
++ local expected=hasbacktick
++ local result
+++ sanitize_config_value 'has`backtick'
++ result=
++ (( test_failed++ ))
+++ echo '[ERR TRAP] rc=1 cmd=((test_failed++))'
+[ERR TRAP] rc=1 cmd=((test_failed++))
++ test_failed=2
++ log_error 'Config sanitization test failed: has`backtick ->  (expected hasbacktick)'
++ _log '' ERROR 'Config sanitization test failed: has`backtick ->  (expected hasbacktick)'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Config sanitization test failed: has`backtick ->  (expected hasbacktick)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Config sanitization test failed: has`backtick ->  (expected hasbacktick)'
+[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has`backtick ->  (expected hasbacktick)
++ for input in "${!test_cases[@]}"
++ local 'expected=has space'
++ local result
+++ sanitize_config_value 'has space'
++ result=
++ (( test_failed++ ))
++ test_failed=4
++ log_error 'Config sanitization test failed: has space ->  (expected has space)'
++ _log '' ERROR 'Config sanitization test failed: has space ->  (expected has space)'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Config sanitization test failed: has space ->  (expected has space)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Config sanitization test failed: has space ->  (expected has space)'
+[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has space ->  (expected has space)
++ for input in "${!test_cases[@]}"
++ local expected=hassemicolon
++ local result
+++ sanitize_config_value 'has;semicolon'
++ result=
++ (( test_failed++ ))
++ test_failed=6
++ log_error 'Config sanitization test failed: has;semicolon ->  (expected hassemicolon)'
++ _log '' ERROR 'Config sanitization test failed: has;semicolon ->  (expected hassemicolon)'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Config sanitization test failed: has;semicolon ->  (expected hassemicolon)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Config sanitization test failed: has;semicolon ->  (expected hassemicolon)'
+[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has;semicolon ->  (expected hassemicolon)
++ for input in "${!test_cases[@]}"
++ local 'expected=has\"quote'
++ local result
+++ sanitize_config_value 'has"quote'
++ result=
++ (( test_failed++ ))
++ test_failed=8
++ log_error 'Config sanitization test failed: has"quote ->  (expected has\"quote)'
++ _log '' ERROR 'Config sanitization test failed: has"quote ->  (expected has\"quote)'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Config sanitization test failed: has"quote ->  (expected has\"quote)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Config sanitization test failed: has"quote ->  (expected has\"quote)'
+[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has"quote ->  (expected has\"quote)
++ for input in "${!test_cases[@]}"
++ local expected=hasdollar
++ local result
+++ sanitize_config_value 'has$dollar'
++ result=
++ (( test_failed++ ))
++ test_failed=10
++ log_error 'Config sanitization test failed: has$dollar ->  (expected hasdollar)'
++ _log '' ERROR 'Config sanitization test failed: has$dollar ->  (expected hasdollar)'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Config sanitization test failed: has$dollar ->  (expected hasdollar)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Config sanitization test failed: has$dollar ->  (expected hasdollar)'
+[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: has$dollar ->  (expected hasdollar)
++ for input in "${!test_cases[@]}"
++ local expected=normal_value
++ local result
+++ sanitize_config_value normal_value
++ result=
++ (( test_failed++ ))
++ test_failed=12
++ log_error 'Config sanitization test failed: normal_value ->  (expected normal_value)'
++ _log '' ERROR 'Config sanitization test failed: normal_value ->  (expected normal_value)'
++ local color=
++ shift
++ local level=ERROR
++ shift
++ local 'message=Config sanitization test failed: normal_value ->  (expected normal_value)'
+++ date '+%Y-%m-%d %H:%M:%S'
+++ echo '2025-08-13 12:00:00 UTC'
+++ return 0
++ printf '[%s] [%-5s] %b\n' '2025-08-13 12:00:00 UTC' ERROR 'Config sanitization test failed: normal_value ->  (expected normal_value)'
+[2025-08-13 12:00:00 UTC] [ERROR] Config sanitization test failed: normal_value ->  (expected normal_value)
++ return 1
+++ echo '[ERR TRAP] rc=1 cmd=return $((test_failed > 0))'
+[ERR TRAP] rc=1 cmd=return $((test_failed > 0))
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+[ERR TRAP] rc=1 cmd=[[ ${TEST_FAILED} -eq 0 ]]
