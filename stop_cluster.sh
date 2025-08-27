@@ -198,4 +198,7 @@ main() {
   _prune_if_requested
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  exec > >(tee -a "${LOG_FILE}") 2> >(tee -a "${LOG_FILE}" >&2)
+  main "$@"
+fi

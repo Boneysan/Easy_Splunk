@@ -136,6 +136,7 @@ validate_compose_schema() {
     esac
 
     if [[ $rc -ne 0 ]]; then
+        VALIDATION_PASSED=false
         log_message ERROR "Compose schema validation failed for $compose_file"
         log_message ERROR "Engine: $COMPOSE_ENGINE $COMPOSE_ENGINE_VERSION"
         echo "" >&2
@@ -160,7 +161,7 @@ validate_compose_schema() {
                 fi
                 ;;
         esac
-        error_exit "Compose validation failed"
+        return $rc
     fi
 
     log_message SUCCESS "Compose schema validation passed"

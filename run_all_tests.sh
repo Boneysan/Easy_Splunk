@@ -414,7 +414,10 @@ EOF
   fi
 }
 # --- Entry ----------------------------------------------------------------------
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  exec > >(tee -a "${LOG_FILE}") 2> >(tee -a "${LOG_FILE}" >&2)
+  main "$@"
+fi
 
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

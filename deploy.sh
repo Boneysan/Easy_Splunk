@@ -1220,5 +1220,9 @@ main() {
     log_message SUCCESS "Deployment completed successfully!"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Redirect stdout/stderr to log file and console, then run main in-process
+    exec > >(tee -a "${LOG_FILE}") 2> >(tee -a "${LOG_FILE}" >&2)
+    main "$@"
+fi
 

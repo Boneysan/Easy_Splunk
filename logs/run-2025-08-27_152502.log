@@ -1,0 +1,137 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation.sh
+Started: Wed Aug 27 15:25:02 MDT 2025
+PID: 86651
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 15:25:02 MDT 2025
+PID: 86651
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 15:25:02] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/logs/run-2025-08-27_152502.log
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 15:25:02 MDT 2025
+PID: 86651
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+Compose Schema Validation Test
+==============================
+
+[2025-08-27 15:25:02] [INFO] Starting Compose Validation Tests
+[0;34m[INFO ][0m Starting Compose Validation Tests
+[2025-08-27 15:25:02] [INFO] =================================
+[0;34m[INFO ][0m =================================
+[2025-08-27 15:25:02] [INFO] === Test 1: Compose Engine Detection ===
+[0;34m[INFO ][0m === Test 1: Compose Engine Detection ===
+[2025-08-27 15:25:02] [INFO] Detected docker-compose binary: Docker Compose version v2.21.0
+[0;34m[INFO ][0m Detected docker-compose binary: Docker Compose version v2.21.0
+[2025-08-27 15:25:02] [SUCCESS] ✅ Compose engine detected successfully
+[0;32m[OK   ][0m ✅ Compose engine detected successfully
+Compose Engine: docker
+Engine Version: Docker Compose version v2.21.0
+Schema Version: 3.8
+Validation Status: NOT RUN
+
+[2025-08-27 15:25:02] [INFO] === Test 2: Valid Compose File Validation ===
+[0;34m[INFO ][0m === Test 2: Valid Compose File Validation ===
+[2025-08-27 15:25:02] [INFO] Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[0;34m[INFO ][0m Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 15:25:02] [INFO] Target engine: docker (schema: 3.8)
+[0;34m[INFO ][0m Target engine: docker (schema: 3.8)
+[2025-08-27 15:25:02] [SUCCESS] Compose schema validation passed
+[0;32m[OK   ][0m Compose schema validation passed
+[2025-08-27 15:25:02] [SUCCESS] ✅ Valid compose file passed validation
+[0;32m[OK   ][0m ✅ Valid compose file passed validation
+
+[2025-08-27 15:25:02] [INFO] === Test 3: Invalid Compose File Detection ===
+[0;34m[INFO ][0m === Test 3: Invalid Compose File Detection ===
+[2025-08-27 15:25:02] [INFO] Testing invalid compose file (should fail validation)...
+[0;34m[INFO ][0m Testing invalid compose file (should fail validation)...
+[2025-08-27 15:25:02] [INFO] Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-invalid-compose.yml
+[0;34m[INFO ][0m Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-invalid-compose.yml
+[2025-08-27 15:25:02] [INFO] Target engine: docker (schema: 3.8)
+[0;34m[INFO ][0m Target engine: docker (schema: 3.8)
+[2025-08-27 15:25:03] [ERROR] Compose schema validation failed for /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-invalid-compose.yml
+[2025-08-27 15:25:03] [ERROR] Engine: docker Docker Compose version v2.21.0
+[2025-08-27 15:25:03] [SUCCESS] ✅ Invalid compose file correctly failed validation
+[0;32m[OK   ][0m ✅ Invalid compose file correctly failed validation
+
+[2025-08-27 15:25:03] [INFO] === Test 4: Metadata Addition ===
+[0;34m[INFO ][0m === Test 4: Metadata Addition ===
+[2025-08-27 15:25:03] [SUCCESS] Added version metadata to compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[0;32m[OK   ][0m Added version metadata to compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 15:25:03] [SUCCESS] ✅ Metadata added successfully
+[0;32m[OK   ][0m ✅ Metadata added successfully
+[2025-08-27 15:25:03] [SUCCESS] ✅ Metadata header found in compose file
+[0;32m[OK   ][0m ✅ Metadata header found in compose file
+[2025-08-27 15:25:03] [SUCCESS] ✅ Original compose content preserved
+[0;32m[OK   ][0m ✅ Original compose content preserved
+
+[2025-08-27 15:25:03] [INFO] === Test 5: Full Pre-deployment Validation ===
+[0;34m[INFO ][0m === Test 5: Full Pre-deployment Validation ===
+[2025-08-27 15:25:03] [INFO] Starting pre-deployment validation for: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[0;34m[INFO ][0m Starting pre-deployment validation for: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 15:25:03] [INFO] Detected docker-compose binary: Docker Compose version v2.21.0
+[0;34m[INFO ][0m Detected docker-compose binary: Docker Compose version v2.21.0
+[2025-08-27 15:25:03] [INFO] Checking compose file compatibility: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[0;34m[INFO ][0m Checking compose file compatibility: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 15:25:03] [WARNING] Found deprecated 'version' field: version: '3.8'
+[1;33m[WARN ][0m Found deprecated 'version' field: version: '3.8'
+[2025-08-27 15:25:03] [WARNING] Consider removing the version field for better compatibility
+[1;33m[WARN ][0m Consider removing the version field for better compatibility
+[2025-08-27 15:25:03] [SUCCESS] Compose file compatibility check passed
+[0;32m[OK   ][0m Compose file compatibility check passed
+[2025-08-27 15:25:03] [INFO] Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[0;34m[INFO ][0m Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 15:25:03] [INFO] Target engine: docker (schema: 3.8)
+[0;34m[INFO ][0m Target engine: docker (schema: 3.8)
+[2025-08-27 15:25:03] [SUCCESS] Compose schema validation passed
+[0;32m[OK   ][0m Compose schema validation passed
+[2025-08-27 15:25:03] [SUCCESS] Added version metadata to compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[0;32m[OK   ][0m Added version metadata to compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 15:25:03] [SUCCESS] Pre-deployment validation completed successfully
+[0;32m[OK   ][0m Pre-deployment validation completed successfully
+[2025-08-27 15:25:03] [SUCCESS] ✅ Full pre-deployment validation passed
+[0;32m[OK   ][0m ✅ Full pre-deployment validation passed
+[2025-08-27 15:25:03] [SUCCESS] ✅ Validation status updated in metadata
+[0;32m[OK   ][0m ✅ Validation status updated in metadata
+
+[2025-08-27 15:25:03] [INFO] === Test 6: Compatibility Checking ===
+[0;34m[INFO ][0m === Test 6: Compatibility Checking ===
+[2025-08-27 15:25:03] [INFO] Checking compose file compatibility: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[0;34m[INFO ][0m Checking compose file compatibility: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 15:25:03] [WARNING] Found deprecated 'version' field: version: '3.8'
+[1;33m[WARN ][0m Found deprecated 'version' field: version: '3.8'
+[2025-08-27 15:25:03] [WARNING] Consider removing the version field for better compatibility
+[1;33m[WARN ][0m Consider removing the version field for better compatibility
+[2025-08-27 15:25:03] [SUCCESS] Compose file compatibility check passed
+[0;32m[OK   ][0m Compose file compatibility check passed
+[2025-08-27 15:25:03] [SUCCESS] ✅ Compatibility check completed
+[0;32m[OK   ][0m ✅ Compatibility check completed
+
+[2025-08-27 15:25:03] [INFO] =================================
+[0;34m[INFO ][0m =================================
+[2025-08-27 15:25:03] [INFO] Test Results Summary:
+[0;34m[INFO ][0m Test Results Summary:
+[2025-08-27 15:25:03] [INFO]   ✅ Passed: 6
+[0;34m[INFO ][0m   ✅ Passed: 6
+[2025-08-27 15:25:03] [INFO]   ❌ Failed: 0
+[0;34m[INFO ][0m   ❌ Failed: 0
+[2025-08-27 15:25:03] [INFO]   📊 Total:  6
+[0;34m[INFO ][0m   📊 Total:  6
+[2025-08-27 15:25:03] [SUCCESS] 🎉 All compose validation tests passed!
+[0;32m[OK   ][0m 🎉 All compose validation tests passed!
+
+[2025-08-27 15:25:03] [SUCCESS] Compose validation system is working correctly!
+[0;32m[OK   ][0m Compose validation system is working correctly!
+[2025-08-27 15:25:03] [INFO] This will help prevent 'works on my box' issues between different compose engines.
+[0;34m[INFO ][0m This will help prevent 'works on my box' issues between different compose engines.

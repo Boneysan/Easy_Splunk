@@ -1,0 +1,42 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation.sh
+Started: Wed Aug 27 15:19:35 MDT 2025
+PID: 85271
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 15:19:35 MDT 2025
+PID: 85271
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 15:19:35] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/logs/run-2025-08-27_151935.log
+===============================================
+Easy_Splunk Execution Log
+Script: test-compose-validation
+Started: Wed Aug 27 15:19:35 MDT 2025
+PID: 85271
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-27 15:19:35] [INFO] Starting Compose Validation Tests
+[2025-08-27 15:19:35] [INFO] =================================
+[2025-08-27 15:19:35] [INFO] === Test 1: Compose Engine Detection ===
+[2025-08-27 15:19:36] [INFO] Detected docker-compose binary: Docker Compose version v2.21.0
+[2025-08-27 15:19:36] [SUCCESS] ✅ Compose engine detected successfully
+[2025-08-27 15:19:36] [INFO] === Test 2: Valid Compose File Validation ===
+[2025-08-27 15:19:36] [INFO] Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-compose.yml
+[2025-08-27 15:19:36] [INFO] Target engine: docker (schema: 3.8)
+[2025-08-27 15:19:36] [SUCCESS] Compose schema validation passed
+[2025-08-27 15:19:36] [SUCCESS] ✅ Valid compose file passed validation
+[2025-08-27 15:19:36] [INFO] === Test 3: Invalid Compose File Detection ===
+[2025-08-27 15:19:36] [INFO] Testing invalid compose file (should fail validation)...
+[2025-08-27 15:19:36] [INFO] Validating compose file: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-invalid-compose.yml
+[2025-08-27 15:19:36] [INFO] Target engine: docker (schema: 3.8)
+[2025-08-27 15:19:36] [ERROR] Compose schema validation failed for /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/lib/test-invalid-compose.yml
+[2025-08-27 15:19:36] [ERROR] Engine: docker Docker Compose version v2.21.0
+[2025-08-27 15:19:36] [ERROR] Compose validation failed

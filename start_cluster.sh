@@ -290,4 +290,7 @@ main() {
 }
 
 START_CLUSTER_VERSION="1.0.0"
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  exec > >(tee -a "${LOG_FILE}") 2> >(tee -a "${LOG_FILE}" >&2)
+  main "$@"
+fi
