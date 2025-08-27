@@ -1,6 +1,6 @@
 # Splunk Cluster Master
 splunk-cm:
-  image: "{{SPLUNK_IMAGE}}"
+  image: "${SPLUNK_IMAGE}"
   container_name: "${COMPOSE_PROJECT_NAME:-splunk}_cluster_master"
   hostname: "splunk-cm"
   restart: unless-stopped

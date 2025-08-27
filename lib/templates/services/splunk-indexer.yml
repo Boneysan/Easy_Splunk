@@ -1,6 +1,6 @@
 # Splunk Indexer {{INSTANCE_NUM}}
 splunk-idx{{INSTANCE_NUM}}:
-  image: "{{SPLUNK_IMAGE}}"
+  image: "${SPLUNK_IMAGE}"
   container_name: "${COMPOSE_PROJECT_NAME:-splunk}_splunk-idx{{INSTANCE_NUM}}"
   hostname: "splunk-idx{{INSTANCE_NUM}}"
   restart: unless-stopped

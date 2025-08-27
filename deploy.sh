@@ -317,34 +317,25 @@ check_port_conflicts() {
 }
 
 # ============================= Runtime Detection ==============================
+# Load centralized runtime detection
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/core.sh"
+source "$SCRIPT_DIR/versions.env"
+source "$SCRIPT_DIR/lib/runtime-detection.sh"
+
 detect_runtime() {
-    if command -v docker >/dev/null 2>&1; then
-        RUNTIME="docker"
-    elif command -v podman >/dev/null 2>&1; then
-        RUNTIME="podman"
-    else
-        error_exit "Neither Docker nor Podman is installed. Please install a container runtime first."
+    if ! detect_runtime; then
+        error_exit "Container runtime detection failed"
     fi
+    RUNTIME="$CONTAINER_RUNTIME"
+    COMPOSE="$COMPOSE_IMPL"
     log_message SUCCESS "Container runtime detected: $RUNTIME"
+    log_message SUCCESS "Compose command: $COMPOSE"
 }
 
 detect_compose() {
-    if [[ "$RUNTIME" == "docker" ]]; then
-        if docker compose version >/dev/null 2>&1; then
-            COMPOSE="docker compose"
-        else
-            error_exit "Docker Compose plugin not found. Install docker-compose-plugin."
-        fi
-    else
-        if podman compose version >/dev/null 2>&1; then
-            COMPOSE="podman compose"
-        elif command -v podman-compose >/dev/null 2>&1; then
-            COMPOSE="podman-compose"
-        else
-            error_exit "Podman compose not found. Install podman-compose."
-        fi
-    fi
-    log_message SUCCESS "Compose command detected: $COMPOSE"
+    # Compose detection is now handled by detect_runtime()
+    log_message INFO "Compose detection handled by detect_runtime()"
 }
 
 verify_runtime() {

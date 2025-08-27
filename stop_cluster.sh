@@ -247,35 +247,11 @@ main() {
     fi
   fi
   
-  # If no configured runtime, apply Docker-first logic (same as orchestrator)
+  # If no configured runtime, use deterministic detection
   if [[ -z "${CONTAINER_RUNTIME:-}" ]]; then
-    log_info "No configured runtime found, applying Docker-first detection logic"
-    local prefer_docker=false
-    local os_name=""
-    
-    if [[ -f /etc/os-release ]]; then
-      source /etc/os-release 2>/dev/null || true
-      os_name="${ID:-unknown}"
-      
-      # Docker-first for Ubuntu/Debian systems
-      if [[ "$os_name" =~ ^(ubuntu|debian)$ ]]; then
-        prefer_docker=true
-        log_info "Ubuntu/Debian system detected - Docker preferred for better ecosystem compatibility"
-      # Docker-first for RHEL 8 systems due to Python 3.6 limitations
-      elif [[ "${VERSION_ID:-}" == "8"* ]] && [[ "$os_name" =~ ^(rhel|centos|rocky|almalinux)$ ]]; then
-        prefer_docker=true
-        log_info "RHEL 8-family system detected - Docker preferred due to Python 3.6 compatibility issues"
-      fi
-    fi
-    
-    # Apply Docker-first preference
-    if [[ "$prefer_docker" == "true" ]]; then
-      if command -v docker &>/dev/null && docker version &>/dev/null 2>&1; then
-        export CONTAINER_RUNTIME="docker"
-        log_info "Auto-selected Docker runtime for $os_name system"
-      else
-        log_info "Docker preferred for $os_name but not available - will detect available runtime"
-      fi
+    log_info "No configured runtime found, using deterministic detection"
+    if ! detect_runtime; then
+      die "${E_RUNTIME:-1}" "Container runtime detection failed"
     fi
   fi
   

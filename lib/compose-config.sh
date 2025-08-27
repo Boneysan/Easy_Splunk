@@ -80,24 +80,19 @@ get_service_config() {
             echo "HEC_PORT=$((8088 + instance_num - 1))"
             echo "SPLUNK_REPLICATION_FACTOR=${SPLUNK_REPLICATION_FACTOR:-1}"
             echo "SPLUNK_SEARCH_FACTOR=${SPLUNK_SEARCH_FACTOR:-1}"
-            echo "SPLUNK_IMAGE=${SPLUNK_IMAGE}"
             ;;
         "splunk-search-head")
             echo "INSTANCE_NUM=${instance_num}"
             echo "WEB_PORT=$((8000 + instance_num - 1))"
             echo "MGMT_PORT=$((8089 + instance_num + 9))"
-            echo "SPLUNK_IMAGE=${SPLUNK_IMAGE}"
             ;;
         "splunk-cluster-master")
             echo "SPLUNK_REPLICATION_FACTOR=${SPLUNK_REPLICATION_FACTOR:-1}"
             echo "SPLUNK_SEARCH_FACTOR=${SPLUNK_SEARCH_FACTOR:-1}"
-            echo "SPLUNK_IMAGE=${SPLUNK_IMAGE}"
             ;;
         "prometheus")
-            echo "PROMETHEUS_IMAGE=${PROMETHEUS_IMAGE}"
             ;;
         "grafana")
-            echo "GRAFANA_IMAGE=${GRAFANA_IMAGE}"
             ;;
     esac
 }

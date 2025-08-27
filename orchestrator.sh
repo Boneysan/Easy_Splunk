@@ -257,26 +257,50 @@ install_docker_compose_fallback() {
 }
 
 # Source runtime configuration from active configuration
+# Source runtime configuration from lockfile or active configuration
 source_runtime_config() {
-    log_message INFO "Sourcing runtime configuration from active configuration"
-    
-    # Source runtime configuration from config/active.conf if available
+    log_message INFO "Sourcing runtime configuration"
+
+    # First priority: Check runtime lockfile for deterministic runtime selection
+    local lockfile="${SCRIPT_DIR}/.orchestrator.lock"
+    if [[ -f "$lockfile" ]]; then
+        local locked_runtime
+        locked_runtime=$(grep "^RUNTIME=" "$lockfile" 2>/dev/null | cut -d'=' -f2)
+        local locked_compose
+        locked_compose=$(grep "^COMPOSE=" "$lockfile" 2>/dev/null | cut -d'=' -f2)
+
+        if [[ -n "$locked_runtime" ]]; then
+            export CONTAINER_RUNTIME="$locked_runtime"
+            export COMPOSE_IMPL="${locked_compose:-}"
+            log_message INFO "✅ Loaded runtime from lockfile: $locked_runtime"
+            return 0
+        fi
+    fi
+
+    # Second priority: Source runtime configuration from config/active.conf if available
+    local CONFIG_FILE="${SCRIPT_DIR}/config/active.conf"
     if [[ -f "$CONFIG_FILE" ]]; then
         log_message INFO "Loading runtime configuration from: $CONFIG_FILE"
-        
+
         # Extract CONTAINER_RUNTIME from config file safely
         local configured_runtime
         configured_runtime=$(grep -E "^CONTAINER_RUNTIME=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'")
-        
+
         if [[ -n "$configured_runtime" ]]; then
             export CONTAINER_RUNTIME="$configured_runtime"
-            log_message INFO "Runtime configuration loaded: CONTAINER_RUNTIME=$CONTAINER_RUNTIME"
-        else
-            log_message INFO "No CONTAINER_RUNTIME found in config file, will use auto-detection"
+            log_message INFO "✅ Loaded runtime from config: $configured_runtime"
+            return 0
         fi
-    else
-        log_message INFO "No active configuration file found, using auto-detection"
     fi
+
+    # Third priority: Auto-detect runtime deterministically
+    log_message INFO "No cached runtime found - performing detection"
+    if ! detect_runtime; then
+        log_message ERROR "Runtime detection failed"
+        return 1
+    fi
+
+    log_message INFO "✅ Runtime configuration loaded: ${CONTAINER_RUNTIME:-unknown}"
 }
 
 # Initialize compose command with intelligent fallback
@@ -297,55 +321,9 @@ init_compose_command() {
         fi
     fi
     
-    # Fallback to local compose initialization logic with Docker-first semantics
-    # Detect OS for intelligent runtime selection
-    local prefer_docker=false
-    local os_name=""
-    
-    if [[ -f /etc/os-release ]]; then
-        source /etc/os-release 2>/dev/null || true
-        os_name="${ID:-unknown}"
-        
-        # Docker-first for Ubuntu/Debian systems
-        if [[ "$os_name" =~ ^(ubuntu|debian)$ ]]; then
-            prefer_docker=true
-            log_message INFO "Ubuntu/Debian system detected - Docker preferred for better ecosystem compatibility"
-        # Docker-first for RHEL 8 systems due to Python 3.6 limitations
-        elif [[ "${VERSION_ID:-}" == "8"* ]] && [[ "$os_name" =~ ^(rhel|centos|rocky|almalinux)$ ]]; then
-            prefer_docker=true
-            log_message INFO "RHEL 8-family system detected - Docker preferred due to Python 3.6 compatibility issues"
-        fi
-    elif [[ -f /etc/redhat-release ]]; then
-        if grep -q "Red Hat Enterprise Linux.*release 8\|CentOS.*release 8\|Rocky Linux.*release 8\|AlmaLinux.*release 8" /etc/redhat-release 2>/dev/null; then
-            prefer_docker=true
-            log_message INFO "RHEL 8-based system detected via redhat-release - Docker preferred"
-        fi
-    fi
-    
-    # Apply Docker-first preference if not explicitly configured
-    if [[ "$prefer_docker" == "true" ]] && [[ -z "${CONTAINER_RUNTIME:-}" ]]; then
-        if command -v docker &>/dev/null; then
-            export CONTAINER_RUNTIME="docker"
-            log_message INFO "Auto-selected Docker runtime for $os_name system"
-        else
-            log_message WARN "Docker preferred for $os_name but not available - will detect available runtime"
-        fi
-    fi
-    
-    # Detect container runtime if not already set
-    if [[ -z "${CONTAINER_RUNTIME:-}" ]]; then
-        log_message INFO "Auto-detecting container runtime with Docker-first preference"
-        
-        if command -v docker &>/dev/null && docker version &>/dev/null 2>&1; then
-            export CONTAINER_RUNTIME="docker"
-            log_message INFO "Auto-detected Docker runtime"
-        elif command -v podman &>/dev/null && podman version &>/dev/null 2>&1; then
-            export CONTAINER_RUNTIME="podman"
-            log_message INFO "Auto-detected Podman runtime"
-        else
-            log_message ERROR "No container runtime (Docker or Podman) found"
-            error_exit "No container runtime available. Please install Docker or Podman."
-        fi
+    # Use deterministic runtime detection
+    if ! detect_runtime; then
+        error_exit "Container runtime detection failed"
     fi
     
     # Validate container runtime
