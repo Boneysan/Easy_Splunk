@@ -441,38 +441,66 @@ validate_compose_services() {
 # ============================= Fixed Credential Management =========================
 # The issue was likely in how encrypted data was being written to/read from files
 
-# Fixed encryption function - no change needed here
+# Fixed encryption function - using temporary files for reliability
 simple_encrypt() {
     local input="$1"
     local key="$2"
     
     if command -v openssl >/dev/null 2>&1; then
-        local key_env_var="DEPLOY_CRED_KEY_$$"
+        # Use unique temporary files
+        local temp_input="/tmp/encrypt_input_${RANDOM}_$$"
+        local temp_output="/tmp/encrypt_output_${RANDOM}_$$"
+        local key_env_var="DEPLOY_CRED_KEY_${RANDOM}_$$"
+        
+        # Write input to temporary file
+        printf '%s' "$input" > "$temp_input" || return 1
+        
+        # Set environment variable for key
         export "$key_env_var"="$key"
         
-        printf '%s' "$input" | openssl enc -aes-256-cbc -a -pbkdf2 -pass "env:$key_env_var" 2>/dev/null
-        local exit_code=$?
+        # Encrypt using temporary files
+        local result=1
+        if openssl enc -aes-256-cbc -a -pbkdf2 -pass "env:$key_env_var" -in "$temp_input" -out "$temp_output" 2>/dev/null; then
+            cat "$temp_output"
+            result=0
+        fi
         
+        # Cleanup
+        rm -f "$temp_input" "$temp_output"
         unset "$key_env_var"
-        return $exit_code
+        return $result
     else
         printf '%s' "$input" | base64 2>/dev/null
     fi
 }
-# Fixed decryption function - no change needed here  
+# Fixed decryption function - using temporary files for reliability  
 simple_decrypt() {
     local encrypted="$1"
     local key="$2"
     
     if command -v openssl >/dev/null 2>&1; then
-        local key_env_var="DEPLOY_CRED_KEY_$$"
+        # Use unique temporary files
+        local temp_input="/tmp/decrypt_input_${RANDOM}_$$"
+        local temp_output="/tmp/decrypt_output_${RANDOM}_$$"
+        local key_env_var="DEPLOY_CRED_KEY_${RANDOM}_$$"
+        
+        # Write encrypted data to temporary file (with newline for proper Base64 handling)
+        printf '%s\n' "$encrypted" > "$temp_input" || return 1
+        
+        # Set environment variable for key
         export "$key_env_var"="$key"
         
-        printf '%s' "$encrypted" | openssl enc -aes-256-cbc -d -a -pbkdf2 -pass "env:$key_env_var" 2>/dev/null
-        local exit_code=$?
+        # Decrypt using temporary files
+        local result=1
+        if openssl enc -aes-256-cbc -d -a -pbkdf2 -pass "env:$key_env_var" -in "$temp_input" -out "$temp_output" 2>/dev/null; then
+            cat "$temp_output"
+            result=0
+        fi
         
+        # Cleanup
+        rm -f "$temp_input" "$temp_output"
         unset "$key_env_var"
-        return $exit_code
+        return $result
     else
         printf '%s' "$encrypted" | base64 -d 2>/dev/null
     fi
