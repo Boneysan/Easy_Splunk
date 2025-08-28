@@ -36,6 +36,8 @@ source "${SCRIPT_DIR}/lib/run-with-log.sh"
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 # shellcheck source=lib/security.sh
 source "${SCRIPT_DIR}/lib/security.sh"
+# shellcheck source=lib/image-validator.sh
+source "${SCRIPT_DIR}/lib/image-validator.sh"
 
 # --- Version Checks ------------------------------------------------------------
 if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
@@ -187,6 +189,20 @@ readonly ${img_var}=\"${new_image}\"
   rm -f "${VERSIONS_FILE}.sibak" 2>/dev/null || true
   harden_file_permissions "${VERSIONS_FILE}" "600" "versions file" || true
   audit_security_configuration "${SCRIPT_DIR}/security-audit.txt"
+  
+  # Validate supply chain security after digest resolution
+  log_info "Validating supply chain security compliance..."
+  if command -v validate_image_supply_chain >/dev/null 2>&1; then
+    if validate_deployment_supply_chain; then
+      log_success "✅ Supply chain security validation passed"
+    else
+      log_warning "⚠️  Supply chain security validation found issues"
+      log_info "Run with DEPLOYMENT_MODE=production for stricter validation"
+    fi
+  else
+    log_debug "Supply chain validation not available"
+  fi
+  
   log_success "✅ ${VERSIONS_FILE} updated with resolved digests and IMAGE pins."
   log_info "Review and commit changes."
 }

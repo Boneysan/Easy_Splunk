@@ -21,6 +21,16 @@ source "${SCRIPT_DIR}/error-handling.sh" || {
     return 1
 }
 
+# Load SELinux preflight checking
+if [[ -f "${SCRIPT_DIR}/selinux-preflight.sh" ]]; then
+    source "${SCRIPT_DIR}/selinux-preflight.sh"
+fi
+
+# Load supply chain security validation
+if [[ -f "${SCRIPT_DIR}/image-validator.sh" ]]; then
+    source "${SCRIPT_DIR}/image-validator.sh"
+fi
+
 # Global status
 COMPOSE_ENGINE=""
 COMPOSE_ENGINE_VERSION=""
@@ -235,6 +245,31 @@ validate_before_deploy() {
     detect_compose_engine
     check_compose_compatibility "$compose_file"
     validate_compose_schema "$compose_file"
+    
+    # SELinux preflight check for Docker with bind mounts
+    if command -v validate_selinux_compatibility >/dev/null 2>&1; then
+        log_message INFO "Running SELinux preflight check..."
+        validate_selinux_compatibility "$compose_file" || {
+            log_message ERROR "SELinux preflight check failed"
+            log_message ERROR "Fix the SELinux volume mount issues above before deployment"
+            return 1
+        }
+    else
+        log_message DEBUG "SELinux preflight check not available"
+    fi
+    
+    # Supply chain security validation for production deployments
+    if command -v validate_compose_supply_chain >/dev/null 2>&1; then
+        log_message INFO "Running supply chain security validation..."
+        validate_compose_supply_chain "$compose_file" || {
+            log_message ERROR "Supply chain security validation failed"
+            log_message ERROR "Fix the image digest issues above before deployment"
+            return 1
+        }
+    else
+        log_message DEBUG "Supply chain security validation not available"
+    fi
+    
     add_compose_metadata "$compose_file" "$generator_script"
     log_message SUCCESS "Pre-deployment validation completed successfully"
 }

@@ -254,6 +254,64 @@ The toolkit now includes intelligent fallback logic for compose implementations:
 
 ---
 
+## 🔐 Security Validation Framework
+
+**NEW FEATURE**: Comprehensive security validation system with SELinux compatibility and supply chain security.
+
+### **SELinux Preflight Validation**
+Automatically detects SELinux enforcing mode and validates Docker volume mounts for compatibility.
+
+- ✅ **Auto-Detection**: Detects if SELinux is enforcing using `getenforce`
+- ✅ **Runtime Aware**: Handles Docker vs Podman differences (Docker needs `:Z` flags, Podman auto-handles SELinux)
+- ✅ **Auto-Remediation**: Automatically adds `:Z` flags to Docker bind mounts when SELinux is enforcing
+- ✅ **Clear Errors**: Provides exact volume mount fixes when validation fails
+
+```bash
+# Example automatic fix for Docker + SELinux
+# Before: ./data/splunk:/opt/splunk/var
+# After:  ./data/splunk:/opt/splunk/var:Z
+```
+
+### **Supply Chain Security**
+Enforces immutable image digests in production/air-gapped environments to prevent supply chain attacks.
+
+- ✅ **Production Mode Detection**: Automatically detects production, air-gapped, and secure environments  
+- ✅ **Digest Enforcement**: Blocks mutable tags like `:latest` in production deployments
+- ✅ **Image Resolution**: `resolve-digests.sh` converts tags to immutable sha256 digests
+- ✅ **Critical Image Protection**: Enforces digests for Splunk, Prometheus, Grafana images
+
+```bash
+# Development: Uses mutable tags
+SPLUNK_IMAGE=splunk/splunk:10.0.0
+
+# Production: Uses immutable digests  
+SPLUNK_IMAGE=splunk/splunk@sha256:abc123...
+```
+
+### **Automatic Integration**
+Security validation is automatically integrated into:
+- ✅ `deploy.sh` - Full deployment validation
+- ✅ `start_cluster.sh` - Pre-start validation
+- ✅ `orchestrator.sh` - Orchestrated validation
+
+### **Manual Security Validation**
+```bash
+# Test security validation
+./test-security-validation.sh
+
+# Generate production digests
+./resolve-digests.sh
+
+# Deploy with full security validation
+export DEPLOYMENT_MODE=production
+./deploy.sh
+
+# View security documentation
+cat docs/SECURITY_VALIDATION.md
+```
+
+---
+
 ## 🚀 Quick Start
 
 ### **Supported Operating Systems**

@@ -14,8 +14,29 @@
 #   ENABLE_SPLUNK=true generate_compose_file splunk-compose.yml
 # ==============================================================================
 
-# ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# SELinux helper: add :Z to bind mounts if Docker+SELinux enforcing
+add_selinux_flag_if_needed() {
+  local mount="$1"
+  # Only add :Z for Docker with SELinux enforcing
+  if [[ -f "${SCRIPT_DIR}/selinux-preflight.sh" ]]; then
+    source "${SCRIPT_DIR}/selinux-preflight.sh"
+    if is_selinux_enforcing && [[ "$(detect_container_runtime)" == "docker" ]]; then
+      # Only add if not already present
+      if [[ "$mount" =~ ^\./.*:.* && ! "$mount" =~ :[Zz]($|,) ]]; then
+        # If there is a :ro or :rw, insert before it
+        if [[ "$mount" =~ :(ro|rw)$ ]]; then
+          echo "${mount}:Z"
+        else
+          echo "${mount}:Z"
+        fi
+        return
+      fi
+    fi
+  fi
+  echo "$mount"
+}
 
 # Load standardized error handling first
 source "${SCRIPT_DIR}/error-handling.sh" || {
@@ -456,7 +477,7 @@ _generate_prometheus_service() {
       - app-net
       - splunk-net
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - $(add_selinux_flag_if_needed "./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro")
       - prometheus-data:/prometheus
     profiles: ["monitoring"]
 EOF
@@ -504,7 +525,7 @@ _generate_grafana_service() {
       - splunk-net
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./config/grafana-provisioning/:/etc/grafana/provisioning/:ro
+      - $(add_selinux_flag_if_needed "./config/grafana-provisioning/:/etc/grafana/provisioning/:ro")
     profiles: ["monitoring"]
 EOF
   if is_true "${ENABLE_HEALTHCHECKS}" && (( COMPOSE_SUPPORTS_HEALTHCHECK == 1 )); then
