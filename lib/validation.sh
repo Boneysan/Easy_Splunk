@@ -16,6 +16,12 @@
 #   validate_versions_env
 # ==============================================================================
 
+# Prevent multiple sourcing
+if [[ -n "${VALIDATION_LIB_SOURCED:-}" ]]; then
+  return 0
+fi
+VALIDATION_LIB_SOURCED=1
+
 
 # BEGIN: Fallback functions for error handling library compatibility
 # These functions provide basic functionality when lib/error-handling.sh fails to load
@@ -372,24 +378,13 @@ validate_container_network() {
 # Input / path validation
 # ==============================================================================
 
-# If sanitize_config_value is not defined elsewhere, delegate to scripts/validation/input_validator.sh
+# Note: sanitize_config_value should be available from input_validator.sh sourced above.
+# If not available (fallback), provide a basic implementation.
 if ! type sanitize_config_value &>/dev/null; then
   sanitize_config_value() {
     local val="$1"
-    # Prefer internal implementation if available
-    if [[ -f "${SCRIPT_DIR:-$(pwd)}/scripts/validation/input_validator.sh" ]]; then
-      # shellcheck disable=SC2086
-      source "${SCRIPT_DIR:-$(pwd)}/scripts/validation/input_validator.sh" >/dev/null 2>&1 || true
-    fi
-    if type sanitize_config_value &>/dev/null; then
-      # Call the now-available implementation
-      sanitize_config_value "$val"
-      return 0
-    else
-      # Fallback: basic passthrough
-      printf '%s' "$val"
-      return 0
-    fi
+    # Basic fallback sanitization without re-sourcing
+    printf '%s' "$val" | tr -d '[:cntrl:]' | sed -e 's/[;&|`$(){}]//g' -e 's/\\/\\\\/g' -e 's/"/\\"/g'
   }
 fi
 

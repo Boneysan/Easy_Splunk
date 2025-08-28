@@ -39,6 +39,7 @@ source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/compose-init.sh"
 source "${SCRIPT_DIR}/lib/runtime-detection.sh"
 source "${SCRIPT_DIR}/lib/security.sh"
+source "${SCRIPT_DIR}/lib/compose-validation.sh"
 
 # --- Version Checks ------------------------------------------------------------
 if [[ "${SECURITY_VERSION:-0.0.0}" < "1.0.0" ]]; then
@@ -253,6 +254,13 @@ main() {
       log_warn "Image pull failed or unavailable (possibly air-gapped). Continuing..."
     fi
   fi
+  
+  # Validate compose file before deployment
+  log_info "Validating compose file before deployment..."
+  if ! validate_before_deploy "${COMPOSE_FILE}" "start_cluster.sh"; then
+    die "${E_GENERAL:-1}" "Compose validation failed. Please fix the compose file before proceeding."
+  fi
+  
   log_info "Bringing services up (detached)..."
   if ! retry_command 3 5 "${COMPOSE_COMMAND_ARRAY[@]}" -f "${COMPOSE_FILE}" up -d --remove-orphans; then
     die "${E_GENERAL:-1}" "Failed to start services after multiple attempts."

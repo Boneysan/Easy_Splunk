@@ -2,6 +2,12 @@
 # lib/error-handling.sh
 # Enhanced error handling module with comprehensive validation functions for Easy_Splunk toolkit
 
+# Prevent multiple sourcing
+if [[ -n "${ERROR_HANDLING_LIB_SOURCED:-}" ]]; then
+  return 0
+fi
+ERROR_HANDLING_LIB_SOURCED=1
+
 
 # BEGIN: Fallback functions for error handling library compatibility
 # These functions provide basic functionality when lib/error-handling.sh fails to load

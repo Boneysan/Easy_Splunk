@@ -6,6 +6,12 @@
 # Dependencies: lib/error-handling.sh
 # ==============================================================================
 
+# Prevent multiple sourcing
+if [[ -n "${INPUT_VALIDATOR_SOURCED:-}" ]]; then
+  return 0
+fi
+INPUT_VALIDATOR_SOURCED=1
+
 
 # BEGIN: Fallback functions for error handling library compatibility
 # These functions provide basic functionality when lib/error-handling.sh fails to load
@@ -205,7 +211,7 @@ readonly MAX_INPUT_LENGTH=8192
 readonly SAFE_PATH_PATTERN='^(/[a-zA-Z0-9][a-zA-Z0-9_.-]*)+$'
 readonly SAFE_ENV_VAR_PATTERN='^[a-zA-Z_][a-zA-Z0-9_]*$'
 readonly SAFE_INPUT_PATTERN='^[A-Za-z0-9 _.,@+()]+$'
-readonly SQL_INJECTION_PATTERN='.*(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|\-\-|\/\*|\*\/|;).*'
+readonly SQL_INJECTION_PATTERN='.*(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|\-\-|\/\*|\*\/|;|'\''.*=.*'\''|\bOR\b|\bAND\b|'\''.*'\''|".*"|`.*`).*'
 
 # Validate cluster size (small, medium, large)
 validate_cluster_size() {

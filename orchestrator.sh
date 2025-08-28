@@ -374,6 +374,16 @@ start_services() {
         log_message INFO "Starting all services"
     fi
     
+    # Validate compose files before deployment
+    log_message INFO "Validating compose files before deployment..."
+    for compose_file in "${COMPOSE_FILES[@]}"; do
+        if [[ -f "$compose_file" ]]; then
+            validate_before_deploy "$compose_file" "orchestrator.sh"
+        else
+            error_exit "Compose file not found: $compose_file"
+        fi
+    done
+    
     # Create and start containers with retry
     retry_network_operation "create containers" \
         $COMPOSE_CMD "${COMPOSE_FILES[@]}" up -d --no-recreate $services_cmd || \

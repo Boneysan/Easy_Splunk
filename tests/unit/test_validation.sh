@@ -7,9 +7,20 @@
 # Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, lib/validation.sh
 # Version: 1.0.0
 # ==============================================================================
+
+# Prevent recursive test execution
+if [[ -n "${TEST_VALIDATION_RUNNING:-}" ]]; then
+    echo "ERROR: Recursive test execution detected" >&2
+    exit 1
+fi
+export TEST_VALIDATION_RUNNING=1
+
 set -euo pipefail
 IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
+# Disable library initialization to prevent side effects and loops
+export LIB_NO_INIT=true
 
 # Source dependencies
 # shellcheck source=/dev/null
@@ -152,24 +163,20 @@ test_input_validation() {
     for input in "${!test_cases[@]}"; do
         local type="${test_cases[$input]}"
         if sanitized=$(validate_input "$input" "$type" "test_$type" 2>/dev/null); then
-            ((test_passed++))
-      test_passed=$((test_passed + 1))
+            test_passed=$((test_passed + 1))
             log_success "Valid $type input test passed: $input -> $sanitized"
         else
-            ((test_failed++))
-      test_failed=$((test_failed + 1))
+            test_failed=$((test_failed + 1))
             log_error "Valid $type input test failed: $input"
         fi
     done
 
-  # Test invalid inputs
+  # Test invalid inputs (use a non-raw type to ensure safety checks apply)
   for input in "${INVALID_INPUTS[@]}"; do
-    if ! validate_input "$input" "raw" 2>/dev/null; then
-      ((test_passed++))
+    if ! validate_input "$input" "int" 2>/dev/null; then
       test_passed=$((test_passed + 1))
       log_success "Invalid input test passed: blocked $input"
     else
-      ((test_failed++))
       test_failed=$((test_failed + 1))
       log_error "Invalid input test failed: accepted $input"
     fi
@@ -186,11 +193,9 @@ test_sql_injection() {
   # Test SQL injection attempts
   for attempt in "${SQL_INJECTION_ATTEMPTS[@]}"; do
     if ! validate_sql_input "$attempt" 2>/dev/null; then
-      ((test_passed++))
       test_passed=$((test_passed + 1))
       log_success "SQL injection test passed: blocked $attempt"
     else
-      ((test_failed++))
       test_failed=$((test_failed + 1))
       log_error "SQL injection test failed: accepted $attempt"
     fi
@@ -200,11 +205,9 @@ test_sql_injection() {
   local valid_sql=("username" "email" "first_name" "last_name")
   for input in "${valid_sql[@]}"; do
     if validate_sql_input "$input" 2>/dev/null; then
-      ((test_passed++))
       test_passed=$((test_passed + 1))
       log_success "Valid SQL input test passed: $input"
     else
-      ((test_failed++))
       test_failed=$((test_failed + 1))
       log_error "Valid SQL input test failed: $input"
     fi
@@ -223,11 +226,9 @@ test_path_traversal() {
   # Test path traversal attempts
   for attempt in "${PATH_TRAVERSAL_ATTEMPTS[@]}"; do
     if ! validate_safe_path "$tmp/$attempt" "$tmp" 2>/dev/null; then
-      ((test_passed++))
       test_passed=$((test_passed + 1))
       log_success "Path traversal test passed: blocked $attempt"
     else
-      ((test_failed++))
       test_failed=$((test_failed + 1))
       log_error "Path traversal test failed: accepted $attempt"
     fi
@@ -239,11 +240,9 @@ test_path_traversal() {
     mkdir -p "$tmp/$(dirname "$path")"
     touch "$tmp/$path"
     if validate_safe_path "$tmp/$path" "$tmp" 2>/dev/null; then
-      ((test_passed++))
       test_passed=$((test_passed + 1))
       log_success "Valid path test passed: $path"
     else
-      ((test_failed++))
       test_failed=$((test_failed + 1))
       log_error "Valid path test failed: $path"
     fi
@@ -271,11 +270,9 @@ test_config_sanitization() {
     local expected="${test_cases[$input]}"
     local result
     if result=$(sanitize_config_value "$input" 2>/dev/null) && [[ "$result" == "$expected" ]]; then
-      ((test_passed++))
       test_passed=$((test_passed + 1))
       log_success "Config sanitization test passed: $input -> $result"
     else
-      ((test_failed++))
       test_failed=$((test_failed + 1))
       log_error "Config sanitization test failed: $input -> $result (expected $expected)"
     fi

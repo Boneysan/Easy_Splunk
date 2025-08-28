@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 
+# Prevent multiple sourcing
+if [[ -n "${CORE_LIB_SOURCED:-}" ]]; then
+  return 0
+fi
+CORE_LIB_SOURCED=1
+
 #
 # ==============================================================================
 # lib/core.sh

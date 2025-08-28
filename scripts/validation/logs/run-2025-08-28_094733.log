@@ -1,0 +1,56 @@
+===============================================
+Easy_Splunk Execution Log
+Script: test_validation
+Started: Thu Aug 28 09:47:33 MDT 2025
+PID: 71769
+User: boneysan
+Working Directory: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk
+===============================================
+[2025-08-28 09:47:33] [INFO] Logging initialized - logs available at: /mnt/d/GitHub/Rhel8_Splunk/Easy_Splunk/scripts/validation/logs/run-2025-08-28_094733.log
+DBG: run_test entering for 'System resources' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ Memory check: 8192MB (>= 4096MB)
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ CPU check: 4 cores (>= 2)
+DBG: run_test entering for 'Disk space' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [WARN ] Cannot set permissions; test directory not found: /tmp/tmp.HnqjcVqQry
+[2025-08-13 12:00:00 UTC] [ERROR] Insufficient disk space at /tmp/tmp.HnqjcVqQry: have unknownGB, need 10GB
+[ERR TRAP] rc=1 cmd=return 1
+[2025-08-13 12:00:00 UTC] [INFO ] Performing security configuration audit...
+[2025-08-13 12:00:00 UTC] [OK   ] PASS: Private key permissions secure
+[2025-08-13 12:00:00 UTC] [OK   ] PASS: No certificates expiring within 30 days
+[2025-08-13 12:00:00 UTC] [INFO ] Security audit report written: /tmp/tmp.HnqjcVqQry/security-audit.txt
+DBG: run_test entering for 'Port free' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ Port 8080 is available.
+DBG: run_test entering for 'RF/SF validation' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ RF/SF constraints satisfied (rf=2, sf=1, indexers=3)
+[2025-08-13 12:00:00 UTC] [ERROR] Replication factor (rf=4) cannot exceed indexer count (indexers=3).
+DBG: run_test entering for 'Directory validation' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [WARN ] Cannot set permissions; test directory not found: /tmp/tmp.yL9SEMAkEQ
+[2025-08-13 12:00:00 UTC] [INFO ] ✔ test dir directory: /tmp/tmp.yL9SEMAkEQ
+[2025-08-13 12:00:00 UTC] [INFO ] Performing security configuration audit...
+[2025-08-13 12:00:00 UTC] [OK   ] PASS: Private key permissions secure
+[2025-08-13 12:00:00 UTC] [OK   ] PASS: No certificates expiring within 30 days
+[2025-08-13 12:00:00 UTC] [INFO ] Security audit report written: /tmp/tmp.yL9SEMAkEQ/security-audit.txt
+DBG: run_test entering for 'Input validation' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [OK   ] Valid bool input test passed: true -> true
+[2025-08-13 12:00:00 UTC] [OK   ] Valid size input test passed: 10GB -> 10GB
+[2025-08-13 12:00:00 UTC] [OK   ] Valid bool input test passed: 1 -> 1
+[2025-08-13 12:00:00 UTC] [OK   ] Valid uint input test passed: 0 -> 0
+[2025-08-13 12:00:00 UTC] [OK   ] Valid raw input test passed: test123 -> test123
+[2025-08-13 12:00:00 UTC] [OK   ] Valid float input test passed: 3.14 -> 3.14
+[2025-08-13 12:00:00 UTC] [OK   ] Valid bool input test passed: false -> false
+[2025-08-13 12:00:00 UTC] [OK   ] Valid int input test passed: 123 -> 123
+[2025-08-13 12:00:00 UTC] [ERROR] Invalid integer for value: invalid_byte
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'SQL injection prevention' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [ERROR] Potential SQL injection detected: ' OR '1'='1
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'Path traversal protection' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [ERROR] Path is outside allowed directory: /tmp/tmp.YSFSMfBVMr/../../../etc/passwd
+[ERR TRAP] rc=1 cmd=( "$@" ) >> "${LOG_FILE}" 2>&1
+DBG: run_test entering for 'Config sanitization' at 2025-08-13 12:00:00 UTC
+[2025-08-13 12:00:00 UTC] [OK   ] Config sanitization test passed: has`backtick -> hasbacktick
+[2025-08-13 12:00:00 UTC] [OK   ] Config sanitization test passed: has space -> has space
+[2025-08-13 12:00:00 UTC] [OK   ] Config sanitization test passed: has;semicolon -> hassemicolon
+[2025-08-13 12:00:00 UTC] [OK   ] Config sanitization test passed: has"quote -> has\"quote
+[2025-08-13 12:00:00 UTC] [OK   ] Config sanitization test passed: has$dollar -> hasdollar
+[2025-08-13 12:00:00 UTC] [OK   ] Config sanitization test passed: normal_value -> normal_value

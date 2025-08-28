@@ -10,6 +10,27 @@
 # Version: 1.0.0
 #
 # Notes:
+# - Provides safe fallbacks for is_true if core didn't define it.
+# - Never logs secret values. Paths and filenames only.
+# - This is a library meant to be sourced; it intentionally avoids `set -e`.
+# ==============================================================================
+
+# Prevent multiple sourcing
+if [[ -n "${SECURITY_LIB_SOURCED:-}" ]]; then
+  return 0
+fi
+SECURITY_LIB_SOURCED=1ash
+# ==============================================================================
+# lib/security.sh
+# Security utilities: strong secrets, safe secret files, curl auth wrapper,
+# TLS certificates, and Splunk-specific security configurations.
+#
+# Dependencies: lib/core.sh (log_*, die, have_cmd, register_cleanup, is_true)
+#               lib/error-handling.sh (atomic_write, atomic_write_file)
+#
+# Version: 1.0.0
+#
+# Notes:
 # - Provides safe fallbacks for is_true if core didn’t define it.
 # - Never logs secret values. Paths and filenames only.
 # - This is a library meant to be sourced; it intentionally avoids `set -e`.
