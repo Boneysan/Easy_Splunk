@@ -3,7 +3,7 @@ set -Eeuo pipefail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
-IFS=$nt
+IFS=$'\n\t'
 
 # fix-python-compatibility.sh
 # Fix podman-compose Python compatibility issues on RHEL 8/Python 3.6

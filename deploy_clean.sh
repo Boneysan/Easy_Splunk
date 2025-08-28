@@ -3,7 +3,7 @@ set -Eeuo pipefail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
-IFS=$nt
+IFS=$'\n\t'
 
 # Easy_Splunk - Combined deployment script (hardened)
 # - Verifies runtime + compose, validates compose services

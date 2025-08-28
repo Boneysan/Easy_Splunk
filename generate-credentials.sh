@@ -3,7 +3,7 @@ set -Eeuo pipefail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
-IFS=$nt
+IFS=$'\n\t'
 
 # generate-credentials.sh - Complete credential generation with comprehensive error handling
 # Securely generates and stores credentials for Splunk cluster

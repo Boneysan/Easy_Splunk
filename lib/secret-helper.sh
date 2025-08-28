@@ -3,7 +3,7 @@ set -Eeuo pipefail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
-IFS=$nt
+IFS=$'\n\t'
 
 # Helper to fetch secrets with fallback. Used by compose and monitoring scripts.
 # Returns secret value to stdout or exits with error if not found/accessible.

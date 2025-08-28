@@ -3,7 +3,7 @@ set -Eeuo pipefail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
-IFS=$nt
+IFS=$'\n\t'
 
 # lib/compose-init.sh - Shared compose command initialization with standardized error handling
 # This library provides compose command detection and initialization for all scripts

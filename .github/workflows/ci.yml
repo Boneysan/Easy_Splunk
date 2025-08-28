@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install shellcheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+
+    - name: Run shellcheck on all .sh files
+      run: |
+        find . -name "*.sh" -type f -exec shellcheck {} \;
+
+  compose-validation:
+    name: Compose Validation
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runtime: [docker, podman]
+    container:
+      image: ${{ matrix.runtime == 'podman' && 'quay.io/podman/stable:latest' || 'docker:latest' }}
+      options: ${{ matrix.runtime == 'podman' && '--privileged' || '' }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        if command -v apt-get &> /dev/null; then
+          apt-get update && apt-get install -y jq curl
+        elif command -v apk &> /dev/null; then
+          apk add --no-cache jq curl
+        fi
+
+    - name: Setup runtime
+      run: |
+        if [[ "${{ matrix.runtime }}" == "podman" ]]; then
+          systemctl start podman || true
+          podman --version
+        else
+          systemctl start docker || true
+          docker --version
+        fi
+
+    - name: Run smoke tests
+      run: |
+        cd tests/smoke
+        chmod +x *.sh
+        ./smoke_generate_compose.sh
+        ./smoke_airgapped_bundle.sh
+
+    - name: Validate compose file generation
+      run: |
+        # Source the compose generator
+        source lib/compose-generator.sh
+
+        # Generate compose file
+        if generate_compose_file "test-compose.yml"; then
+          echo "✅ Compose file generated successfully"
+
+          # Validate with the detected runtime
+          if [[ "${{ matrix.runtime }}" == "podman" ]]; then
+            podman-compose -f test-compose.yml config
+          else
+            docker compose -f test-compose.yml config
+          fi
+        else
+          echo "❌ Failed to generate compose file"
+          exit 1
+        fi
+
+  template-regeneration-check:
+    name: Template Regeneration Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl
+
+    - name: Generate templates from config-templates
+      run: |
+        # Generate compose from small-production template
+        source lib/compose-generator.sh
+        export CONFIG_FILE="config-templates/small-production.conf"
+
+        if generate_compose_file "generated-compose.yml"; then
+          echo "✅ Template generated successfully"
+        else
+          echo "❌ Failed to generate from template"
+          exit 1
+        fi
+
+    - name: Check for differences
+      run: |
+        if [[ -f "docker-compose.yml" ]]; then
+          if diff -u docker-compose.yml generated-compose.yml; then
+            echo "✅ No differences found - templates are up to date"
+          else
+            echo "⚠️  Differences found between generated and committed compose files"
+            echo "This might indicate that templates need to be regenerated"
+            diff -u docker-compose.yml generated-compose.yml || true
+          fi
+        else
+          echo "ℹ️  No existing docker-compose.yml to compare against"
+        fi

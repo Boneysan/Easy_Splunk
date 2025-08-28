@@ -3,7 +3,7 @@ set -Eeuo pipefail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
-IFS=$nt
+IFS=$'\n\t'
 
 # lib/error-handling.sh
 # Enhanced error handling module with comprehensive validation functions for Easy_Splunk toolkit

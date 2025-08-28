@@ -3,7 +3,7 @@ set -Eeuo pipefail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
-IFS=$nt
+IFS=$'\n\t'
 
 # quick-fixes.sh - One-stop shop for all Easy_Splunk immediate s    6)
         echo "🧪 Te    7)
