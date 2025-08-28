@@ -1,10 +1,21 @@
 This document provides a detailed, step-by-step guide for new users. It covers the installation process from start to finish, offering both a simple automated path and manual platform-specific instructions, and concludes with a helpful troubleshooting guide for common issues.
 
+> 🚀 **New Users: Start Here First!**
+>
+> For the fastest path to a running cluster, see the **[Quick Start Guide](../QUICK_START.md)** - it has exact commands and takes only 5 minutes!
+>
+> Already know what you're doing? Continue reading for detailed instructions.
+
 -----
 
 # Installation Guide
 
-Welcome\! This guide will walk you through the complete process of setting up the App Cluster Orchestrator on your system. We'll cover installing prerequisites, configuring your environment, and running the application for the first time.
+Welcome\! This guide will walk you through the complete process of setting up the Easy_Splunk cluster orchestrator on your system. We'll cover installing prerequisites, configuring your environment, and running the application for the first time.
+
+**Quick Links:**
+- [🚀 Quick Start (5 minutes)](../QUICK_START.md)
+- [🐳 Docker vs Podman Guide](../DOCKER_PODMAN_GUIDE.md)
+- [🚨 Troubleshooting](../ENHANCED_ERROR_START_HERE.md)
 
 -----
 

@@ -1,17 +1,33 @@
 # Easy_Splunk
 
-A comprehensive shell-based orchestration toolkit for deploying, managing, and securing a containerized Splunk cluster on Docker or Podman.  
+A comprehensive shell-based orchestration toolkit for deploying, managing, and securing a containerized Splunk cluster on Docker or Podman.
 Supports air-gapped environments, automated credential/TLS generation, integrated monitoring (Prometheus + Grafana), and hardened RHEL/Fedora deployments.
 
 **✅ Latest Update**: Enhanced error handling with detailed troubleshooting steps and comprehensive guidance for common deployment issues. Fixed container runtime detection for RHEL 8, CentOS 8, Rocky Linux, and other enterprise distributions.
 
-**🚨 Having Issues?** Jump to [Immediate Solutions](#-immediate-solutions-troubleshooting) for quick fixes.
+---
+
+## 🚀 Quick Start (5 minutes to running cluster)
+
+**New users start here!** Get your Splunk cluster running immediately:
+
+- **[🚀 Quick Start Guide](QUICK_START.md)** - Exact commands for prerequisites, deployment, and login
+- **[🐳 Docker vs Podman Guide](DOCKER_PODMAN_GUIDE.md)** - When and why we choose Docker/Podman automatically
+- **[🚨 Enhanced Error Handling: Start Here](ENHANCED_ERROR_START_HERE.md)** - Quick fixes for common issues
+
+**Having Issues?** Jump to [Immediate Solutions](#-immediate-solutions-troubleshooting) for quick fixes.
 
 ---
 
-# Easy_Splunk
+## 📋 Table of Contents
 
-A shell-based orchestration toolkit for deploying, managing, and securing a containerized Splunk cluster on Docker or Podman. Supports air‑gapped installs, automated credentials/TLS, and optional monitoring (Prometheus + Grafana).
+- [🚀 Quick Start (5 minutes)](#-quick-start-5-minutes-to-running-cluster)
+- [🐳 Docker vs Podman Decision Guide](#-docker-vs-podman-decision-guide)
+- [🚨 Enhanced Error Handling](#-enhanced-error-handling)
+- [📦 Installation](#-installation)
+- [⚙️ Configuration](#️-configuration)
+- [🔧 Troubleshooting](#-troubleshooting)
+- [📚 Documentation](#-documentation)
 
 ---
 
