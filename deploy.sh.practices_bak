@@ -5,9 +5,6 @@ shopt -s lastpipe 2>/dev/null || true
 # Strict IFS for safer word splitting
 IFS=$'\n\t'
 
-# Global trap for useful diagnostics
-trap 'rc=$?; echo "[ERROR] ${BASH_SOURCE[0]}:$LINENO exited with $rc" >&2; exit $rc' ERR
-
 # Easy_Splunk - Combined deployment script (hardened)
 # - Verifies runtime + compose, validates compose services
 # - Prefers Docker (falls back to Podman)

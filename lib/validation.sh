@@ -3,7 +3,10 @@ set -Eeuo pipefail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
-IFS=$nt
+IFS=$'\n\t'
+
+# Global trap for useful diagnostics
+trap 'rc=$?; echo "[ERROR] ${BASH_SOURCE[0]}:$LINENO exited with $rc" >&2; exit $rc' ERR
 
 # ==============================================================================
 # lib/validation.sh
@@ -170,7 +173,7 @@ if ! type with_retry &>/dev/null; then
       fi
       
       log_message WARNING "Attempt ${attempt} failed (rc=${rc}); retrying in ${delay}s..." 2>/dev/null || echo "WARNING: Attempt ${attempt} failed, retrying in ${delay}s..." >&2
-      sleep $delay
+      sleep "$delay"
       ((attempt++))
       ((delay *= 2))
     done
@@ -343,10 +346,8 @@ validate_docker_daemon() {
     fi
   fi
 
-  if ! have_cmd "$runtime"; then
-    log_error "Container runtime not found: $runtime"
-    return 1
-  fi
+  # Ensure the runtime command is available
+  require_cmd "$runtime"
 
   if ! "$runtime" info >/dev/null 2>&1; then
     log_error "Cannot connect to $runtime daemon/service"
@@ -366,10 +367,8 @@ validate_container_network() {
     runtime="$(detect_container_runtime 2>/dev/null || echo docker)"
   fi
 
-  if ! have_cmd "$runtime"; then
-    log_error "Container runtime not found: $runtime"
-    return 1
-  fi
+  # Ensure the runtime command is available
+  require_cmd "$runtime"
 
   if ! "$runtime" network inspect "$network" >/dev/null 2>&1; then
     log_error "Container network not found: $network"
@@ -625,7 +624,10 @@ validate_splunk_license() {
 
   # Stricter XML validation if xmllint is available
   if have_cmd xmllint; then
-    xmllint --noout "$license_file" 2>/dev/null || { log_error "Invalid XML in Splunk license: $license_file"; return 1; }
+    if ! xmllint --noout "$license_file" 2>/dev/null; then
+      log_error "Invalid XML in Splunk license: $license_file"
+      return 1
+    fi
   fi
 
   log_info "✔ Splunk license file format appears valid"

@@ -315,6 +315,14 @@ require_cmd() {
   fi
 }
 
+# Specific command requirement helpers for common tools
+require_docker() { require_cmd "docker"; }
+require_podman() { require_cmd "podman"; }
+require_curl() { require_cmd "curl"; }
+require_jq() { require_cmd "jq"; }
+require_git() { require_cmd "git"; }
+require_openssl() { require_cmd "openssl"; }
+
 # Check if running as root
 is_root() { [[ "${EUID:-$(id -u)}" -eq 0 ]]; }
 
