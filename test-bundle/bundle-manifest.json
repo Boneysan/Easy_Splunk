@@ -1,0 +1,20 @@
+{
+  "schema": "air-gapped-bundle-v2",
+  "created": "2025-08-28T18:19:57Z",
+  "created_by": "boneysan@DESKTOP-3O7RLKC",
+  "runtime": "unknown",
+  "compression": "gzip",
+  "compose_version": "'3.8'",
+  "compose_checksum": "0dcf73dbacb5bd9b7951b956bfbaaa78e69eceb5753de151067e22645da5ebce",
+  "images": [
+    {
+      "name": "placeholder:latest",
+      "digest": "unknown"
+    }
+  ],
+  "files": {
+    "docker-compose.yml": "0dcf73dbacb5bd9b7951b956bfbaaa78e69eceb5753de151067e22645da5ebce"
+,
+    "test-file.txt": "0c15e883dee85bb2f3540a47ec58f617a2547117f9096417ba5422268029f501"
+  }
+}

@@ -341,6 +341,153 @@ JSON
 JSON
 }
 
+# Enhanced manifest with image digests and compose checksum
+__enhanced_bundle_manifest_json() {
+  local bundle_dir="${1:?bundle_dir required}"
+  local compose_file="${2:-${bundle_dir}/docker-compose.yml}"
+  shift 2
+  local imgs=( "$@" )
+
+  local bundle_version="${BUNDLE_VERSION:-}"
+  local bundle_arch="${BUNDLE_ARCHITECTURE:-}"
+  local created_date_iso="$(date -u +%FT%TZ)"
+  local created_from="${USER:-unknown}@$(hostname 2>/dev/null || echo unknown)"
+
+  # Get compose version and checksum
+  local compose_version="3.8"
+  local compose_checksum=""
+  if [[ -f "$compose_file" ]]; then
+    compose_version="$(grep -E '^version:' "$compose_file" | head -1 | sed 's/version:\s*//' | tr -d '"' || echo "3.8")"
+    compose_checksum="$(sha256sum "$compose_file" | awk '{print $1}')"
+  fi
+
+  cat <<JSON
+{
+  "schema": "air-gapped-bundle-v2",
+  "created": "${created_date_iso}",
+  "created_by": "${created_from}",
+  "runtime": "${CONTAINER_RUNTIME}",
+  "compression": "${TARBALL_COMPRESSION}",
+  "compose_version": "${compose_version}",
+  "compose_checksum": "${compose_checksum}",
+  "images": [
+JSON
+  local i
+  for (( i=0; i<${#imgs[@]}; i++ )); do
+    local sep=,
+    (( i == ${#imgs[@]}-1 )) && sep=""
+    local image="${imgs[$i]}"
+    local digest=""
+    if [[ "$CONTAINER_RUNTIME" == "docker" ]]; then
+      digest="$(docker inspect "$image" --format='{{index .RepoDigests 0}}' 2>/dev/null || echo "")"
+    elif [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
+      digest="$(podman inspect "$image" --format='{{index .RepoDigests 0}}' 2>/dev/null || echo "")"
+    fi
+    printf '    {"name": "%s", "digest": "%s"}%s\n' "${image}" "${digest:-unknown}" "${sep}"
+  done
+  cat <<'JSON'
+  ],
+  "files": {
+JSON
+
+  # Add checksums for all files in bundle
+  local first_file=1
+  for file in "${bundle_dir}"/*; do
+    if [[ -f "$file" ]]; then
+      local filename
+      filename="$(basename -- "$file")"
+      if [[ "$filename" != "bundle-manifest.json" ]]; then
+        if (( first_file == 0 )); then
+          echo "," >> /dev/stdout
+        fi
+        local checksum
+        checksum="$(sha256sum "$file" | awk '{print $1}')"
+        printf '    "%s": "%s"\n' "${filename}" "${checksum}"
+        first_file=0
+      fi
+    fi
+  done
+
+  cat <<'JSON'
+  }
+}
+JSON
+}
+
+# create_enhanced_airgapped_bundle <bundle_dir> <compose_file> <img...>
+# Creates enhanced bundle with comprehensive manifest
+create_enhanced_airgapped_bundle() {
+  __ensure_runtime
+  local bundle="${1:?bundle_dir required}"
+  local compose_file="${2:?compose_file required}"
+  shift 2
+  local imgs=( "$@" )
+  (( ${#imgs[@]} > 0 )) || die "${E_INVALID_INPUT:-2}" "create_enhanced_airgapped_bundle: no images"
+
+  mkdir -p -- "${bundle}"
+  chmod 755 "${bundle}" 2>/dev/null || true
+
+  # Pull everything first
+  pull_images "${imgs[@]}"
+
+  # Save to tarball inside bundle
+  local base="${bundle}/images.tar"
+  local archive_path
+  archive_path="$(save_images_archive "${base}" "${imgs[@]}")"
+
+  # Copy compose file to bundle
+  if [[ -f "$compose_file" ]]; then
+    cp "$compose_file" "${bundle}/docker-compose.yml"
+    chmod 644 "${bundle}/docker-compose.yml"
+  fi
+
+  # Write enhanced manifest (atomic)
+  __enhanced_bundle_manifest_json "${bundle}" "${compose_file}" "${imgs[@]}" | atomic_write "${bundle}/bundle-manifest.json" "644"
+
+  # Snapshot versions.env securely if available
+  if [[ -f "./versions.env" ]]; then
+    write_secret_file "${bundle}/versions.env" "$(cat ./versions.env)" "versions.env"
+  fi
+
+  # Enhanced README with verification instructions
+  cat <<EOF | atomic_write "${bundle}/README" "644"
+Air-gapped Bundle (Enhanced)
+----------------------------
+Created: $(date -u +%FT%TZ)
+Runtime: ${CONTAINER_RUNTIME}
+Compression: ${TARBALL_COMPRESSION}
+Compose Version: ${compose_version:-3.8}
+
+Files:
+  - $(basename -- "${archive_path}")
+  - $(basename -- "${archive_path}").sha256
+  - bundle-manifest.json (enhanced manifest)
+  - docker-compose.yml
+  - versions.env (if present)
+
+Pre-deployment Verification:
+  1) Verify bundle integrity:
+       ./bundle-hardening.sh /path/to/bundle
+
+  2) Verify tarballs:
+       cd /path/to/bundle && sha256sum -c *.sha256
+
+Load on target:
+  1) Verify checksum:
+       sha256sum $(basename -- "${archive_path}") | awk '{print \$1}' && cat $(basename -- "${archive_path}").sha256
+  2) Load into runtime:
+       docker load -i $(basename -- "${archive_path}")        # or
+       podman load -i $(basename -- "${archive_path}")
+  3) Start services:
+       docker compose -f docker-compose.yml up -d
+EOF
+
+  # Run security audit
+  audit_security_configuration "${bundle}/security-audit.txt"
+
+  log_success "Enhanced air-gapped bundle created at: ${bundle}"
+}
+
 # create_airgapped_bundle <bundle_dir> <img...>
 # Creates:
 #   bundle_dir/
@@ -607,6 +754,6 @@ export -f generate_checksum_file verify_checksum_file \
           load_image_archive load_airgapped_bundle verify_images_present \
           verify_bundle bundle_info list_bundle_images \
           collect_images_from_versions_file create_bundle_from_versions \
-          create_image_archive
+          create_image_archive create_enhanced_airgapped_bundle
 
 # Define version
