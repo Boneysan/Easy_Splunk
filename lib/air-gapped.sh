@@ -15,7 +15,7 @@ IFS=$'\n\t'
 #   - lib/security.sh          (write_secret_file, audit_security_configuration)
 #
 # Dependencies (detected/optional at runtime):
-#   - lib/runtime-detection.sh (detect_container_runtime, compose, capability vars)
+#   - lib/runtime.sh (detect_container_runtime, compose, capability vars)
 #   - lib/versions.sh          (load_versions_file, verify_versions_env, list_all_images)
 #
 # Expects (from required deps): log_*, die, have_cmd, atomic_write{,_file}, with_retry

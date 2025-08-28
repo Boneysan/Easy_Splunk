@@ -5,9 +5,9 @@ shopt -s lastpipe 2>/dev/null || true
 # Strict IFS for safer word splitting
 IFS=$'\n\t'
 
-# Quick if/fi matcher for runtime-detection.sh
+# Quick if/fi matcher for runtime.sh
 
-file="lib/runtime-detection.sh"
+file="lib/runtime.sh"
 if_count=0
 fi_count=0
 line_num=0

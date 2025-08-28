@@ -25,7 +25,7 @@ IFS=$'\n\t'
 #   ./restore_cluster.sh --backup-file backups/plain.tgz --skip-rollback \
 #       --only-volumes dev_app-data,dev_redis-data
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh, backup_cluster.sh, gpg (if .gpg)
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime.sh, lib/security.sh, backup_cluster.sh, gpg (if .gpg)
 # Version: 1.0.0
 # ==============================================================================
 
@@ -150,8 +150,8 @@ source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 source "${SCRIPT_DIR}/lib/run-with-log.sh"
-# shellcheck source=lib/runtime-detection.sh
-source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+# shellcheck source=lib/runtime.sh
+source "${SCRIPT_DIR}/lib/runtime.sh"
 # shellcheck source=lib/security.sh
 source "${SCRIPT_DIR}/lib/security.sh"
 # shellcheck source=backup_cluster.sh

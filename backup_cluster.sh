@@ -24,7 +24,7 @@ IFS=$'\n\t'
 #       --volumes my-app_app-data,my-app_redis-data
 #   ./backup_cluster.sh --use-backup-manager --type full
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh, gpg (unless --no-encrypt)
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime.sh, lib/security.sh, gpg (unless --no-encrypt)
 # Version: 2.0.0
 # ==============================================================================
 
@@ -45,8 +45,8 @@ setup_standard_logging "backup_cluster"
 # deps
 # shellcheck source=lib/core.sh
 source "${SCRIPT_DIR}/lib/core.sh"
-# shellcheck source=lib/runtime-detection.sh
-source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+# shellcheck source=lib/runtime.sh
+source "${SCRIPT_DIR}/lib/runtime.sh"
 # shellcheck source=lib/security.sh
 source "${SCRIPT_DIR}/lib/security.sh"
 

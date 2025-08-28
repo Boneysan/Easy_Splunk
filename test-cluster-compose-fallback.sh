@@ -37,10 +37,10 @@ else
     exit 1
 fi
 
-if source "${SCRIPT_DIR}/lib/runtime-detection.sh" 2>/dev/null; then
-    echo "✅ runtime-detection.sh loaded"
+if source "${SCRIPT_DIR}/lib/runtime.sh" 2>/dev/null; then
+    echo "✅ runtime.sh loaded"
 else
-    echo "❌ Failed to load runtime-detection.sh"
+    echo "❌ Failed to load runtime.sh"
     exit 1
 fi
 

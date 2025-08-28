@@ -27,7 +27,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 # Load test dependencies
 source lib/core.sh
 source versions.env
-source lib/runtime-detection.sh
+source lib/runtime.sh
 
 echo "=== Deterministic Runtime Selection Test ==="
 echo ""

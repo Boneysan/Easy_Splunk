@@ -10,7 +10,7 @@ IFS=$'\n\t'
 # Master script to run all unit and integration tests for the Splunk cluster orchestrator project.
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
-#               lib/validation.sh, lib/runtime-detection.sh, lib/compose-generator.sh,
+#               lib/validation.sh, lib/runtime.sh, lib/compose-generator.sh,
 #               lib/security.sh, lib/monitoring.sh, lib/parse-args.sh, lib/air-gapped.sh,
 #               lib/universal-forwarder.sh, lib/platform-helpers.sh, orchestrator.sh,
 #               generate-credentials.sh, generate-monitoring-config.sh, create-airgapped-bundle.sh,
@@ -280,7 +280,7 @@ run_test_script() {
   # Run in a subshell to avoid state pollution
   (
     # Source dependencies (ordered to satisfy guards)
-    for dep in core.sh error-handling.sh validation.sh versions.sh runtime-detection.sh compose-generator.sh security.sh monitoring.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh; do
+    for dep in core.sh error-handling.sh validation.sh versions.sh runtime.sh compose-generator.sh security.sh monitoring.sh air-gapped.sh universal-forwarder.sh platform-helpers.sh; do
       # shellcheck source=/dev/null
       source "${REPO_ROOT}/lib/${dep}"
     done

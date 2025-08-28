@@ -17,7 +17,7 @@ IFS=$'\n\t'
 # Usage:
 #   ./install-prerequisites.sh [--yes] [--runtime auto|podman|docker] [--prefer-podman] [--air-gapped DIR]
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/validation.sh, lib/runtime-detection.sh, versions.env
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/validation.sh, lib/runtime.sh, versions.env
 # Version: 1.0.0
 #
 # Usage Examples:
@@ -197,8 +197,8 @@ source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 # shellcheck source=lib/validation.sh
 source "${SCRIPT_DIR}/lib/validation.sh"
-# shellcheck source=lib/runtime-detection.sh
-source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+# shellcheck source=lib/runtime.sh
+source "${SCRIPT_DIR}/lib/runtime.sh"
 # shellcheck source=versions.env
 if [[ -f "${SCRIPT_DIR}/versions.env" ]]; then
   # Normalize potential CRLF line endings when sourcing
@@ -965,7 +965,7 @@ verify_installation_detailed() {
     enhanced_error "COMPOSE_MISSING" \
       "No compose command available for testing" \
       "$LOG_FILE" \
-      "Check runtime detection: ./lib/runtime-detection.sh" \
+      "Check runtime detection: ./lib/runtime.sh" \
       "Install compose: pip3 install podman-compose" \
       "Use native compose: podman compose --help" \
       "Check installation: ./install-prerequisites.sh --yes"

@@ -20,7 +20,7 @@ IFS=$'\n\t'
 #   --yes, -y                 Non-interactive (assume yes on prompts)
 #   -h, --help                Show usage
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime.sh, lib/security.sh
 # Version: 1.0.0
 # ==============================================================================
 
@@ -41,7 +41,7 @@ setup_standard_logging "start_cluster"
 # --- Source deps ---
 source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/compose-init.sh"
-source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+source "${SCRIPT_DIR}/lib/runtime.sh"
 source "${SCRIPT_DIR}/lib/security.sh"
 source "${SCRIPT_DIR}/lib/compose-validation.sh"
 

@@ -44,7 +44,7 @@ setup_standard_logging "create-airgapped-bundle"
 #
 # Dependencies:
 #   lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
-#   lib/runtime-detection.sh, lib/security.sh, lib/air-gapped.sh, generate-credentials.sh
+#   lib/runtime.sh, lib/security.sh, lib/air-gapped.sh, generate-credentials.sh
 # Version: 1.0.0
 # ==============================================================================
 
@@ -175,8 +175,8 @@ source "${SCRIPT_DIR}/lib/security.sh"
 source <(sed 's/\r$//' "${SCRIPT_DIR}/versions.env")
 # shellcheck source=lib/versions.sh
 source "${SCRIPT_DIR}/lib/versions.sh"
-# shellcheck source=lib/runtime-detection.sh
-source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+# shellcheck source=lib/runtime.sh
+source "${SCRIPT_DIR}/lib/runtime.sh"
 # shellcheck source=lib/air-gapped.sh
 source "${SCRIPT_DIR}/lib/air-gapped.sh"
 

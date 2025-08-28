@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 # Load dependencies
 source lib/core.sh
 source versions.env
-source lib/runtime-detection.sh
+source lib/runtime.sh
 
 show_help() {
     cat << 'EOF'

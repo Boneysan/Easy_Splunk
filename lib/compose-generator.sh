@@ -10,7 +10,7 @@ IFS=$'\n\t'
 # Compose file generator (modular, atomic, profile-aware)
 #
 # Dependencies: lib/core.sh, lib/validation.sh, lib/error-handling.sh,
-#               lib/runtime-detection.sh, versions.env
+#               lib/runtime.sh, versions.env
 # Required by: orchestrator.sh
 # Version: 1.0.0
 #

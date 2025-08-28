@@ -80,6 +80,16 @@ jobs:
           exit 1
         fi
 
+    - name: Run compose linter
+      run: |
+        # Run the compose linter on generated file
+        if ./lint-compose.sh "test-compose.yml"; then
+          echo "✅ Compose linting passed"
+        else
+          echo "❌ Compose linting failed"
+          exit 1
+        fi
+
   template-regeneration-check:
     name: Template Regeneration Check
     runs-on: ubuntu-latest
@@ -115,6 +125,34 @@ jobs:
             echo "This might indicate that templates need to be regenerated"
             diff -u docker-compose.yml generated-compose.yml || true
           fi
+  log-rotation:
+    name: Log Rotation Test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Create test logs
+      run: |
+        mkdir -p logs
+        # Create some test log files with different ages
+        for i in {1..10}; do
+          echo "Test log content $i" > "logs/test-$i.log"
+          # Set different modification times
+          touch -d "$i days ago" "logs/test-$i.log"
+        done
+
+    - name: Run log rotation
+      run: |
+        chmod +x rotate-logs.sh
+        ./rotate-logs.sh
+
+    - name: Verify log rotation worked
+      run: |
+        log_count=$(find logs -name "*.log" -o -name "*.log.gz" | wc -l)
+        echo "Remaining log files: $log_count"
+        if [[ $log_count -le 7 ]]; then  # Should keep max 7 files
+          echo "✅ Log rotation working correctly"
         else
-          echo "ℹ️  No existing docker-compose.yml to compare against"
+          echo "❌ Log rotation may not be working properly"
+          exit 1
         fi

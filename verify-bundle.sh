@@ -23,7 +23,7 @@ IFS=$'\n\t'
 #   0 = PASS, non-zero = FAIL
 #
 # Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh
-# Optional    : lib/runtime-detection.sh (for compose validation), jq, shellcheck
+# Optional    : lib/runtime.sh (for compose validation), jq, shellcheck
 # Version: 1.0.0
 # ==============================================================================
 
@@ -49,7 +49,7 @@ readonly REQUIRED_FILES_BASE=(
   "manifest.json"
   "lib/core.sh"
   "lib/error-handling.sh"
-  "lib/runtime-detection.sh"
+  "lib/runtime.sh"
   "lib/air-gapped.sh"
 )
 
@@ -184,9 +184,9 @@ _compose_validate_if_possible() {
     return 0
   fi
   local compose_cmd=""
-  if [[ -f "${root}/lib/runtime-detection.sh" ]]; then
+  if [[ -f "${root}/lib/runtime.sh" ]]; then
     # shellcheck source=/dev/null
-    source "${root}/lib/runtime-detection.sh"
+    source "${root}/lib/runtime.sh"
     if detect_container_runtime &>/dev/null; then
       compose_cmd="${COMPOSE_COMMAND}"
     fi

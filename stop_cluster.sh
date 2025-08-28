@@ -22,7 +22,7 @@ IFS=$'\n\t'
 #   --yes, -y               Non-interactive (assume yes on prompts)
 #   -h, --help              Show usage
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime.sh
 # ==============================================================================
 
 # ============================= Script Configuration ===========================
@@ -42,7 +42,7 @@ setup_standard_logging "stop_cluster"
 # --- Source Dependencies ---
 source "${SCRIPT_DIR}/lib/core.sh"
 source "${SCRIPT_DIR}/lib/compose-init.sh"
-source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+source "${SCRIPT_DIR}/lib/runtime.sh"
 
 # --- Defaults ---
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"

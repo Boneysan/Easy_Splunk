@@ -132,7 +132,7 @@ key_files=(
     "resolve-digests.sh"
     "lib/core.sh"
     "lib/error-handling.sh"
-    "lib/runtime-detection.sh"
+    "lib/runtime.sh"
     "lib/security.sh"
     "lib/monitoring.sh"
 )

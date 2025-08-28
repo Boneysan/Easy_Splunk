@@ -17,7 +17,7 @@ IFS=$'\n\t'
 #  - Creates versions.env.bak and sed sidecar backups
 #
 # Requirements
-#  - lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh, lib/security.sh (in ./lib)
+#  - lib/core.sh, lib/error-handling.sh, lib/runtime.sh, lib/security.sh (in ./lib)
 #  - Docker or Podman available to pull/inspect images
 #
 # Notes
@@ -36,8 +36,8 @@ source "${SCRIPT_DIR}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${SCRIPT_DIR}/lib/error-handling.sh"
 source "${SCRIPT_DIR}/lib/run-with-log.sh"
-# shellcheck source=lib/runtime-detection.sh
-source "${SCRIPT_DIR}/lib/runtime-detection.sh"
+# shellcheck source=lib/runtime.sh
+source "${SCRIPT_DIR}/lib/runtime.sh"
 # shellcheck source=lib/security.sh
 source "${SCRIPT_DIR}/lib/security.sh"
 # shellcheck source=lib/image-validator.sh

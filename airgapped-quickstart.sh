@@ -23,7 +23,7 @@ IFS=$'\n\t'
 # Env overrides:
 #   REQUIRED_SERVICES="app redis"   Space-separated list to health-check
 #
-# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime-detection.sh,
+# Dependencies: lib/core.sh, lib/error-handling.sh, lib/runtime.sh,
 #               lib/security.sh, lib/air-gapped.sh
 # Version: 1.0.0
 # ==============================================================================
@@ -157,8 +157,8 @@ fi
 source "${BUNDLE_ROOT}/lib/core.sh"
 # shellcheck source=lib/error-handling.sh
 source "${BUNDLE_ROOT}/lib/error-handling.sh"
-# shellcheck source=lib/runtime-detection.sh
-source "${BUNDLE_ROOT}/lib/runtime-detection.sh"
+# shellcheck source=lib/runtime.sh
+source "${BUNDLE_ROOT}/lib/runtime.sh"
 # shellcheck source=lib/security.sh
 source "${BUNDLE_ROOT}/lib/security.sh"
 # shellcheck source=lib/air-gapped.sh

@@ -337,7 +337,7 @@ check_port_conflicts() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/versions.env"
-source "$SCRIPT_DIR/lib/runtime-detection.sh"
+source "$SCRIPT_DIR/lib/runtime.sh"
 
 detect_runtime() {
     if ! detect_runtime; then

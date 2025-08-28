@@ -18,7 +18,7 @@ IFS=$'\n\t'
 #
 # Dependencies: lib/core.sh (log_*, die, is_number)
 #               lib/security.sh (audit_security_configuration, generate_self_signed_cert)
-# Optionally:   lib/runtime-detection.sh (not required)
+# Optionally:   lib/runtime.sh (not required)
 # Version: 1.0.0
 # ==============================================================================
 
