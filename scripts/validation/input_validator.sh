@@ -495,21 +495,10 @@ EOF
 fi
 
 # ============================= Script Configuration ===========================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Load standardized error handling first (two levels up from scripts/validation)
-if [[ -f "${SCRIPT_DIR}/../../lib/error-handling.sh" ]]; then
-    # shellcheck source=/dev/null
-    source "${SCRIPT_DIR}/../../lib/error-handling.sh"
-else
-    echo "ERROR: Failed to load error handling library" >&2
-    exit 1
-fi
-
-# Setup standardized logging
-setup_standard_logging "input_validator"
-
-# Set error handling
-set -euo pipefail
+# Note: This script defines validation functions and should be safe to source
+# by other libraries (for example unit tests). Avoid performing module-level
+# initialization (such as setup_standard_logging or set -euo pipefail) when
+# being sourced. If this script is executed directly, the CLI-handling above
+# will run and the caller can opt into initialization.
 
 

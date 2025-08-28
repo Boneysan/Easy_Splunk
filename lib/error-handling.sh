@@ -488,8 +488,19 @@ cleanup() {
     exit $exit_code
 }
 
-# Setup cleanup trap
-trap cleanup EXIT INT TERM
+# Note: Do not register traps or perform heavy initialization when this file is
+# being sourced by other scripts (for example unit tests). Register the cleanup
+# trap and initialize logging only when the module is executed directly or when
+# explicitly allowed.
+
+# The environment variable LIB_NO_INIT can be set to "true" to skip module
+# initialization during sourcing (useful for tests).
+
+# Register trap and initialize only when executed as a script (not sourced)
+# and when LIB_NO_INIT is not set to true.
+if [[ "${BASH_SOURCE[0]}" == "${0}" && "${LIB_NO_INIT:-false}" != "true" ]]; then
+    trap cleanup EXIT INT TERM
+fi
 
 # Validation functions for container environment
 validate_container_runtime() {
@@ -547,8 +558,16 @@ validate_python_environment() {
     return 0
 }
 
-# Initialize logging when sourced
-init_logging
+# Initialize logging only when executed directly (see guard above). If a
+# caller (script) needs logging when sourcing this library it should call
+# setup_standard_logging or init_logging explicitly. This avoids side-effects in
+# unit tests that merely source the library for function access.
+
+# If the module is executed directly and module init is allowed, initialize
+# logging now.
+if [[ "${BASH_SOURCE[0]}" == "${0}" && "${LIB_NO_INIT:-false}" != "true" ]]; then
+    init_logging
+fi
 
 # Export commonly used functions
 export -f log_message enhanced_error enhanced_compose_error enhanced_installation_error
