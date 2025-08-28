@@ -742,8 +742,8 @@ get_credentials_interactive() {
                 echo
                 if [[ ! $REPLY =~ ^[Nn]$ ]]; then
                     SPLUNK_PASSWORD=$(generate_secure_password 16)
-                    echo "Generated password: $SPLUNK_PASSWORD"
-                    echo "Please save this password securely!"
+                    log_secure INFO "Generated secure password for Splunk admin user"
+                    echo "Password generated successfully. It will be saved to credentials file."
                     password_valid=true
                 fi
             else

@@ -1,4 +1,52 @@
+# Credentials and secrets
 .credentials/
 .keys/
+secrets/
+credentials/
 *.key
 *.enc
+*.pem
+*.crt
+*.p12
+*.pfx
+.env
+.env.local
+.env.production
+*.env
+
+# Logs and runtime files
+logs/
+*.log
+*.log.*
+
+# Temporary and lock files
+*.tmp
+*.temp
+*.lock
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+
+# Docker and compose artifacts
+docker-compose.override.yml
+.docker/
+.compose/
+
+# Runtime state
+.state/
+.cache/
+*.pid
+*.sock
+
+# IDE and editor files
+.vscode/settings.json
+.idea/
+*.sublime-*
+.DS_Store
+Thumbs.db
+
+# Backup files from scripts
+*.backup.*
+*-backup-*

@@ -937,6 +937,7 @@ create_env_file() {
         echo "SPLUNK_USER=${SPLUNK_USER}"
         if (( WRITE_PASSWORD_TO_ENV )); then
             log_message WARN "Writing SPLUNK_PASSWORD into .env (convenient but NOT recommended on shared systems)"
+            # Write actual password to file, but don't echo it to console
             echo "SPLUNK_PASSWORD=${SPLUNK_PASSWORD}"
         fi
         echo "SPLUNK_SECRET=${splunk_secret}"

@@ -200,7 +200,7 @@ show_access_info() {
     echo "  📊 Grafana Dashboard:"
     echo "     URL: http://localhost:3000"
     echo "     Username: admin"
-    echo "     Password: admin_password_change_me"
+    echo "     Password: [REDACTED - check monitoring credentials]"
     echo
     echo "  📈 Prometheus:"
     echo "     URL: http://localhost:9090"
