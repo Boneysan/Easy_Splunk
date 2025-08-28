@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# easy-splunk-airgap - Create air-gapped deployment bundles
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Source core libraries
+source "${PROJECT_DIR}/lib/core.sh"
+source "${PROJECT_DIR}/lib/error-handling.sh"
+
+setup_standard_logging "easy-splunk-airgap"
+
+show_help() {
+    cat << 'EOF'
+Easy_Splunk Air-gapped Bundle Creator
+
+Create self-contained bundles for air-gapped deployments.
+
+USAGE:
+    easy-splunk-airgap [OPTIONS]
+
+OPTIONS:
+    -o, --output DIR     Output directory for bundle (default: ./airgap-bundle)
+    -c, --compose FILE   Docker compose file to bundle (default: docker-compose.yml)
+    --resolve-digests    Resolve image digests for reproducible builds
+    --verify             Verify bundle integrity after creation
+    -v, --verbose        Enable verbose output
+    -h, --help           Show this help message
+
+EXAMPLES:
+    # Create basic air-gapped bundle
+    easy-splunk-airgap
+
+    # Create bundle with digest resolution
+    easy-splunk-airgap --resolve-digests
+
+    # Create bundle in specific directory
+    easy-splunk-airgap --output /path/to/bundle
+
+    # Create and verify bundle
+    easy-splunk-airgap --verify
+
+For more information about air-gapped deployments, see:
+https://github.com/Boneysan/Easy_Splunk/blob/main/docs/AIRGAPPED_DEPLOYMENT.md
+EOF
+}
+
+main() {
+    local output_dir="./airgap-bundle"
+    local compose_file="${PROJECT_DIR}/docker-compose.yml"
+    local resolve_digests="false"
+    local verify="false"
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -o|--output)
+                output_dir="$2"
+                shift 2
+                ;;
+            -c|--compose)
+                compose_file="$2"
+                shift 2
+                ;;
+            --resolve-digests)
+                resolve_digests="true"
+                shift
+                ;;
+            --verify)
+                verify="true"
+                shift
+                ;;
+            -v|--verbose)
+                set -x
+                shift
+                ;;
+            *)
+                error_exit "Unknown option: $1"
+                ;;
+        esac
+    done
+
+    log_info "Creating air-gapped bundle"
+    log_info "Output directory: $output_dir"
+    log_info "Compose file: $compose_file"
+
+    # Ensure output directory exists
+    mkdir -p "$output_dir"
+
+    # Resolve digests if requested
+    if [[ "$resolve_digests" == "true" ]]; then
+        log_info "Resolving image digests..."
+        if [[ -x "${PROJECT_DIR}/resolve-digests.sh" ]]; then
+            "${PROJECT_DIR}/resolve-digests.sh"
+        else
+            log_warn "resolve-digests.sh not found, skipping digest resolution"
+        fi
+    fi
+
+    # Create the bundle
+    if [[ -x "${PROJECT_DIR}/create-airgapped-bundle.sh" ]]; then
+        "${PROJECT_DIR}/create-airgapped-bundle.sh" "$output_dir" "$compose_file"
+    else
+        error_exit "create-airgapped-bundle.sh not found or not executable"
+    fi
+
+    # Verify if requested
+    if [[ "$verify" == "true" ]]; then
+        log_info "Verifying bundle integrity..."
+        if [[ -x "${PROJECT_DIR}/bundle-hardening.sh" ]]; then
+            if "${PROJECT_DIR}/bundle-hardening.sh" "$output_dir"; then
+                log_success "Bundle verification passed"
+            else
+                error_exit "Bundle verification failed"
+            fi
+        else
+            log_warn "bundle-hardening.sh not found, skipping verification"
+        fi
+    fi
+
+    log_success "Air-gapped bundle created successfully in: $output_dir"
+    log_info "To deploy: copy bundle to air-gapped environment and run deployment commands"
+}
+
+main "$@"

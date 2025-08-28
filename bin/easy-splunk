@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# easy-splunk - Main entry point for Easy_Splunk operations
+# Provides a unified interface for all Splunk cluster operations
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Source core libraries
+source "${PROJECT_DIR}/lib/core.sh"
+source "${PROJECT_DIR}/lib/error-handling.sh"
+source "${PROJECT_DIR}/lib/runtime-detection.sh"
+
+# Setup logging
+setup_standard_logging "easy-splunk"
+
+# Default configuration
+CONFIG_FILE="${CONFIG_FILE:-${PROJECT_DIR}/config/active.conf}"
+COMPOSE_FILE="${COMPOSE_FILE:-${PROJECT_DIR}/docker-compose.yml}"
+
+show_help() {
+    cat << 'EOF'
+Easy_Splunk - Containerized Splunk Cluster Orchestrator
+
+USAGE:
+    easy-splunk [COMMAND] [OPTIONS]
+
+COMMANDS:
+    deploy          Deploy a Splunk cluster
+    airgap          Create air-gapped deployment bundle
+    backup          Backup cluster configuration and data
+    restore         Restore cluster from backup
+    health          Check cluster health
+    logs            Show cluster logs
+    stop            Stop the cluster
+    cleanup         Clean up cluster resources
+    generate        Generate configuration files
+
+OPTIONS:
+    -c, --config FILE    Use specific config file (default: config/active.conf)
+    -s, --size SIZE      Cluster size: small|medium|large (default: small)
+    -m, --monitoring     Enable monitoring stack
+    --dry-run           Show what would be done without executing
+    -v, --verbose        Enable verbose output
+    -h, --help           Show this help message
+
+EXAMPLES:
+    # Quick start with small cluster
+    easy-splunk deploy
+
+    # Deploy with monitoring
+    easy-splunk deploy --monitoring
+
+    # Deploy medium cluster
+    easy-splunk deploy --size medium
+
+    # Create air-gapped bundle
+    easy-splunk airgap
+
+    # Check cluster health
+    easy-splunk health
+
+    # Stop cluster
+    easy-splunk stop
+
+CONFIGURATION:
+    Default config: config/active.conf
+    Templates: config-templates/small-production.conf
+               config-templates/medium-production.conf
+               config-templates/large-production.conf
+
+For more information, see: https://github.com/Boneysan/Easy_Splunk
+EOF
+}
+
+deploy_cluster() {
+    local size="${SIZE:-small}"
+    local monitoring="${WITH_MONITORING:-false}"
+    local dry_run="${DRY_RUN:-false}"
+
+    log_info "Starting Easy_Splunk deployment"
+    log_info "Size: $size, Monitoring: $monitoring"
+
+    if [[ "$dry_run" == "true" ]]; then
+        log_info "DRY RUN: Would deploy $size cluster with monitoring=$monitoring"
+        return 0
+    fi
+
+    # Use the main deploy script
+    export SIZE="$size"
+    export WITH_MONITORING="$monitoring"
+
+    if [[ -x "${PROJECT_DIR}/deploy.sh" ]]; then
+        "${PROJECT_DIR}/deploy.sh" "$@"
+    else
+        error_exit "deploy.sh not found or not executable"
+    fi
+}
+
+airgap_bundle() {
+    log_info "Creating air-gapped deployment bundle"
+
+    if [[ -x "${PROJECT_DIR}/create-airgapped-bundle.sh" ]]; then
+        "${PROJECT_DIR}/create-airgapped-bundle.sh" "$@"
+    else
+        error_exit "create-airgapped-bundle.sh not found or not executable"
+    fi
+}
+
+backup_cluster() {
+    log_info "Backing up cluster"
+
+    if [[ -x "${PROJECT_DIR}/backup_cluster.sh" ]]; then
+        "${PROJECT_DIR}/backup_cluster.sh" "$@"
+    else
+        error_exit "backup_cluster.sh not found or not executable"
+    fi
+}
+
+restore_cluster() {
+    log_info "Restoring cluster from backup"
+
+    if [[ -x "${PROJECT_DIR}/restore_cluster.sh" ]]; then
+        "${PROJECT_DIR}/restore_cluster.sh" "$@"
+    else
+        error_exit "restore_cluster.sh not found or not executable"
+    fi
+}
+
+check_health() {
+    log_info "Checking cluster health"
+
+    if [[ -x "${PROJECT_DIR}/health_check_enhanced.sh" ]]; then
+        "${PROJECT_DIR}/health_check_enhanced.sh" "$@"
+    elif [[ -x "${PROJECT_DIR}/health_check.sh" ]]; then
+        "${PROJECT_DIR}/health_check.sh" "$@"
+    else
+        error_exit "Health check script not found"
+    fi
+}
+
+show_logs() {
+    log_info "Showing cluster logs"
+
+    # Detect runtime and show logs
+    detect_runtime
+    local runtime="$DETECTED_RUNTIME"
+
+    case "$runtime" in
+        docker)
+            if command -v docker &> /dev/null; then
+                docker compose -f "$COMPOSE_FILE" logs -f "$@"
+            else
+                error_exit "Docker not available"
+            fi
+            ;;
+        podman)
+            if command -v podman-compose &> /dev/null; then
+                podman-compose -f "$COMPOSE_FILE" logs -f "$@"
+            else
+                error_exit "podman-compose not available"
+            fi
+            ;;
+        *)
+            error_exit "Unknown runtime: $runtime"
+            ;;
+    esac
+}
+
+stop_cluster() {
+    log_info "Stopping cluster"
+
+    detect_runtime
+    local runtime="$DETECTED_RUNTIME"
+
+    case "$runtime" in
+        docker)
+            if command -v docker &> /dev/null; then
+                docker compose -f "$COMPOSE_FILE" down "$@"
+            else
+                error_exit "Docker not available"
+            fi
+            ;;
+        podman)
+            if command -v podman-compose &> /dev/null; then
+                podman-compose -f "$COMPOSE_FILE" down "$@"
+            else
+                error_exit "podman-compose not available"
+            fi
+            ;;
+        *)
+            error_exit "Unknown runtime: $runtime"
+            ;;
+    esac
+}
+
+cleanup_cluster() {
+    log_info "Cleaning up cluster resources"
+
+    detect_runtime
+    local runtime="$DETECTED_RUNTIME"
+
+    case "$runtime" in
+        docker)
+            if command -v docker &> /dev/null; then
+                docker compose -f "$COMPOSE_FILE" down -v --rmi all "$@"
+                log_info "Cleaned up Docker resources"
+            else
+                error_exit "Docker not available"
+            fi
+            ;;
+        podman)
+            if command -v podman &> /dev/null; then
+                podman-compose -f "$COMPOSE_FILE" down --volumes "$@"
+                log_info "Cleaned up Podman resources"
+            else
+                error_exit "Podman not available"
+            fi
+            ;;
+        *)
+            error_exit "Unknown runtime: $runtime"
+            ;;
+    esac
+}
+
+generate_config() {
+    log_info "Generating configuration"
+
+    if [[ -x "${PROJECT_DIR}/generate-credentials.sh" ]]; then
+        "${PROJECT_DIR}/generate-credentials.sh" "$@"
+    else
+        error_exit "generate-credentials.sh not found or not executable"
+    fi
+}
+
+# Parse command line arguments
+COMMAND=""
+SIZE="small"
+WITH_MONITORING="false"
+DRY_RUN="false"
+VERBOSE="false"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -c|--config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        -s|--size)
+            SIZE="$2"
+            shift 2
+            ;;
+        -m|--monitoring)
+            WITH_MONITORING="true"
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN="true"
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE="true"
+            set -x
+            shift
+            ;;
+        deploy|airgap|backup|restore|health|logs|stop|cleanup|generate)
+            COMMAND="$1"
+            shift
+            break
+            ;;
+        *)
+            error_exit "Unknown option: $1"
+            ;;
+    esac
+done
+
+# Execute command
+case "$COMMAND" in
+    deploy)
+        deploy_cluster "$@"
+        ;;
+    airgap)
+        airgap_bundle "$@"
+        ;;
+    backup)
+        backup_cluster "$@"
+        ;;
+    restore)
+        restore_cluster "$@"
+        ;;
+    health)
+        check_health "$@"
+        ;;
+    logs)
+        show_logs "$@"
+        ;;
+    stop)
+        stop_cluster "$@"
+        ;;
+    cleanup)
+        cleanup_cluster "$@"
+        ;;
+    generate)
+        generate_config "$@"
+        ;;
+    "")
+        show_help
+        exit 0
+        ;;
+    *)
+        error_exit "Unknown command: $COMMAND"
+        ;;
+esac

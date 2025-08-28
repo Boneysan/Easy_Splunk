@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# easy-splunk-backup - Backup and restore Splunk cluster data
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Source core libraries
+source "${PROJECT_DIR}/lib/core.sh"
+source "${PROJECT_DIR}/lib/error-handling.sh"
+
+setup_standard_logging "easy-splunk-backup"
+
+show_help() {
+    cat << 'EOF'
+Easy_Splunk Backup & Restore
+
+Backup cluster configuration and data, or restore from backups.
+
+USAGE:
+    easy-splunk-backup [COMMAND] [OPTIONS]
+
+COMMANDS:
+    backup          Create a new backup
+    restore         Restore from backup
+    list            List available backups
+    cleanup         Clean up old backups
+
+OPTIONS:
+    -d, --backup-dir DIR    Backup directory (default: ./backups)
+    -n, --name NAME         Backup name (default: auto-generated)
+    --include-data          Include Splunk data in backup (large!)
+    --exclude-logs          Exclude logs from backup
+    -v, --verbose           Enable verbose output
+    -h, --help              Show this help message
+
+EXAMPLES:
+    # Create backup
+    easy-splunk-backup backup
+
+    # Create backup with custom name
+    easy-splunk-backup backup --name "pre-upgrade-$(date +%Y%m%d)"
+
+    # List available backups
+    easy-splunk-backup list
+
+    # Restore from latest backup
+    easy-splunk-backup restore
+
+    # Restore specific backup
+    easy-splunk-backup restore --name "backup-20231201"
+
+    # Clean up backups older than 30 days
+    easy-splunk-backup cleanup --older-than 30
+
+For more information about backup strategies, see:
+https://github.com/Boneysan/Easy_Splunk/blob/main/docs/BACKUP_STRATEGY.md
+EOF
+}
+
+backup_cluster() {
+    local backup_dir="${BACKUP_DIR:-./backups}"
+    local backup_name="${BACKUP_NAME:-backup-$(date +%Y%m%d-%H%M%S)}"
+    local include_data="${INCLUDE_DATA:-false}"
+    local exclude_logs="${EXCLUDE_LOGS:-false}"
+
+    log_info "Creating cluster backup"
+    log_info "Backup directory: $backup_dir"
+    log_info "Backup name: $backup_name"
+
+    # Create backup directory
+    mkdir -p "$backup_dir"
+
+    # Use the main backup script
+    if [[ -x "${PROJECT_DIR}/backup_cluster.sh" ]]; then
+        export BACKUP_DIR="$backup_dir"
+        export BACKUP_NAME="$backup_name"
+        export INCLUDE_DATA="$include_data"
+        export EXCLUDE_LOGS="$exclude_logs"
+
+        "${PROJECT_DIR}/backup_cluster.sh" "$@"
+    else
+        error_exit "backup_cluster.sh not found or not executable"
+    fi
+}
+
+restore_cluster() {
+    local backup_dir="${BACKUP_DIR:-./backups}"
+    local backup_name="${BACKUP_NAME:-latest}"
+
+    log_info "Restoring cluster from backup"
+    log_info "Backup directory: $backup_dir"
+    log_info "Backup name: $backup_name"
+
+    # Use the main restore script
+    if [[ -x "${PROJECT_DIR}/restore_cluster.sh" ]]; then
+        export BACKUP_DIR="$backup_dir"
+        export BACKUP_NAME="$backup_name"
+
+        "${PROJECT_DIR}/restore_cluster.sh" "$@"
+    else
+        error_exit "restore_cluster.sh not found or not executable"
+    fi
+}
+
+list_backups() {
+    local backup_dir="${BACKUP_DIR:-./backups}"
+
+    log_info "Listing available backups in: $backup_dir"
+
+    if [[ -d "$backup_dir" ]]; then
+        echo "Available backups:"
+        echo "=================="
+
+        local count=0
+        for backup in "$backup_dir"/*/; do
+            if [[ -d "$backup" ]]; then
+                local name=$(basename "$backup")
+                local size=$(du -sh "$backup" 2>/dev/null | cut -f1)
+                local mtime=$(stat -c %y "$backup" 2>/dev/null | cut -d'.' -f1)
+
+                echo "📦 $name"
+                echo "   Size: $size"
+                echo "   Created: $mtime"
+                echo ""
+
+                ((count++))
+            fi
+        done
+
+        if [[ $count -eq 0 ]]; then
+            echo "No backups found in $backup_dir"
+        else
+            echo "Total: $count backup(s)"
+        fi
+    else
+        log_warn "Backup directory does not exist: $backup_dir"
+    fi
+}
+
+cleanup_backups() {
+    local backup_dir="${BACKUP_DIR:-./backups}"
+    local older_than="${OLDER_THAN:-30}"
+
+    log_info "Cleaning up backups older than $older_than days in: $backup_dir"
+
+    if [[ -d "$backup_dir" ]]; then
+        local deleted=0
+        local now=$(date +%s)
+
+        for backup in "$backup_dir"/*/; do
+            if [[ -d "$backup" ]]; then
+                local mtime=$(stat -c %Y "$backup" 2>/dev/null)
+                local age_days=$(( (now - mtime) / 86400 ))
+
+                if [[ $age_days -gt $older_than ]]; then
+                    local name=$(basename "$backup")
+                    log_info "Deleting old backup: $name (age: $age_days days)"
+                    rm -rf "$backup"
+                    ((deleted++))
+                fi
+            fi
+        done
+
+        log_success "Cleanup complete. Deleted $deleted old backup(s)."
+    else
+        log_warn "Backup directory does not exist: $backup_dir"
+    fi
+}
+
+# Parse command line arguments
+COMMAND=""
+BACKUP_DIR="./backups"
+BACKUP_NAME=""
+INCLUDE_DATA="false"
+EXCLUDE_LOGS="false"
+OLDER_THAN="30"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -d|--backup-dir)
+            BACKUP_DIR="$2"
+            shift 2
+            ;;
+        -n|--name)
+            BACKUP_NAME="$2"
+            shift 2
+            ;;
+        --include-data)
+            INCLUDE_DATA="true"
+            shift
+            ;;
+        --exclude-logs)
+            EXCLUDE_LOGS="true"
+            shift
+            ;;
+        --older-than)
+            OLDER_THAN="$2"
+            shift 2
+            ;;
+        -v|--verbose)
+            set -x
+            shift
+            ;;
+        backup|restore|list|cleanup)
+            COMMAND="$1"
+            shift
+            break
+            ;;
+        *)
+            error_exit "Unknown option: $1"
+            ;;
+    esac
+done
+
+# Execute command
+case "$COMMAND" in
+    backup)
+        backup_cluster "$@"
+        ;;
+    restore)
+        restore_cluster "$@"
+        ;;
+    list)
+        list_backups "$@"
+        ;;
+    cleanup)
+        cleanup_backups "$@"
+        ;;
+    "")
+        show_help
+        exit 0
+        ;;
+    *)
+        error_exit "Unknown command: $COMMAND"
+        ;;
+esac
