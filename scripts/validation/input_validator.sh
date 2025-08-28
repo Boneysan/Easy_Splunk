@@ -204,7 +204,7 @@ readonly MAX_PATH_LENGTH=4096
 readonly MAX_INPUT_LENGTH=8192
 readonly SAFE_PATH_PATTERN='^(/[a-zA-Z0-9][a-zA-Z0-9_.-]*)+$'
 readonly SAFE_ENV_VAR_PATTERN='^[a-zA-Z_][a-zA-Z0-9_]*$'
-readonly SAFE_INPUT_PATTERN='^[a-zA-Z0-9 _.,\-@+()]+$'
+readonly SAFE_INPUT_PATTERN='^[A-Za-z0-9 _.,@+()]+$'
 readonly SQL_INJECTION_PATTERN='.*(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|\-\-|\/\*|\*\/|;).*'
 
 # Validate cluster size (small, medium, large)
