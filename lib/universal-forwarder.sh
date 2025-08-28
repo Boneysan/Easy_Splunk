@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # lib/universal-forwarder.sh
 # Download & configure Splunk Universal Forwarder (UF).
@@ -353,4 +359,3 @@ generate_uf_outputs_config() {
 # ==============================================================================
 
 export -f download_uf_package generate_uf_outputs_config
-UF_VERSION_LIB="1.0.0"

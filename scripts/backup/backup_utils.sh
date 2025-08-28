@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # scripts/backup/backup_utils.sh
 # Utility functions for backup and recovery operations
@@ -117,8 +123,6 @@ if ! type with_retry &>/dev/null; then
 fi
 # END: Fallback functions for error handling library compatibility
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/../../lib/core.sh"

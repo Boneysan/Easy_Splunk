@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # lib/compose-generator-v2.sh
 # Template-based compose file generator (Phase 3 rewrite)

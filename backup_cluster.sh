@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 #
 # ==============================================================================
 # backup_cluster.sh  — Secure encrypted backup for container volumes
@@ -35,8 +41,6 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "backup_cluster"
 
 # Set error handling
-set -euo pipefail
-IFS=$'\n\t'
 
 # deps
 # shellcheck source=lib/core.sh
@@ -275,4 +279,3 @@ EOF
 }
 
 BACKUP_CLUSTER_VERSION="1.0.0"
-main "$@"

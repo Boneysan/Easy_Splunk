@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/unit/test_validation.sh
 # Unit tests for validation.sh, covering system resources, disk space, ports,
@@ -15,8 +21,6 @@ if [[ -n "${TEST_VALIDATION_RUNNING:-}" ]]; then
 fi
 export TEST_VALIDATION_RUNNING=1
 
-set -euo pipefail
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Disable library initialization to prevent side effects and loops
@@ -36,7 +40,6 @@ source "${SCRIPT_DIR}/../../lib/validation.sh"
 setup_standard_logging "test_validation"
 
 # Ensure ERR trap runs in functions and subshells and log any failing command
-set -o errtrace
 trap 'echo "[ERR TRAP] rc=$? cmd=$BASH_COMMAND" >> "${LOG_FILE:-/tmp/test_validation_err.log}" 2>/dev/null || true' ERR
 
 # Test counter and results

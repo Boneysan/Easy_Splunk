@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # resolve-digests.sh — pin tags in versions.env to immutable digests
 #
 # What this does
@@ -22,8 +28,6 @@
 # Version: 1.0.0
 #
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # deps
@@ -225,6 +229,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "resolve-digests"
 
 # Set error handling
-set -euo pipefail
 
 

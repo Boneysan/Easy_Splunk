@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/security/test_security_scan.sh
 # Test script for security vulnerability scanner
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck source=../../lib/core.sh

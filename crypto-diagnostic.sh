@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # crypto-diagnostic.sh - Pinpoint the encryption/decryption issue
 
-set -euo pipefail
 
 # Simple logging
 log() { printf "[%s] %s\n" "$(date '+%H:%M:%S')" "$*"; }

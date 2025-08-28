@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # test-installation-preference.sh - Test what the installation script will choose
 
 echo "=== Testing Installation Script Docker Preference ==="

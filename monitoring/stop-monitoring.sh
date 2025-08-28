@@ -1,10 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # monitoring/stop-monitoring.sh
 # Stop Splunk cluster monitoring infrastructure
 # ==============================================================================
 
-set -euo pipefail
 
 # Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -186,6 +191,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "stop-monitoring"
 
 # Set error handling
-set -euo pipefail
 
 

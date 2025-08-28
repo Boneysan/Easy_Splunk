@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # install-prerequisites.sh
 # Installs and verifies a container runtime + compose implementation.
@@ -183,8 +189,6 @@ fi
 # END: Fallback functions for error handling library compatibility
 
 # --- Strict mode & base env -----------------------------------------------------
-set -euo pipefail
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # shellcheck source=lib/core.sh
@@ -1151,6 +1155,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "install-prerequisites-old"
 
 # Set error handling
-set -euo pipefail
 
 

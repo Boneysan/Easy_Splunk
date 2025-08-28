@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 #
 # ==============================================================================
 # generate-management-scripts.sh
@@ -21,8 +27,6 @@
 # Version: 1.0.0
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 
 # --- Source Dependencies ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
@@ -90,8 +94,6 @@ _sed_escape_repl() {
 # Common prefix for generated scripts
 read -r -d '' _COMMON_PFX <<'EOS' || true
 #!/usr/bin/env bash
-set -euo pipefail
-IFS=$'\n\t'
 
 SECRETS_ENV_FILE="${SECRETS_ENV_FILE_PLACEHOLDER}"
 API_BASE_URL="${API_BASE_URL_PLACEHOLDER}"
@@ -232,6 +234,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "generate-management-scripts"
 
 # Set error handling
-set -euo pipefail
 
 

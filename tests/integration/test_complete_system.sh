@@ -1,11 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/integration/test_complete_system.sh
 # Comprehensive integration test for security, monitoring, and backup systems
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." &>/dev/null && pwd)"
@@ -520,6 +524,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "test_complete_system"
 
 # Set error handling
-set -euo pipefail
 
 

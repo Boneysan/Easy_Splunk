@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 #
 # ==============================================================================
 # parse-args.sh
@@ -513,4 +519,3 @@ parse_arguments() {
   export SPLUNK_PASSWORD SPLUNK_SECRET
 
   complete_step "parse-args"
-}

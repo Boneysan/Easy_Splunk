@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 
 KEY=$(cat credentials/.session_key)
 USER_ENC=$(cat credentials/splunk_admin_user.enc)

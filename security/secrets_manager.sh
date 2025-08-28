@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
-IFS=$'\n\t'
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 
 # Lightweight secrets manager for Easy_Splunk
 # - prefers system keyring via `secret-tool` when available

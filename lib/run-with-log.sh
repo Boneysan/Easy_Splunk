@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # lib/run-with-log.sh
 # Lightweight helper to standardize log initialization and tee stdout/stderr to the
 # log file created by lib/error-handling.sh. Intended to be sourced by entrypoint

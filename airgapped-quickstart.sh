@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # airgapped-quickstart.sh
 # Deploy from an air-gapped bundle on the offline target machine.
@@ -135,8 +141,6 @@ if ! type with_retry &>/dev/null; then
 fi
 # END: Fallback functions for error handling library compatibility
 
-set -euo pipefail
-IFS=$'\n\t'
 
 # --- Locate bundle root / libs --------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
@@ -322,6 +326,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "airgapped-quickstart"
 
 # Set error handling
-set -euo pipefail
 
 

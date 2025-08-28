@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # health_check.sh - Complete health checking with comprehensive error handling
 # Comprehensive health checks for Splunk cluster and monitoring stack
 
@@ -563,6 +569,5 @@ source "${SCRIPT_DIR}/lib/run-with-log.sh" || true
 setup_standard_logging "health_check"
 
 # Set error handling
-set -euo pipefail
 
 

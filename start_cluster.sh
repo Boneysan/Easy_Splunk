@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # start_cluster.sh
 # Starts the application cluster and verifies that all services are healthy.
@@ -31,8 +37,6 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "start_cluster"
 
 # Set error handling
-set -euo pipefail
-IFS=$'\n\t'
 
 # --- Source deps ---
 source "${SCRIPT_DIR}/lib/core.sh"
@@ -301,4 +305,3 @@ START_CLUSTER_VERSION="1.0.0"
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   exec > >(tee -a "${LOG_FILE}") 2> >(tee -a "${LOG_FILE}" >&2)
   main "$@"
-fi

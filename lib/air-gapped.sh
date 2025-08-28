@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # lib/air-gapped.sh
 # Air-gapped bundle creation, verification, and loading.
@@ -604,4 +610,3 @@ export -f generate_checksum_file verify_checksum_file \
           create_image_archive
 
 # Define version
-AIR_GAPPED_VERSION="1.0.0"

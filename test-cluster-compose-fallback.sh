@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # test-cluster-compose-fallback.sh - Test compose fallback for cluster scripts
 
 echo "🧪 Testing Cluster Scripts Compose Fallback"
@@ -94,6 +100,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "test-cluster-compose-fallback"
 
 # Set error handling
-set -euo pipefail
 
 

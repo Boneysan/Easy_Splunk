@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # lib/validation.sh
 # System and config validation helpers (pure checks + enforce wrappers).
@@ -696,4 +702,3 @@ enforce_configuration_compatibility() {
 
 # ==============================================================================
 # End of lib/validation.sh
-# ==============================================================================

@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/unit/test_install_prerequisites.sh
 # Unit tests for install-prerequisites.sh, covering OS detection, prerequisite
@@ -8,7 +14,6 @@
 #               lib/runtime-detection.sh, install-prerequisites.sh, versions.env
 # ==============================================================================
 
-set -euo pipefail
 
 # Ensure dependencies are sourced
 for script in core.sh error-handling.sh validation.sh runtime-detection.sh install-prerequisites.sh; do
@@ -81,4 +86,3 @@ run_test "Rollback registration" test_rollback_registration
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
-[[ ${TEST_FAILED} -eq 0 ]]

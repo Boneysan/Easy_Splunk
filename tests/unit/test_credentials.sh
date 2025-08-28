@@ -1,11 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/unit/test_credentials.sh
 # Unit tests for credential handling and security
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Source dependencies
@@ -220,6 +224,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "test_credentials"
 
 # Set error handling
-set -euo pipefail
 
 

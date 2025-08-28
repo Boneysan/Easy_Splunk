@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # demonstrate-enhanced-workflow.sh
 # Complete demonstration of enhanced error handling workflow with automated fixes
@@ -117,7 +123,6 @@ if ! type with_retry &>/dev/null; then
 fi
 # END: Fallback functions for error handling library compatibility
 
-set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source enhanced error handling
@@ -322,6 +327,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "demonstrate-enhanced-workflow"
 
 # Set error handling
-set -euo pipefail
 
 

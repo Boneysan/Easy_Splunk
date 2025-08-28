@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/unit/test_parse_args.sh
 # Unit tests for parse-args.sh, covering argument parsing, template loading,
@@ -8,7 +14,6 @@
 #               parse-args.sh
 # ==============================================================================
 
-set -euo pipefail
 
 # Ensure dependencies are sourced
 for script in core.sh error-handling.sh validation.sh parse-args.sh; do
@@ -91,4 +96,3 @@ run_test "Secure password storage" test_secure_password_storage
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
-[[ ${TEST_FAILED} -eq 0 ]]

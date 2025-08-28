@@ -1,7 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # validate-images.sh - Simple validation for versions.env
 
-set -euo pipefail
 
 VERSIONS_FILE="${1:-versions.env}"
 
@@ -66,4 +71,3 @@ else
     echo ""
     echo "💥 Found $errors validation errors"
     exit 1
-fi

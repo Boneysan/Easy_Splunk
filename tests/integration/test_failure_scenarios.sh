@@ -1,11 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/integration/test_failure_scenarios.sh
 # Tests for handling various failure scenarios
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/../../lib/core.sh"
@@ -188,6 +192,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "test_failure_scenarios"
 
 # Set error handling
-set -euo pipefail
 
 

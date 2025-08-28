@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # lib/monitoring.sh
 # Generate Prometheus & Grafana configs (atomic, compose-aligned).
@@ -265,4 +271,3 @@ generate_monitoring_config() {
 }
 
 # Define version
-MONITORING_VERSION="1.0.0"

@@ -1,7 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # fix-all-function-loading.sh - Systematic fix for function loading issues across all Easy_Splunk scripts
 
-set -euo pipefail
 
 echo "🔧 Applying systematic function loading fixes to all Easy_Splunk scripts..."
 

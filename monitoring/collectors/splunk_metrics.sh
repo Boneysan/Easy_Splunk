@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # monitoring/collectors/splunk_metrics.sh
 # Comprehensive Splunk metrics collector for Prometheus
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck source=../../lib/core.sh
@@ -243,6 +247,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "splunk_metrics"
 
 # Set error handling
-set -euo pipefail
 
 

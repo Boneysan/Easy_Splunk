@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # lib/platform-helpers.sh
 # RHEL-family helpers for firewalld and SELinux when running container stacks.
@@ -299,4 +305,3 @@ export -f set_selinux_file_context label_container_volume rhel_container_prepare
 export -f platform_security_summary
 
 # Define version
-PLATFORM_HELPERS_VERSION="1.0.0"

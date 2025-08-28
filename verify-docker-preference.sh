@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # verify-docker-preference.sh - Demonstrates Docker-first preference in Easy_Splunk
 
 echo "=== Easy_Splunk Docker-First Preference Verification ==="

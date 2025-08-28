@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # rhel8-docker-preference-summary.sh - Summary of RHEL 8 Docker preference enhancement
 
 echo "🎯 RHEL 8 DOCKER PREFERENCE ENHANCEMENT"

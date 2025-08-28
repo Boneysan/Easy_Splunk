@@ -1,4 +1,10 @@
-```bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/unit/test_versions.sh
@@ -6,8 +12,6 @@
 #
 # Dependencies: lib/core.sh, versions.env, lib/versions.sh
 # ==============================================================================
-set -euo pipefail
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Source dependencies
@@ -87,4 +91,3 @@ run_test "Image and version listing" test_list_images_versions
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
-```

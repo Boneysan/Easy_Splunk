@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # lib/image-validator.sh - Supply chain security and image digest validation
 
 # Prevent multiple sourcing
@@ -507,4 +513,3 @@ export -f requires_digest_enforcement validate_image_supply_chain
 export -f extract_compose_images extract_versions_images
 export -f validate_compose_supply_chain validate_versions_supply_chain
 export -f validate_deployment_supply_chain show_supply_chain_status
-export -f generate_supply_chain_report validate_supply_chain_compatibility

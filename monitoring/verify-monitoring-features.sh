@@ -1,10 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # monitoring/verify-monitoring-features.sh
 # Verification script for monitoring checklist items
 # ==============================================================================
 
-set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/core.sh"
@@ -354,6 +359,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "verify-monitoring-features"
 
 # Set error handling
-set -euo pipefail
 
 

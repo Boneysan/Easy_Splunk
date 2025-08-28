@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # function-loading-status.sh - Test all critical scripts for function loading issues
 
 
@@ -114,7 +120,6 @@ if ! type with_retry &>/dev/null; then
 fi
 # END: Fallback functions for error handling library compatibility
 
-set -euo pipefail
 
 echo "🧪 Testing Easy_Splunk Script Function Loading Status"
 echo "===================================================="

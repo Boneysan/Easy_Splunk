@@ -1,7 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # check-updates.sh - Check for newer versions of pinned images
 
-set -euo pipefail
 
 VERSIONS_FILE="${1:-versions.env}"
 
@@ -51,4 +56,3 @@ check_image_updates "$GRAFANA_IMAGE"
 
 echo ""
 echo "💡 Pro tip: Run 'docker pull <image>' to check if newer versions exist"
-echo "💡 Consider automating updates with Renovate or Dependabot"

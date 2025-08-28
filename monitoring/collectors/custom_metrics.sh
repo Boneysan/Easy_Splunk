@@ -1,11 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # monitoring/collectors/custom_metrics.sh
 # Custom Splunk metrics collection for specific business requirements
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/../../lib/core.sh"
@@ -204,6 +208,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "custom_metrics"
 
 # Set error handling
-set -euo pipefail
 
 

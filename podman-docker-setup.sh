@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # podman-docker-setup.sh
 # Install container runtime with Docker preference and Podman fallback.
@@ -19,8 +25,6 @@
 # Required by  : install-prerequisites.sh
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck source=lib/core.sh
@@ -500,6 +504,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "podman-docker-setup"
 
 # Set error handling
-set -euo pipefail
 
 

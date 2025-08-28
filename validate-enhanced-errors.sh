@@ -1,10 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # validate-enhanced-errors.sh
 # Validation script to ensure all enhanced error handling components work correctly
 # ==============================================================================
 
-set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "🔍 Enhanced Error Handling Validation"
@@ -123,6 +128,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "validate-enhanced-errors"
 
 # Set error handling
-set -euo pipefail
 
 

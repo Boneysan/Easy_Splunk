@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/unit/test_core.sh
 # Unit tests for core.sh, covering logging, error handling, system info,
@@ -6,8 +12,6 @@
 #
 # Dependencies: lib/core.sh
 # ==============================================================================
-set -euo pipefail
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Set test mode to prevent core.sh from overriding our settings
@@ -104,4 +108,3 @@ run_test "Cleanup management" test_cleanup
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
-[[ ${TEST_FAILED} -eq 0 ]]

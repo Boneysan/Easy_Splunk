@@ -1,7 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # test-with-retry-fix.sh - Test the fixed with_retry function
 
-set -euo pipefail
 
 echo "🧪 Testing with_retry function fix..."
 

@@ -1,11 +1,16 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # fix-podman-compose.sh
 # Specific fix for podman-compose issues on RHEL 8 and similar systems
 # Implements targeted troubleshooting steps for current podman-compose problems
 # ==============================================================================
 
-set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source enhanced error handling
@@ -759,6 +764,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "fix-podman-compose"
 
 # Set error handling
-set -euo pipefail
 
 

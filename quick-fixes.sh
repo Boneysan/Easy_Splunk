@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # quick-fixes.sh - One-stop shop for all Easy_Splunk immediate s    6)
         echo "🧪 Te    7)
         echo "🧪 Testing all scripts status..."

@@ -1,4 +1,10 @@
-```bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/unit/test_compose_generator.sh
@@ -7,8 +13,6 @@
 # Dependencies: lib/core.sh, lib/error-handling.sh, versions.env, lib/versions.sh,
 #               lib/validation.sh, lib/compose-generator.sh
 # ==============================================================================
-set -euo pipefail
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Source dependencies
@@ -79,4 +83,3 @@ run_test "Validate Compose config" test_validate_compose_config
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
-```

@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # tests/unit/test_orchestrator.sh
 # Unit tests for orchestrator.sh, covering full workflow with mocks.
@@ -7,8 +13,6 @@
 #               lib/validation.sh, lib/runtime-detection.sh, lib/compose-generator.sh,
 #               parse-args.sh, orchestrator.sh
 # ==============================================================================
-set -euo pipefail
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Source dependencies
@@ -120,4 +124,3 @@ run_test "Health check fallback" test_health_check_fallback
 
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
-[[ ${TEST_FAILED} -eq 0 ]]

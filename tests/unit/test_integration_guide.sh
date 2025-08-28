@@ -1,3 +1,9 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
 
 
 # ============================= Script Configuration ===========================
@@ -13,7 +19,6 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "test_integration_guide"
 
 # Set error handling
-set -euo pipefail
 ```bash
 #!/usr/bin/env bash
 # ==============================================================================
@@ -23,7 +28,6 @@ set -euo pipefail
 # Dependencies: lib/core.sh, lib/error-handling.sh, lib/security.sh, integration-guide.sh
 # Version: 1.0.0
 # ==============================================================================
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Source dependencies

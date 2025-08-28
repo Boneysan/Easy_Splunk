@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
-IFS=$'\n\t'
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Set test mode to prevent core.sh strict mode conflicts

@@ -1,8 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # test-docker-compatibility.sh - Comprehensive Docker compatibility test
 # Tests all Docker scenarios to ensure full compatibility
 
-set -euo pipefail
 
 echo "🐳 DOCKER COMPATIBILITY TEST"
 echo "============================"

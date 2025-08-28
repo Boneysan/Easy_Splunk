@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 #
 # ==============================================================================
 # verify-bundle.sh — Comprehensive verifier for air-gapped bundles
@@ -21,8 +27,6 @@
 # Version: 1.0.0
 # ==============================================================================
 
-set -euo pipefail
-IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck source=lib/core.sh
@@ -319,6 +323,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "verify-bundle"
 
 # Set error handling
-set -euo pipefail
 
 

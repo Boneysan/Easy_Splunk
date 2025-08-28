@@ -1,6 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # Update all digests in versions.env based on current tags
-set -euo pipefail
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -152,4 +157,3 @@ else
     echo -e "${GREEN}✓ Digests and metadata updated in $VERSIONS_FILE${NC}"
 fi
 # Exit with error if any updates failed
-[[ $failed -eq 0 ]] || exit 1

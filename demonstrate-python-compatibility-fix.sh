@@ -1,8 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # demonstrate-python-compatibility-fix.sh
 # Show enhanced error handling with Python compatibility detection
 
-set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "🧪 Demonstrating Enhanced Error Handling with Python Compatibility Detection"
@@ -49,6 +54,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "demonstrate-python-compatibility-fix"
 
 # Set error handling
-set -euo pipefail
 
 

@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # test-compose-validation.sh
 # Test script for compose schema validation and version pinning
@@ -23,7 +29,6 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "test-compose-validation"
 
 # Set error handling
-set -euo pipefail
 
 # Load compose validation library
 source "${SCRIPT_DIR}/lib/compose-validation.sh" || error_exit "Failed to load compose validation library"

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # Verifies resolved image lines and (optionally) checks remote digests.
-set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -307,4 +312,3 @@ else
         echo -e "${RED}✗ Image verification failed with $errors errors${NC}"
     fi
     exit 2
-fi

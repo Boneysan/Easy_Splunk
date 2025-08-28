@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # run_all_tests.sh
 # Master script to run all unit and integration tests for the Splunk cluster orchestrator project.
@@ -16,8 +22,6 @@
 # Version: 1.0.21
 # ==============================================================================
 # --- Strict Mode & Setup --------------------------------------------------------
-set -eEuo pipefail
-IFS=$'\n\t'
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # --- Source Core Dependencies ---------------------------------------------------
 # shellcheck source=lib/core.sh
@@ -432,6 +436,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "run_all_tests"
 
 # Set error handling
-set -euo pipefail
 
 

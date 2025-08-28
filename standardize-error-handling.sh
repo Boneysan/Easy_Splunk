@@ -1,7 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # standardize-error-handling.sh - Script to standardize error handling across all scripts
 
-set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -163,7 +168,6 @@ source \"\${SCRIPT_DIR}/lib/error-handling.sh\" || {
 setup_standard_logging \"$(basename "$script_path" .sh)\"
 
 # Set error handling
-set -euo pipefail
 "
 
     # Add the rest of the script, but remove fallback functions

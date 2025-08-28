@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # lib/compose-generator.sh
 # Compose file generator (modular, atomic, profile-aware)
@@ -909,4 +915,3 @@ EOF
 
 # ==============================================================================
 # End of lib/compose-generator.sh
-# ==============================================================================

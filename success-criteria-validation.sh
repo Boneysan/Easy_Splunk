@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # success-criteria-validation.sh
 # Validates all security success criteria implementation
@@ -117,7 +123,6 @@ if ! type with_retry &>/dev/null; then
 fi
 # END: Fallback functions for error handling library compatibility
 
-set -euo pipefail
 
 echo "🔍 SECURITY SUCCESS CRITERIA VALIDATION"
 echo "========================================"

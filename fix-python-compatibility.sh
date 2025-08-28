@@ -1,8 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # fix-python-compatibility.sh
 # Fix podman-compose Python compatibility issues on RHEL 8/Python 3.6
 
-set -euo pipefail
 
 echo "🔧 Fixing podman-compose Python compatibility issue..."
 

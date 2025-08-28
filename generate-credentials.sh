@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # generate-credentials.sh - Complete credential generation with comprehensive error handling
 # Securely generates and stores credentials for Splunk cluster
 
@@ -1016,6 +1022,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "generate-credentials"
 
 # Set error handling
-set -euo pipefail
 
 

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # Reads versions.env and writes .env.images with FOO_IMAGE=repo:tag or repo@sha256:digest
-set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSIONS="${VERSIONS_ENV:-$ROOT_DIR/versions.env}"
@@ -70,4 +75,3 @@ done
 
 (( fail == 0 )) || { echo "One or more image resolutions failed"; exit 2; }
 
-echo "# OK: wrote $(wc -l < "$OUT") lines to $OUT"

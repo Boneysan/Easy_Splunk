@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 #
 # tests/integration/test_full_deployment.sh
 # End-to-end release validation
@@ -10,8 +16,6 @@
 # ==============================================================================
 
 # Intentionally avoid `set -e`; we want to capture failures and keep going.
-set -uo pipefail
-IFS=$'\n\t'
 
 # --- Source deps ---
 source "./lib/core.sh"
@@ -186,6 +190,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "test_full_deployment"
 
 # Set error handling
-set -euo pipefail
 
 

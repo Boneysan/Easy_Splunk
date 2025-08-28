@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # Test script for with_retry function
 
 source lib/error-handling.sh
@@ -28,6 +34,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "test-with-retry"
 
 # Set error handling
-set -euo pipefail
 
 

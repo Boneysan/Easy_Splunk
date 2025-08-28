@@ -1,4 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # lib/error-handling.sh
 # Enhanced error handling module with comprehensive validation functions for Easy_Splunk toolkit
 
@@ -579,4 +585,3 @@ fi
 export -f log_message enhanced_error enhanced_compose_error enhanced_installation_error
 export -f enhanced_runtime_error enhanced_network_error enhanced_permission_error
 export -f validate_container_runtime validate_compose_tool validate_python_environment
-export -f with_retry init_logging setup_standard_logging run_with_log error_exit

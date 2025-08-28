@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # Easy_Splunk - Combined deployment script (hardened)
 # - Verifies runtime + compose, validates compose services
 # - Prefers Docker (falls back to Podman)
@@ -10,7 +16,6 @@
 # - Persisted state marker (config/active.conf)
 # - Cleanup/rollback on failure
 
-set -euo pipefail
 
 # ============================= Script Configuration ===========================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -471,6 +476,5 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "deploy-main"
 
 # Set error handling
-set -euo pipefail
 
 

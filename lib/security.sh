@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 # ==============================================================================
 # lib/security.sh
 # Security utilities: strong secrets, safe secret files, curl auth wrapper,
@@ -907,4 +913,3 @@ export -f generate_random_password validate_password_strength write_secret_file 
           generate_splunk_ssl_cert audit_security_configuration
 
 # Define version
-SECURITY_VERSION="1.0.0"

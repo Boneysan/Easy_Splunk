@@ -1,4 +1,10 @@
-```bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+shopt -s lastpipe 2>/dev/null || true
+
+# Strict IFS for safer word splitting
+IFS=$nt
+
 #!/usr/bin/env bash
 # ==============================================================================
 # tests/unit/test_generate_selinux_helpers.sh
@@ -7,8 +13,6 @@
 # Dependencies: lib/core.sh, lib/security.sh, lib/platform-helpers.sh, generate-selinux-helpers.sh
 # Version: 1.0.0
 # ==============================================================================
-set -euo pipefail
-IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Source dependencies
@@ -107,4 +111,3 @@ run_test "No firewall changes" test_no_firewall_changes
 # Summary
 log_info "Test summary: ${TEST_PASSED} passed, ${TEST_FAILED} failed, ${TEST_COUNT} total"
 [[ ${TEST_FAILED} -eq 0 ]]
-```
