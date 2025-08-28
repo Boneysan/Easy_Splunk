@@ -5,9 +5,6 @@ shopt -s lastpipe 2>/dev/null || true
 # Strict IFS for safer word splitting
 IFS=$'\n\t'
 
-# Global trap for useful diagnostics
-trap 'rc=$?; echo "[ERROR] ${BASH_SOURCE[0]}:$LINENO exited with $rc" >&2; exit $rc' ERR
-
 # Easy_Splunk - Combined deployment script (hardened)
 # - Verifies runtime + compose, validates compose services
 # - Prefers Docker (falls back to Podman)
@@ -1058,6 +1055,30 @@ build_deploy_cmd() {
     DEPLOY_CMD=( $COMPOSE "${COMPOSE_FILES[@]}" up -d "${COMPOSE_OPTS[@]}" )
 }
 
+# Run post-generation compose linter
+run_compose_linter() {
+    local compose_file="$1"
+    local linter_script="${SCRIPT_DIR}/lint-compose.sh"
+    
+    if [[ ! -x "$linter_script" ]]; then
+        log_message WARN "Compose linter not found or not executable: $linter_script"
+        return 0
+    fi
+    
+    log_message INFO "Running post-generation compose linter on: $compose_file"
+    
+    # Run linter with appropriate verbosity
+    local linter_cmd=("$linter_script")
+    (( QUIET )) && linter_cmd+=("--quiet")
+    linter_cmd+=("$compose_file")
+    
+    if "${linter_cmd[@]}"; then
+        log_message SUCCESS "Compose linter passed: $compose_file"
+    else
+        error_exit "Compose linter failed for: $compose_file. Security or policy violations detected."
+    fi
+}
+
 deploy_cluster() {
     log_message INFO "Starting deployment..."
     log_message INFO "Runtime: $RUNTIME"
@@ -1077,6 +1098,14 @@ deploy_cluster() {
         echo "----------------------"
         return 0
     fi
+
+    # Run post-generation compose linter for each compose file
+    log_message INFO "Running post-generation compose linter..."
+    for compose_file in "${COMPOSE_FILES[@]}"; do
+        if [[ "$compose_file" != "-f" ]] && [[ -f "$compose_file" ]]; then
+            run_compose_linter "$compose_file"
+        fi
+    done
 
     # Validate compose files before deployment
     log_message INFO "Validating compose files before deployment..."
