@@ -47,24 +47,43 @@ readonly MAX_STARTUP_WAIT=300  # 5 minutes
 readonly HEALTH_CHECK_INTERVAL=5
 readonly SERVICE_START_DELAY=10
 
-# Global variables
-WITH_MONITORING=false
-TEARDOWN=false
-RESTART=false
-FORCE=false
-COMPOSE_CMD=""
-COMPOSE_FILES=()
-SERVICES_TO_START=()
+# Acquire lock to prevent multiple instances
+acquire_lock() {
+    local lockfile="$1"
+    local timeout="${2:-30}"
+    
+    log_message INFO "Acquiring lock: $lockfile"
+    
+    # Check if lock file exists and is stale
+    if [[ -f "$lockfile" ]]; then
+        local pid
+        pid=$(grep "^PID=" "$lockfile" 2>/dev/null | cut -d'=' -f2)
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            log_message ERROR "Another instance is running (PID: $pid)"
+            return 1
+        else
+            log_message WARN "Removing stale lock file"
+            rm -f "$lockfile"
+        fi
+    fi
+    
+    # Create lock file
+    cat > "$lockfile" << EOF
+# Orchestrator Lock File
+# Created: $(date)
+# PID: $$
+# User: $(whoami)
+EOF
+    
+    log_message SUCCESS "Lock acquired: $lockfile"
+    return 0
+}
 
-# Cleanup function
-cleanup_orchestration() {
-    log_message INFO "Cleaning up orchestration resources..."
-    
-    # Remove any temporary compose files
-    rm -f "/tmp/compose_*.yml" 2>/dev/null
-    
-    # Release any locks
-    rm -f "${SCRIPT_DIR}/.orchestrator.lock" 2>/dev/null
+# Register cleanup function
+register_cleanup() {
+    local cleanup_func="$1"
+    trap "$cleanup_func" EXIT INT TERM
+    log_message DEBUG "Cleanup function registered: $cleanup_func"
 }
 
 # Usage function
@@ -307,6 +326,34 @@ init_compose_command() {
 # Validate compose files
 validate_compose_files() {
     log_message INFO "Validating compose files"
+    
+    # Check if compose file exists, generate if missing
+    if [[ ! -f "$COMPOSE_FILE" ]]; then
+        log_message INFO "Compose file not found, generating from template..."
+        
+        # Load compose generator
+        if [[ -f "${SCRIPT_DIR}/lib/compose-generator.sh" ]]; then
+            source "${SCRIPT_DIR}/lib/compose-generator.sh" || error_exit "Failed to load compose generator"
+        elif [[ -f "${SCRIPT_DIR}/lib/compose-generator-v2.sh" ]]; then
+            source "${SCRIPT_DIR}/lib/compose-generator-v2.sh" || error_exit "Failed to load compose generator v2"
+        else
+            error_exit "No compose generator found"
+        fi
+        
+        # Set default environment for Splunk generation
+        export ENABLE_SPLUNK="${ENABLE_SPLUNK:-true}"
+        export ENABLE_MONITORING="${ENABLE_MONITORING:-false}"
+        export INDEXER_COUNT="${INDEXER_COUNT:-2}"
+        export SEARCH_HEAD_COUNT="${SEARCH_HEAD_COUNT:-1}"
+        export SPLUNK_CLUSTER_MODE="${SPLUNK_CLUSTER_MODE:-cluster}"
+        
+        # Generate compose file
+        if ! generate_compose_file "$COMPOSE_FILE"; then
+            error_exit "Failed to generate compose file"
+        fi
+        
+        log_message SUCCESS "Compose file generated: $COMPOSE_FILE"
+    fi
     
     # Check main compose file
     validate_path "$COMPOSE_FILE" "file"
@@ -591,6 +638,25 @@ orchestrate() {
     
     # Display status
     display_status
+}
+
+# Cleanup function for orchestration
+cleanup_orchestration() {
+    log_message INFO "Cleaning up orchestration resources"
+    
+    # Remove lock file
+    if [[ -f "${SCRIPT_DIR}/.orchestrator.lock" ]]; then
+        rm -f "${SCRIPT_DIR}/.orchestrator.lock"
+        log_message DEBUG "Removed orchestrator lock file"
+    fi
+    
+    # Clean up any temporary files
+    if [[ -n "${TMPDIR:-}" ]] && [[ -d "$TMPDIR" ]]; then
+        find "$TMPDIR" -name "docker-compose*.tmp.*" -type f -mtime +1 -delete 2>/dev/null || true
+        log_message DEBUG "Cleaned up temporary compose files"
+    fi
+    
+    log_message INFO "Orchestration cleanup completed"
 }
 
 # Main execution

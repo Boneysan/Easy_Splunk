@@ -40,6 +40,9 @@ fi
 
 echo "Loading compose generator..."
 source lib/core.sh 2>/dev/null || echo "Warning: core.sh failed to load"
+source lib/error-handling.sh 2>/dev/null || echo "Warning: error-handling.sh failed to load"
+source lib/validation.sh 2>/dev/null || echo "Warning: validation.sh failed to load"
+source lib/compose-validation.sh 2>/dev/null || echo "Warning: compose-validation.sh failed to load"
 source lib/compose-generator.sh || {
     echo "ERROR: Failed to load compose generator"
     exit 1

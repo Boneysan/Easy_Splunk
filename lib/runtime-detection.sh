@@ -72,12 +72,18 @@ detect_runtime() {
         cached_runtime=$(grep "^RUNTIME=" "$lockfile" 2>/dev/null | cut -d'=' -f2)
         local cached_compose
         cached_compose=$(grep "^COMPOSE=" "$lockfile" 2>/dev/null | cut -d'=' -f2)
-
-        if [[ -n "$cached_runtime" ]]; then
-            log_info "✅ Using cached runtime: $cached_runtime"
+        local cached_pid
+        cached_pid=$(grep "^PID=" "$lockfile" 2>/dev/null | cut -d'=' -f2)
+        
+        # Check if the cached PID is still running
+        if [[ -n "$cached_pid" ]] && kill -0 "$cached_pid" 2>/dev/null; then
+            log_info "✅ Using cached runtime (process still active): $cached_runtime"
             export CONTAINER_RUNTIME="$cached_runtime"
             export COMPOSE_IMPL="${cached_compose:-}"
             return 0
+        else
+            log_warn "⚠️  Stale lock file detected (PID $cached_pid not running), forcing redetection"
+            rm -f "$lockfile"
         fi
     fi
 
