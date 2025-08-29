@@ -9,10 +9,10 @@ IFS=$'\n\t'
 # This library provides compose command detection and initialization for all scripts
 
 # ============================= Script Configuration ===========================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load standardized error handling first
-source "${SCRIPT_DIR}/error-handling.sh" || {
+source "${LIB_DIR}/error-handling.sh" || {
     echo "ERROR: Failed to load error handling library" >&2
     exit 1
 }

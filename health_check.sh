@@ -158,7 +158,6 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 
 # Initialize error handling (but don't exit on first failure for health checks)
 init_logging
-setup_error_trapping
 
 # Configuration
 readonly CONFIG_FILE="${SCRIPT_DIR}/config/active.conf"
@@ -550,24 +549,7 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    run_entrypoint main "$@"
+    main "$@"
 fi
-
-# ============================= Script Configuration ===========================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Load standardized error handling first
-source "${SCRIPT_DIR}/lib/error-handling.sh" || {
-    echo "ERROR: Failed to load error handling library" >&2
-    exit 1
-}
-
-# Ensure run-with-log is available
-source "${SCRIPT_DIR}/lib/run-with-log.sh" || true
-
-# Setup standardized logging
-setup_standard_logging "health_check"
-
-# Set error handling
 
 

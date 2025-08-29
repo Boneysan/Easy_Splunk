@@ -25,7 +25,10 @@ IFS=$'\n\t'
 if [[ -n "${SECURITY_LIB_SOURCED:-}" ]]; then
   return 0
 fi
-SECURITY_LIB_SOURCED=1ash
+SECURITY_LIB_SOURCED=1
+
+# Version information
+readonly SECURITY_VERSION="1.0.0"
 # ==============================================================================
 # lib/security.sh
 # Security utilities: strong secrets, safe secret files, curl auth wrapper,

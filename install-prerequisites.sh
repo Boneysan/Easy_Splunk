@@ -5,6 +5,9 @@ shopt -s lastpipe 2>/dev/null || true
 # Strict IFS for safer word splitting
 IFS=$'\n\t'
 
+# Script directory setup
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # --- config flags -------------------------------------------------------------
 AUTO_YES="${AUTO_YES:-0}"
 AUTO_CONTINUE="${AUTO_CONTINUE:-0}"   # try sg/newgrp to resume in same terminal

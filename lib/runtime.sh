@@ -16,7 +16,7 @@ trap 'rc=$?; echo "[ERROR] ${BASH_SOURCE[0]}:$LINENO exited with $rc" >&2; exit 
 # Version: 1.0.0
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---- Version and Guard ---------------------------------------------------------
 if [[ -n "${RUNTIME_LIB_VERSION:-}" ]]; then
@@ -41,7 +41,7 @@ ORCHESTRATOR_LOCK_FILE=".orchestrator.lock"
 # read_orchestrator_lock
 # Reads the current runtime lock file and sets global variables
 read_orchestrator_lock() {
-    local lock_file="${SCRIPT_DIR}/../${ORCHESTRATOR_LOCK_FILE}"
+    local lock_file="${LIB_DIR}/../${ORCHESTRATOR_LOCK_FILE}"
 
     if [[ ! -f "$lock_file" ]]; then
         log_debug "No orchestrator lock file found at: $lock_file"
@@ -88,7 +88,7 @@ read_orchestrator_lock() {
 write_orchestrator_lock() {
     local runtime="${1:-${CONTAINER_RUNTIME}}"
     local compose="${2:-${COMPOSE_IMPL}}"
-    local lock_file="${SCRIPT_DIR}/../${ORCHESTRATOR_LOCK_FILE}"
+    local lock_file="${LIB_DIR}/../${ORCHESTRATOR_LOCK_FILE}"
 
     if [[ -z "$runtime" ]]; then
         log_error "Cannot write lock file: no runtime specified"
@@ -117,7 +117,7 @@ write_orchestrator_lock() {
 # clear_orchestrator_lock
 # Removes the orchestrator lock file
 clear_orchestrator_lock() {
-    local lock_file="${SCRIPT_DIR}/../${ORCHESTRATOR_LOCK_FILE}"
+    local lock_file="${LIB_DIR}/../${ORCHESTRATOR_LOCK_FILE}"
 
     if [[ -f "$lock_file" ]]; then
         rm -f "$lock_file"
@@ -253,4 +253,4 @@ export -f clear_orchestrator_lock
 export -f enhanced_runtime_summary
 export -f initialize_runtime
 
-log_debug "Runtime library loaded (version: $RUNTIME_LIB_VERSION)"
+# log_debug "Runtime library loaded (version: $RUNTIME_LIB_VERSION)"

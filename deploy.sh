@@ -333,14 +333,9 @@ check_port_conflicts() {
 }
 
 # ============================= Runtime Detection ==============================
-# Load centralized runtime detection
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/core.sh"
-source "$SCRIPT_DIR/versions.env"
-source "$SCRIPT_DIR/lib/runtime.sh"
 
 detect_runtime() {
-    if ! detect_runtime; then
+    if ! initialize_runtime; then
         error_exit "Container runtime detection failed"
     fi
     RUNTIME="$CONTAINER_RUNTIME"
