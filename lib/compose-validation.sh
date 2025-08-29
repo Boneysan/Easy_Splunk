@@ -19,22 +19,22 @@ IFS=$'\n\t'
 # Version: 1.0.1
 # ============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load standardized error handling first
-source "${SCRIPT_DIR}/error-handling.sh" || {
+source "${LIB_DIR}/error-handling.sh" || {
     echo "ERROR: Failed to load error handling library" >&2
     return 1
 }
 
 # Load SELinux preflight checking
-if [[ -f "${SCRIPT_DIR}/selinux-preflight.sh" ]]; then
-    source "${SCRIPT_DIR}/selinux-preflight.sh"
+if [[ -f "${LIB_DIR}/selinux-preflight.sh" ]]; then
+    source "${LIB_DIR}/selinux-preflight.sh"
 fi
 
 # Load supply chain security validation
-if [[ -f "${SCRIPT_DIR}/image-validator.sh" ]]; then
-    source "${SCRIPT_DIR}/image-validator.sh"
+if [[ -f "${LIB_DIR}/image-validator.sh" ]]; then
+    source "${LIB_DIR}/image-validator.sh"
 fi
 
 # Global status

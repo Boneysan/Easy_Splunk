@@ -44,6 +44,12 @@ fi
 # Load compose validation library
 source "${SCRIPT_DIR}/lib/compose-validation.sh" || error_exit "Failed to load compose validation library"
 
+# Load core library (required by runtime.sh)
+source "${SCRIPT_DIR}/lib/core.sh" || error_exit "Failed to load core library"
+
+# Load runtime detection library
+source "${SCRIPT_DIR}/lib/runtime.sh" || error_exit "Failed to load runtime library"
+
 # Defaults / Flags
 SIZE="${SIZE:-small}"              # small|medium|large
 WITH_MONITORING=0
