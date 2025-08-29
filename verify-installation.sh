@@ -99,6 +99,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Helper function for colored output
+color_echo() {
+    local color="$1"
+    local message="$2"
+    echo -e "${color}${message}${NC}"
+}
+
 log_info() {
     echo -e "${BLUE}[INFO ]${NC} $*"
 }
@@ -244,15 +251,15 @@ echo ""
 echo "📋 NEXT STEPS:"
 echo ""
 echo "1. Deploy a Splunk cluster:"
-echo "   ${GREEN}./deploy.sh small --with-monitoring${NC}"
+color_echo "$GREEN" "   ./deploy.sh small --with-monitoring"
 echo ""
 echo "2. Or deploy a specific configuration:"
-echo "   ${GREEN}./deploy.sh medium --index-name my_app_prod --splunk-user admin${NC}"
+color_echo "$GREEN" "   ./deploy.sh medium --index-name my_app_prod --splunk-user admin"
 echo ""
 echo "3. Check deployment health:"
-echo "   ${GREEN}./health_check.sh${NC}"
+color_echo "$GREEN" "   ./health_check.sh"
 echo ""
 echo "4. Access Splunk Web UI:"
-echo "   ${GREEN}http://localhost:8000${NC}"
+color_echo "$GREEN" "   http://localhost:8000"
 echo ""
-echo "🆘 Need help? Run: ${YELLOW}./quick-fixes.sh${NC}"
+echo -e "🆘 Need help? Run: ${YELLOW}./quick-fixes.sh${NC}"
