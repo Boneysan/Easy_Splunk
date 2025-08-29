@@ -15,6 +15,14 @@ if command -v docker >/dev/null 2>&1; then
 elif command -v podman >/dev/null 2>&1; then
   RUNTIME="podman"
 else
+  echo
+  echo "❌ NO CONTAINER RUNTIME FOUND ❌"
+  echo
+  echo "Neither Docker nor Podman is installed on this system."
+  echo
+  echo "SOLUTION: Run the installation script:"
+  echo "  ./install-prerequisites.sh --yes"
+  echo
   fail "Neither Docker nor Podman found. Run ./install-prerequisites.sh"
 fi
 ok "Container runtime detected: $RUNTIME"
@@ -22,23 +30,62 @@ ok "Container runtime detected: $RUNTIME"
 # 2) daemon reachable (docker) / socket usable (podman)
 if [[ "$RUNTIME" == "docker" ]]; then
   if ! docker info >/dev/null 2>&1; then
-    fail "Docker daemon not reachable by current user. If you just added the docker group, log out/in."
+    echo
+    echo "🚨 DOCKER GROUP MEMBERSHIP ISSUE DETECTED 🚨"
+    echo
+    echo "The Docker daemon is not accessible because group membership changes"
+    echo "require a new login session to take effect."
+    echo
+    echo "SOLUTION: Log out and log back in, then run:"
+    echo "  ./verify-installation.sh"
+    echo
+    echo "Or if you want to continue in the same terminal:"
+    echo "  exit"
+    echo "  # Log back in to your system"
+    echo "  ./verify-installation.sh"
+    echo
+    fail "Docker daemon not reachable by current user. Group membership not active yet."
   fi
   ok "Docker daemon reachable"
   # 3) compose available
   if docker compose version >/dev/null 2>&1; then
     ok "docker compose available"
   else
+    echo
+    echo "❌ DOCKER COMPOSE MISSING ❌"
+    echo
+    echo "Docker Compose plugin is not installed or not working."
+    echo
+    echo "SOLUTION: Re-run the installation script:"
+    echo "  ./install-prerequisites.sh --yes"
+    echo
     fail "docker compose plugin not found. Re-run ./install-prerequisites.sh"
   fi
 else
   if ! podman info >/dev/null 2>&1; then
-    fail "Podman not functional. Re-run ./install-prerequisites.sh"
+    echo
+    echo "🚨 PODMAN ACCESS ISSUE DETECTED 🚨"
+    echo
+    echo "Podman is not accessible by the current user."
+    echo "This may be due to group membership or permission issues."
+    echo
+    echo "SOLUTION: Check your user permissions or re-run:"
+    echo "  ./install-prerequisites.sh --prefer-podman"
+    echo
+    fail "Podman not functional. Check user permissions."
   fi
   ok "Podman usable"
   if podman compose version >/dev/null 2>&1 || command -v podman-compose >/dev/null 2>&1; then
     ok "podman compose available"
   else
+    echo
+    echo "❌ PODMAN COMPOSE MISSING ❌"
+    echo
+    echo "Podman Compose is not installed or not working."
+    echo
+    echo "SOLUTION: Re-run the installation script with Podman preference:"
+    echo "  ./install-prerequisites.sh --prefer-podman --yes"
+    echo
     fail "podman compose not found. Re-run ./install-prerequisites.sh --prefer-podman"
   fi
 fi
