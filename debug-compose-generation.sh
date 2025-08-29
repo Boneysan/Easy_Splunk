@@ -57,6 +57,50 @@ fi
 if ! type safe_path &>/dev/null; then
     safe_path() { echo "$1"; }  # Simple fallback
 fi
+if ! type validate_environment_vars &>/dev/null; then
+    validate_environment_vars() {
+        log_info "Validating environment variables..."
+        # Simple validation - just check if ENABLE_SPLUNK is set
+        if [[ -z "${ENABLE_SPLUNK:-}" ]]; then
+            log_error "ENABLE_SPLUNK is not set"
+            return 1
+        fi
+        return 0
+    }
+fi
+if ! type validate_splunk_cluster_size &>/dev/null; then
+    validate_splunk_cluster_size() {
+        local indexer_count="$1"
+        local search_head_count="$2"
+        log_info "Validating Splunk cluster size: ${indexer_count} indexers, ${search_head_count} search heads"
+        # Basic validation
+        if [[ "$indexer_count" -lt 1 ]]; then
+            log_error "INDEXER_COUNT must be at least 1"
+            return 1
+        fi
+        if [[ "$search_head_count" -lt 1 ]]; then
+            log_error "SEARCH_HEAD_COUNT must be at least 1"
+            return 1
+        fi
+        return 0
+    }
+fi
+if ! type validate_image_references &>/dev/null; then
+    validate_image_references() {
+        local compose_file="$1"
+        log_info "Validating image references in: $compose_file"
+        # Simple validation - just check if file exists and has some content
+        if [[ ! -f "$compose_file" ]]; then
+            log_error "Compose file does not exist: $compose_file"
+            return 1
+        fi
+        if ! grep -q "image:" "$compose_file"; then
+            log_error "No image references found in compose file"
+            return 1
+        fi
+        return 0
+    }
+fi
 
 # Load compose generator (it will handle its own dependencies)
 echo "Loading compose-generator.sh..."
