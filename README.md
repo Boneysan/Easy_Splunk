@@ -22,12 +22,64 @@ Supports air-gapped environments, automated credential/TLS generation, integrate
 ## 📋 Table of Contents
 
 - [🚀 Quick Start (5 minutes)](#-quick-start-5-minutes-to-running-cluster)
-- [🐳 Docker vs Podman Decision Guide](#-docker-vs-podman-decision-guide)
+- [� Unified CLI Tools](#-unified-cli-tools)
+- [�🐳 Docker vs Podman Decision Guide](#-docker-vs-podman-decision-guide)
 - [🚨 Enhanced Error Handling](#-enhanced-error-handling)
 - [📦 Installation](#-installation)
 - [⚙️ Configuration](#️-configuration)
 - [🔧 Troubleshooting](#-troubleshooting)
 - [📚 Documentation](#-documentation)
+
+---
+
+## 🔧 Unified CLI Tools
+
+The toolkit provides unified command-line interfaces for simplified operations:
+
+### Main CLI (`bin/easy-splunk`)
+```bash
+# Deploy cluster with monitoring
+./bin/easy-splunk deploy --config config-templates/small-production.conf
+
+# Create air-gapped deployment bundle
+./bin/easy-splunk airgap --output my-bundle.tar.gz
+
+# Backup cluster configuration and data
+./bin/easy-splunk backup --output backup.tar.gz
+
+# Check cluster health and status
+./bin/easy-splunk health
+
+# View cluster logs
+./bin/easy-splunk logs
+
+# Stop all services
+./bin/easy-splunk stop
+
+# Clean up resources
+./bin/easy-splunk cleanup
+
+# Generate configuration files
+./bin/easy-splunk generate
+```
+
+### Specialized CLIs
+```bash
+# Air-gapped bundle creation with digest resolution
+./bin/easy-splunk-airgap --resolve-digests --verify
+
+# Backup and restore operations
+./bin/easy-splunk-backup list
+./bin/easy-splunk-backup cleanup --older-than 30
+./bin/easy-splunk-backup restore backup.tar.gz
+```
+
+### Benefits of Unified CLI
+- **Simplified commands** - Single entry point for all operations
+- **Consistent interface** - Same options and help across all tools
+- **Better error handling** - Enhanced diagnostics and troubleshooting
+- **Auto-completion** - Tab completion for commands and options
+- **Centralized logging** - All operations logged to `logs/` directory
 
 ---
 
@@ -339,7 +391,33 @@ cat docs/SECURITY_VALIDATION.md
 
 **Docker-optimized** = Automatically prefers Docker for optimal compatibility
 
-### **Installation Steps**
+### **Recent Improvements (v1.0.0)**
+
+#### **🔧 Unified CLI Architecture**
+- **New CLI Tools**: `bin/easy-splunk`, `bin/easy-splunk-airgap`, `bin/easy-splunk-backup`
+- **Simplified Commands**: Single entry point for all operations
+- **Enhanced Error Handling**: Better diagnostics and troubleshooting
+- **Centralized Logging**: All operations logged to `logs/` directory
+
+#### **📋 Log Management**
+- **Automatic Rotation**: `./rotate-logs.sh` cleans up old logs
+- **Age-based Cleanup**: Removes logs older than 7 days
+- **Count-based Limits**: Keeps only 50 most recent log files
+- **Compression**: Older logs automatically compressed
+
+#### **🔒 Security Enhancements**
+- **Variable-only Image References**: Enforced in compose files
+- **Bundle Manifest Verification**: Comprehensive air-gapped validation
+- **Runtime Lock Files**: Deterministic container runtime selection
+
+#### **🛠️ Developer Experience**
+- **Organized Scripts**: Deploy variants moved to `scripts/dev/`
+- **Enhanced CI/CD**: Additional validation steps in GitHub Actions
+- **Bash Strict Mode**: Applied to all 200+ shell scripts
+
+---
+
+## 📦 Installation
 
 The installation process uses a **two-phase approach** for reliable Docker group permission handling:
 
@@ -362,6 +440,10 @@ exit
 # 5) Verify installation and get ready to deploy
 ./verify-installation.sh
 
+# 6) Quick deployment test (optional)
+./bin/easy-splunk deploy --dry-run --config config-templates/small-production.conf
+```
+
 # 6) Deploy a cluster with monitoring
 ./deploy.sh small --with-monitoring
 
@@ -377,7 +459,17 @@ exit
 #### **Quick Installation (if you understand the requirements)**
 ```bash
 # All-in-one for experienced users who will log out/in manually
+#### **Quick Installation (if you understand the requirements)**
+```bash
+# Install prerequisites (auto-detects OS)
 ./install-prerequisites.sh --yes && echo "⚠️ Log out/in, then run: ./verify-installation.sh"
+
+# Quick deployment using unified CLI
+./bin/easy-splunk deploy --config config-templates/small-production.conf
+
+# Or using individual scripts (legacy)
+./generate-credentials.sh && ./deploy.sh --config config-templates/small-production.conf
+```
 ```
 
 ---
@@ -657,6 +749,45 @@ Common flags (subset):
 --debug                   Verbose logs
 
 # Compatibility (no-op but accepted): --mode, --skip-digests
+```
+
+---
+
+## 🆕 Recent Changes (v1.0.0)
+
+### **Unified CLI Architecture**
+The toolkit now provides simplified command-line interfaces:
+
+```bash
+# Deploy cluster
+./bin/easy-splunk deploy --config config-templates/small-production.conf
+
+# Create air-gapped bundle
+./bin/easy-splunk airgap --output my-bundle.tar.gz
+
+# Backup operations
+./bin/easy-splunk-backup list
+./bin/easy-splunk-backup cleanup --older-than 30
+
+# Health monitoring
+./bin/easy-splunk health
+./bin/easy-splunk logs
+```
+
+### **Enhanced Features**
+- **Log Rotation**: `./rotate-logs.sh` automatically manages log files
+- **Runtime Consolidation**: Single `lib/runtime.sh` for all runtime detection
+- **Security Validation**: Enforced variable-only image references
+- **CI/CD Enhancement**: Additional validation steps in GitHub Actions
+- **Script Organization**: Deploy variants moved to `scripts/dev/`
+
+### **Migration Guide**
+```bash
+# OLD (still works)
+./deploy.sh --config config-templates/small-production.conf
+
+# NEW (recommended)
+./bin/easy-splunk deploy --config config-templates/small-production.conf
 ```
 
 ---

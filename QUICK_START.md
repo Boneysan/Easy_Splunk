@@ -21,6 +21,16 @@ cd Easy_Splunk
 
 ## ⚡ Deploy Small Profile with Monitoring (5 minutes)
 
+### Option 1: Unified CLI (Recommended)
+```bash
+# Generate credentials and certificates
+./bin/easy-splunk generate
+
+# Deploy small production cluster with monitoring
+./bin/easy-splunk deploy --config config-templates/small-production.conf
+```
+
+### Option 2: Individual Scripts (Legacy)
 ```bash
 # Generate credentials and certificates
 ./generate-credentials.sh
@@ -67,10 +77,51 @@ echo "NewSecurePassword123!" > ./credentials/splunk-admin-password.txt
 # 4. Change password to something secure
 ```
 
-## 📊 Verify Your Deployment
+## � Unified CLI Tools
+
+The toolkit provides unified CLI entry points for simplified operations:
+
+### Main CLI (`bin/easy-splunk`)
+```bash
+# Deploy cluster
+./bin/easy-splunk deploy --config config-templates/small-production.conf
+
+# Create air-gapped bundle
+./bin/easy-splunk airgap --output my-bundle.tar.gz
+
+# Backup cluster
+./bin/easy-splunk backup --output backup-2025-08-29.tar.gz
+
+# Check health
+./bin/easy-splunk health
+
+# View logs
+./bin/easy-splunk logs
+
+# Stop cluster
+./bin/easy-splunk stop
+
+# Clean up resources
+./bin/easy-splunk cleanup
+```
+
+### Specialized CLIs
+```bash
+# Air-gapped bundle creation
+./bin/easy-splunk-airgap --resolve-digests --verify
+
+# Backup and restore operations
+./bin/easy-splunk-backup list
+./bin/easy-splunk-backup cleanup --older-than 30
+```
+
+## �📊 Verify Your Deployment
 
 ```bash
-# Check cluster health
+# Check cluster health (unified CLI)
+./bin/easy-splunk health
+
+# Or use individual script
 ./health_check.sh
 
 # View monitoring dashboards
@@ -80,6 +131,22 @@ open https://localhost:8000  # Splunk
 
 ## 🛠️ Common Next Steps
 
+### Using Unified CLI (Recommended)
+```bash
+# Scale up your cluster
+./bin/easy-splunk deploy --config config-templates/medium-production.conf
+
+# Enable air-gapped mode
+./bin/easy-splunk airgap
+
+# Backup your configuration
+./bin/easy-splunk backup
+
+# Monitor system resources
+./bin/easy-splunk deploy --monitoring
+```
+
+### Using Individual Scripts (Legacy)
 ```bash
 # Scale up your cluster
 ./deploy.sh --config config-templates/medium-production.conf
@@ -108,7 +175,36 @@ Jump to our [Enhanced Error Handling Guide](ENHANCED_ERROR_HANDLING_GUIDE.md) fo
 - **Development**: `config-templates/development.conf`
 - **Custom Setup**: Edit any `.conf` file in `config-templates/`
 
-## 🔍 Troubleshooting Quick Reference
+## � Maintenance & Monitoring
+
+### Log Management
+```bash
+# Rotate and clean up old logs automatically
+./rotate-logs.sh
+
+# View recent logs
+./bin/easy-splunk logs
+
+# Check system health
+./bin/easy-splunk health
+```
+
+### Backup Operations
+```bash
+# Create backup (unified CLI)
+./bin/easy-splunk backup --output my-backup.tar.gz
+
+# List available backups
+./bin/easy-splunk-backup list
+
+# Clean old backups
+./bin/easy-splunk-backup cleanup --older-than 30
+
+# Restore from backup
+./bin/easy-splunk-backup restore my-backup.tar.gz
+```
+
+## �🔍 Troubleshooting Quick Reference
 
 | Issue | Quick Fix |
 |-------|-----------|
@@ -117,6 +213,8 @@ Jump to our [Enhanced Error Handling Guide](ENHANCED_ERROR_HANDLING_GUIDE.md) fo
 | Docker not starting | `sudo systemctl start docker` |
 | Podman compose issues | `./fix-podman-compose.sh` |
 | Python 3.6 errors (RHEL 8) | `./fix-python-compatibility.sh` |
+| CLI not found | `chmod +x bin/easy-splunk*` |
+| Old logs accumulating | `./rotate-logs.sh` |
 
 ---
 
