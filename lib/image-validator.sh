@@ -12,8 +12,8 @@ IFS=$'\n\t'
 readonly IMAGE_VALIDATOR_LIB_SOURCED=1
 
 # Source required libraries
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/error-handling.sh"
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${LIB_DIR}/error-handling.sh"
 
 # =============================================================================
 # SUPPLY CHAIN SECURITY CONFIGURATION
