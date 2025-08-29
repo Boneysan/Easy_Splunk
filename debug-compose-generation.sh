@@ -1,5 +1,7 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
+#!/usr/bin/env becho "=== Alternative Test ==="
+echo "Testing compose generation without direct sourcing..."
+
+# Try to run the compose generator as a subprocessail
 shopt -s lastpipe 2>/dev/null || true
 
 # Strict IFS for safer word splitting
@@ -44,6 +46,20 @@ echo "Testing compose generation without direct sourcing..."
 # Try to run the compose generator as a subprocess
 echo "Running compose generator as subprocess..."
 bash -c "
+# Add fallback functions that might be missing
+if ! type begin_step &>/dev/null; then
+    begin_step() { log_info \"Starting: \$1\"; }
+fi
+if ! type complete_step &>/dev/null; then
+    complete_step() { log_info \"Completed: \$1\"; }
+fi
+if ! type url &>/dev/null; then
+    url() { echo \"\$1\"; }  # Simple fallback
+fi
+if ! type safe_path &>/dev/null; then
+    safe_path() { echo \"\$1\"; }  # Simple fallback
+fi
+
 export ENABLE_SPLUNK=true
 export ENABLE_MONITORING=true
 export INDEXER_COUNT=2
