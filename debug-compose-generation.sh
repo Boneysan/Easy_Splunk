@@ -14,6 +14,10 @@ IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Setup standardized logging
+source lib/error-handling.sh 2>/dev/null || echo "Warning: error-handling.sh failed to load"
+setup_standard_logging "debug-compose-generation"
+
 echo "=== Debug Compose Generation ==="
 echo "Working directory: $(pwd)"
 
@@ -40,7 +44,6 @@ fi
 
 echo "Loading compose generator..."
 source lib/core.sh 2>/dev/null || echo "Warning: core.sh failed to load"
-source lib/error-handling.sh 2>/dev/null || echo "Warning: error-handling.sh failed to load"
 source lib/validation.sh 2>/dev/null || echo "Warning: validation.sh failed to load"
 source lib/compose-validation.sh 2>/dev/null || echo "Warning: compose-validation.sh failed to load"
 source lib/compose-generator.sh || {
