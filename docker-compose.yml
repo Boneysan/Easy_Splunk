@@ -32,6 +32,7 @@ services:
       - "8089:8089"  # Management port
     environment:
       SPLUNK_START_ARGS: "--accept-license --answer-yes"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
       SPLUNK_ROLE: "splunk_cluster_master"
       SPLUNK_CLUSTER_MASTER_URL: "https://splunk-cm:8089"
       SPLUNK_PASSWORD: "${SPLUNK_PASSWORD}"
@@ -74,6 +75,7 @@ services:
       - "8088:8088"  # HTTP Event Collector
     environment:
       SPLUNK_START_ARGS: "--accept-license --answer-yes"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
       SPLUNK_ROLE: "splunk_indexer"
       SPLUNK_CLUSTER_MASTER_URL: "https://splunk-cm:8089"
       SPLUNK_INDEXER_URL: "https://splunk-idx1:8089"
@@ -120,6 +122,7 @@ services:
       - "8089:8088"  # HTTP Event Collector
     environment:
       SPLUNK_START_ARGS: "--accept-license --answer-yes"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
       SPLUNK_ROLE: "splunk_indexer"
       SPLUNK_CLUSTER_MASTER_URL: "https://splunk-cm:8089"
       SPLUNK_INDEXER_URL: "https://splunk-idx2:8089"
@@ -166,6 +169,7 @@ services:
       - "8099:8089"  # Management port
     environment:
       SPLUNK_START_ARGS: "--accept-license --answer-yes"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
       SPLUNK_ROLE: "splunk_search_head"
       SPLUNK_CLUSTER_MASTER_URL: "https://splunk-cm:8089"
       SPLUNK_SEARCH_HEAD_URL: "https://splunk-sh1:8089"
