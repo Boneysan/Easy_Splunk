@@ -426,7 +426,13 @@ build_compose_command() {
 validate_compose_services() {
     # Ensure the expected minimum services exist in the resolved config
     local services
-    if ! services="$($COMPOSE "${COMPOSE_FILES[@]}" config --services 2>/dev/null)"; then
+    log_message INFO "DEBUG: COMPOSE='$COMPOSE'"
+    log_message INFO "DEBUG: COMPOSE_FILES='${COMPOSE_FILES[*]}'"
+    log_message INFO "DEBUG: COMPOSE_PROFILES='$COMPOSE_PROFILES'"
+    local cmd="$COMPOSE ${COMPOSE_FILES[*]} --profile $COMPOSE_PROFILES config --services"
+    log_message INFO "DEBUG: Executing command: $cmd"
+    if ! services="$(eval "$COMPOSE" "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILES" config --services 2>&1)"; then
+        log_message ERROR "Command failed with output: $services"
         error_exit "Failed to parse compose services from configuration"
     fi
     if [[ "${DEBUG_MODE:-0}" == "1" || "${DEBUG:-false}" == "true" ]]; then
@@ -1061,6 +1067,9 @@ run_compose_linter() {
     local compose_file="$1"
     local linter_script="${SCRIPT_DIR}/lint-compose.sh"
     
+    log_message INFO "DEBUG: Checking linter script: $linter_script"
+    log_message INFO "DEBUG: Is executable: $([[ -x "$linter_script" ]] && echo 'YES' || echo 'NO')"
+    
     if [[ ! -x "$linter_script" ]]; then
         log_message WARN "Compose linter not found or not executable: $linter_script"
         return 0
@@ -1111,8 +1120,11 @@ deploy_cluster() {
     # Validate compose files before deployment
     log_message INFO "Validating compose files before deployment..."
     for compose_file in "${COMPOSE_FILES[@]}"; do
-        if [[ -f "$compose_file" ]]; then
+        if [[ "$compose_file" != "-f" ]] && [[ -f "$compose_file" ]]; then
             validate_before_deploy "$compose_file" "deploy.sh"
+        elif [[ "$compose_file" == "-f" ]]; then
+            # Skip the -f flag
+            continue
         else
             error_exit "Compose file not found: $compose_file"
         fi

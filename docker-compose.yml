@@ -44,7 +44,7 @@ services:
     volumes:
       - splunk-cm-etc:/opt/splunk/etc
       - splunk-cm-var:/opt/splunk/var
-    profiles: ["splunk"]
+    profiles: ["splunk", "small", "medium", "large"]
     healthcheck:
       test: ["CMD-SHELL", "curl -k -f https://localhost:8089/services/server/info >/dev/null 2>&1 || test $? -eq 22"]
       interval: 30s
@@ -88,7 +88,7 @@ services:
     volumes:
       - splunk-idx1-etc:/opt/splunk/etc
       - splunk-idx1-var:/opt/splunk/var
-    profiles: ["splunk"]
+    profiles: ["splunk", "small", "medium", "large"]
     healthcheck:
       test: ["CMD-SHELL", "$SPLUNK_HOME/bin/splunk status || exit 1"]
       interval: 30s
@@ -135,7 +135,7 @@ services:
     volumes:
       - splunk-idx2-etc:/opt/splunk/etc
       - splunk-idx2-var:/opt/splunk/var
-    profiles: ["splunk"]
+    profiles: ["splunk", "small", "medium", "large"]
     healthcheck:
       test: ["CMD-SHELL", "$SPLUNK_HOME/bin/splunk status || exit 1"]
       interval: 30s
@@ -180,7 +180,7 @@ services:
     volumes:
       - splunk-sh1-etc:/opt/splunk/etc
       - splunk-sh1-var:/opt/splunk/var
-    profiles: ["splunk"]
+    profiles: ["splunk", "small", "medium", "large"]
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8000/en-US/account/login >/dev/null || exit 1"]
       interval: 30s
@@ -203,85 +203,14 @@ services:
       options:
         max-size: "50m"
         max-file: "5"
+  # Indexer alias for deploy.sh compatibility
+  indexer:
+    extends:
+      service: splunk-idx1
+    container_name: "${COMPOSE_PROJECT_NAME:-splunk}_indexer"
+    profiles: ["small", "medium", "large"]
   # Prometheus monitoring service
-  prometheus:
-    image: "${PROMETHEUS_IMAGE}"
-    container_name: "${COMPOSE_PROJECT_NAME:-myapp}_prometheus"
-    restart: unless-stopped
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=15d'
-      - '--web.enable-lifecycle'
-    ports:
-      - "9090:9090"
-    networks:
-      - app-net
-      - splunk-net
-    volumes:
-      - $(add_selinux_flag_if_needed "./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro")
-      - prometheus-data:/prometheus
-    profiles: ["monitoring"]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
-      interval: 20s
-      timeout: 3s
-      retries: 10
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '${PROMETHEUS_CPU_LIMIT:-1}'
-          memory: '${PROMETHEUS_MEM_LIMIT:-1G}'
-        reservations:
-          cpus: '${PROMETHEUS_CPU_RESERVE:-0.5}'
-          memory: '${PROMETHEUS_MEM_RESERVE:-512M}'
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-  # Grafana dashboard service
-  grafana:
-    image: "${GRAFANA_IMAGE}"
-    container_name: "${COMPOSE_PROJECT_NAME:-myapp}_grafana"
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
-      GF_INSTALL_PLUGINS: "grafana-piechart-panel"
-    networks:
-      - app-net
-      - splunk-net
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - $(add_selinux_flag_if_needed "./config/grafana-provisioning/:/etc/grafana/provisioning/:ro")
-    profiles: ["monitoring"]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q 'database.*ok'"]
-      interval: 20s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '${GRAFANA_CPU_LIMIT:-0.5}'
-          memory: '${GRAFANA_MEM_LIMIT:-512M}'
-        reservations:
-          cpus: '${GRAFANA_CPU_RESERVE:-0.2}'
-          memory: '${GRAFANA_MEM_RESERVE:-256M}'
-    depends_on:
-      prometheus:
-        condition: service_healthy
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+
 
 networks:
   app-net:

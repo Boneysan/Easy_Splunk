@@ -1,0 +1,186 @@
+# ==============================================================================
+# monitoring/prometheus/docker-compose.monitoring.yml
+# Comprehensive Docker Compose configuration for Splunk monitoring stack
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # Prometheus - Metrics collection and alerting
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: splunk-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./splunk_rules.yml:/etc/prometheus/splunk_rules.yml:ro
+      - prometheus_data:/prometheus
+      - /etc/localtime:/etc/localtime:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--log.level=info'
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - SPLUNK_MONITOR_USER=${SPLUNK_MONITOR_USER:-monitor}
+      - SPLUNK_MONITOR_PASSWORD=${SPLUNK_MONITOR_PASSWORD:-changeme}
+    networks:
+      - monitoring
+      - splunk_cluster
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Grafana - Metrics visualization and dashboards
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: splunk-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/splunk_cluster_overview.json
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+
+  # AlertManager - Alert routing and notifications
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    container_name: splunk-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ../alerts/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ../alerts/notification_templates:/etc/alertmanager/templates:ro
+      - alertmanager_data:/alertmanager
+      - /etc/localtime:/etc/localtime:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--cluster.advertise-address=0.0.0.0:9093'
+      - '--log.level=info'
+    environment:
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - EMAIL_SMTP_HOST=${EMAIL_SMTP_HOST:-}
+      - EMAIL_FROM=${EMAIL_FROM:-alerts@company.com}
+    networks:
+      - monitoring
+
+  # Node Exporter - System metrics collection
+  node-exporter:
+    image: prom/node-exporter:v1.6.0
+    container_name: splunk-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /etc/localtime:/etc/localtime:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - monitoring
+    pid: host
+
+  # Splunk Metrics Exporter - Custom Splunk metrics
+  splunk-metrics-exporter:
+    build:
+      context: ../collectors
+      dockerfile: Dockerfile.metrics
+    container_name: splunk-metrics-exporter
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    environment:
+      - SPLUNK_HOST=${SPLUNK_INDEXER_1:-splunk-idx1}
+      - SPLUNK_PORT=8089
+      - SPLUNK_USER=${SPLUNK_MONITOR_USER:-monitor}
+      - SPLUNK_PASSWORD=${SPLUNK_MONITOR_PASSWORD:-changeme}
+      - METRICS_PORT=9090
+      - COLLECTION_INTERVAL=30
+    volumes:
+      - /run/secrets/curl_auth:/run/secrets/curl_auth:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - monitoring
+      - splunk_cluster
+    depends_on:
+      - prometheus
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /var/lib/node_exporter/textfile:/var/lib/node_exporter/textfile:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.textfile.directory=/var/lib/node_exporter/textfile'
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
