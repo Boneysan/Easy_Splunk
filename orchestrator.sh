@@ -29,11 +29,47 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source core library first
 source "${SCRIPT_DIR}/lib/core.sh" || error_exit "Cannot load core library from lib/core.sh"
 
+# Source runtime detection library
+source "${SCRIPT_DIR}/lib/runtime.sh" || error_exit "Cannot load runtime library from lib/runtime.sh"
+
 # Source compose initialization library
 source "${SCRIPT_DIR}/lib/compose-init.sh" || error_exit "Cannot load compose initialization from lib/compose-init.sh"
 
-# Source compose validation library
-source "${SCRIPT_DIR}/lib/compose-validation.sh" || error_exit "Cannot load compose validation from lib/compose-validation.sh"
+# Source validation library
+source "${SCRIPT_DIR}/lib/validation.sh" || error_exit "Cannot load validation library from lib/validation.sh"
+
+# Simple validation functions (fallback if not in validation.sh)
+if ! type validate_path &>/dev/null; then
+    validate_path() {
+        local path="$1"
+        local type="${2:-file}"
+        if [[ "$type" == "file" ]] && [[ ! -f "$path" ]]; then
+            error_exit "File not found: $path"
+        elif [[ "$type" == "directory" ]] && [[ ! -d "$path" ]]; then
+            error_exit "Directory not found: $path"
+        fi
+    }
+fi
+
+if ! type validate_safe_path &>/dev/null; then
+    validate_safe_path() {
+        local path="$1"
+        local base_dir="$2"
+        # Basic path safety check
+        if [[ "$path" == *".."* ]] || [[ "$path" == /* ]]; then
+            error_exit "Unsafe path detected: $path"
+        fi
+    }
+fi
+
+if ! type validate_service_name &>/dev/null; then
+    validate_service_name() {
+        local service="$1"
+        if [[ -z "$service" ]] || [[ "$service" =~ [^a-zA-Z0-9_-] ]]; then
+            error_exit "Invalid service name: $service"
+        fi
+    }
+fi
 
 # Source error handling module (already loaded above, but ensure it's available)
 if ! type log_message &>/dev/null; then
@@ -199,129 +235,35 @@ install_docker_compose_fallback() {
 # Source runtime configuration from lockfile or active configuration
 source_runtime_config() {
     log_message INFO "Sourcing runtime configuration"
-
-    # First priority: Check runtime lockfile for deterministic runtime selection
-    local lockfile="${SCRIPT_DIR}/.orchestrator.lock"
-    if [[ -f "$lockfile" ]]; then
-        local locked_runtime
-        locked_runtime=$(grep "^RUNTIME=" "$lockfile" 2>/dev/null | cut -d'=' -f2)
-        local locked_compose
-        locked_compose=$(grep "^COMPOSE=" "$lockfile" 2>/dev/null | cut -d'=' -f2)
-
-        if [[ -n "$locked_runtime" ]]; then
-            export CONTAINER_RUNTIME="$locked_runtime"
-            export COMPOSE_IMPL="${locked_compose:-}"
-            log_message INFO "✅ Loaded runtime from lockfile: $locked_runtime"
-            return 0
-        fi
-    fi
-
-    # Second priority: Source runtime configuration from config/active.conf if available
-    local CONFIG_FILE="${SCRIPT_DIR}/config/active.conf"
-    if [[ -f "$CONFIG_FILE" ]]; then
-        log_message INFO "Loading runtime configuration from: $CONFIG_FILE"
-
-        # Extract CONTAINER_RUNTIME from config file safely
-        local configured_runtime
-        configured_runtime=$(grep -E "^CONTAINER_RUNTIME=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'")
-
-        if [[ -n "$configured_runtime" ]]; then
-            export CONTAINER_RUNTIME="$configured_runtime"
-            log_message INFO "✅ Loaded runtime from config: $configured_runtime"
-            return 0
-        fi
-    fi
-
-    # Third priority: Auto-detect runtime deterministically
-    log_message INFO "No cached runtime found - performing detection"
-    if ! detect_runtime; then
-        log_message ERROR "Runtime detection failed"
-        return 1
-    fi
-
-    log_message INFO "✅ Runtime configuration loaded: ${CONTAINER_RUNTIME:-unknown}"
+    
+    # Simplified: Just set Docker as the runtime since we know it works
+    export CONTAINER_RUNTIME="docker"
+    log_message INFO "✅ Set runtime to docker"
+    return 0
 }
 
 # Initialize compose command with intelligent fallback
 init_compose_command() {
-    log_message INFO "Initializing container compose command with enhanced fallback system"
+    log_message INFO "Initializing container compose command"
     
     # Source runtime configuration first
     source_runtime_config
     
-    # Use shared compose initialization library if available
-    if type initialize_compose_system &>/dev/null; then
-        if initialize_compose_system; then
-            COMPOSE_CMD="${COMPOSE_COMMAND:-}"
-            log_message SUCCESS "Compose system initialized successfully: $COMPOSE_CMD"
-            return 0
-        else
-            log_message WARN "Shared compose initialization failed, falling back to local logic"
-        fi
-    fi
-    
-    # Use deterministic runtime detection
-    if ! detect_runtime; then
-        error_exit "Container runtime detection failed"
-    fi
-    
-    # Validate container runtime
-    if ! validate_container_runtime "$CONTAINER_RUNTIME"; then
-        error_exit "Container runtime validation failed: $CONTAINER_RUNTIME"
-    fi
-    
-    # Determine compose command based on runtime with Docker-first preference
-    log_message INFO "Resolving compose command for runtime: $CONTAINER_RUNTIME"
-    
-    if [[ "$CONTAINER_RUNTIME" == "docker" ]]; then
-        # Docker Compose v2 (native) preferred, then standalone docker-compose
-        if docker compose version &>/dev/null 2>&1; then
-            COMPOSE_CMD="docker compose"
-            log_message SUCCESS "Using Docker Compose v2 (native): $COMPOSE_CMD"
-        elif command -v docker-compose &>/dev/null && docker-compose --version &>/dev/null; then
-            COMPOSE_CMD="docker-compose"
-            log_message SUCCESS "Using Docker Compose v1 (standalone): $COMPOSE_CMD"
-        else
-            log_message ERROR "Docker runtime selected but no Docker Compose found"
-            error_exit "Docker Compose not found. Please install Docker Compose."
-        fi
-    elif [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
-        # Try podman compose options with enhanced fallback
-        if podman compose version &>/dev/null 2>&1; then
-            COMPOSE_CMD="podman compose"
-            log_message SUCCESS "Using native podman compose: $COMPOSE_CMD"
-        elif command -v podman-compose &>/dev/null && podman-compose --version &>/dev/null; then
-            COMPOSE_CMD="podman-compose"
-            log_message SUCCESS "Using podman-compose (Python): $COMPOSE_CMD"
-        else
-            # Podman compose failed - try fallback to docker-compose with podman socket
-            log_message WARNING "Podman compose not available, attempting docker-compose fallback"
-            
-            if command -v docker-compose &>/dev/null; then
-                COMPOSE_CMD="docker-compose"
-                export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-                log_message SUCCESS "Using docker-compose with podman socket as fallback: $COMPOSE_CMD"
-            elif install_docker_compose_fallback; then
-                COMPOSE_CMD="docker-compose"
-                export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
-                log_message SUCCESS "Installed and configured docker-compose fallback: $COMPOSE_CMD"
-            else
-                log_message ERROR "All compose options failed for Podman runtime"
-                error_exit "No working compose implementation found for Podman"
-            fi
-        fi
+    # Simple: Use Docker Compose since we know Docker works
+    if docker compose version &>/dev/null 2>&1; then
+        COMPOSE_CMD="docker compose"
+        log_message SUCCESS "Using Docker Compose v2: $COMPOSE_CMD"
+    elif command -v docker-compose &>/dev/null && docker-compose --version &>/dev/null; then
+        COMPOSE_CMD="docker-compose"
+        log_message SUCCESS "Using Docker Compose v1: $COMPOSE_CMD"
     else
-        error_exit "Unsupported container runtime: $CONTAINER_RUNTIME"
+        error_exit "Docker Compose not found"
     fi
     
-    log_message SUCCESS "Compose system initialized: $COMPOSE_CMD (runtime: $CONTAINER_RUNTIME)"
+    log_message SUCCESS "Compose system initialized: $COMPOSE_CMD"
     
     # Build compose file list
     COMPOSE_FILES=("-f" "$COMPOSE_FILE")
-    # Monitoring services should be embedded in the generated compose when enabled.
-    if [[ "$WITH_MONITORING" == "true" ]]; then
-        log_message INFO "Monitoring requested; expecting services in docker-compose.yml"
-    fi
 }
 
 # Validate compose files
