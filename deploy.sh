@@ -426,11 +426,6 @@ build_compose_command() {
 validate_compose_services() {
     # Ensure the expected minimum services exist in the resolved config
     local services
-    log_message INFO "DEBUG: COMPOSE='$COMPOSE'"
-    log_message INFO "DEBUG: COMPOSE_FILES='${COMPOSE_FILES[*]}'"
-    log_message INFO "DEBUG: COMPOSE_PROFILES='$COMPOSE_PROFILES'"
-    local cmd="$COMPOSE ${COMPOSE_FILES[*]} --profile $COMPOSE_PROFILES config --services"
-    log_message INFO "DEBUG: Executing command: $cmd"
     if ! services="$(eval "$COMPOSE" "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILES" config --services 2>&1)"; then
         log_message ERROR "Command failed with output: $services"
         error_exit "Failed to parse compose services from configuration"
@@ -1059,16 +1054,13 @@ pre_deployment_checks() {
 }
 
 build_deploy_cmd() {
-    DEPLOY_CMD=( $COMPOSE "${COMPOSE_FILES[@]}" up -d "${COMPOSE_OPTS[@]}" )
+    DEPLOY_CMD_STR="$COMPOSE ${COMPOSE_FILES[@]} up -d ${COMPOSE_OPTS[@]}"
 }
 
 # Run post-generation compose linter
 run_compose_linter() {
     local compose_file="$1"
     local linter_script="${SCRIPT_DIR}/lint-compose.sh"
-    
-    log_message INFO "DEBUG: Checking linter script: $linter_script"
-    log_message INFO "DEBUG: Is executable: $([[ -x "$linter_script" ]] && echo 'YES' || echo 'NO')"
     
     if [[ ! -x "$linter_script" ]]; then
         log_message WARN "Compose linter not found or not executable: $linter_script"
@@ -1100,7 +1092,7 @@ deploy_cluster() {
     if (( DRY_RUN )); then
         echo
         echo "---- DRY RUN MODE ----"
-        printf 'Command: %q ' "${DEPLOY_CMD[@]}"; echo
+        printf 'Command: %q ' "${DEPLOY_CMD_STR}"; echo
         echo "Environment:"
         echo "  COMPOSE_PROFILES=$COMPOSE_PROFILES"
         echo "  SPLUNK_USER=$SPLUNK_USER"
@@ -1133,7 +1125,7 @@ deploy_cluster() {
     cd "$SCRIPT_DIR" || error_exit "Failed to change to script directory"
 
     STARTED_DEPLOY=1
-    if "${DEPLOY_CMD[@]}"; then
+    if eval "$DEPLOY_CMD_STR"; then
         log_message SUCCESS "Containers started successfully"
     else
         error_exit "Deployment failed. Check logs: $LOG_FILE"
