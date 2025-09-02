@@ -46,6 +46,7 @@ readonly CONFIG_FILE="${SCRIPT_DIR}/config/active.conf"
 readonly MAX_STARTUP_WAIT=300  # 5 minutes
 readonly HEALTH_CHECK_INTERVAL=5
 readonly SERVICE_START_DELAY=10
+readonly COMPOSE_PROFILE="${COMPOSE_PROFILE:-splunk}"  # Default to splunk profile
 
 # Acquire lock to prevent multiple instances
 acquire_lock() {
@@ -366,7 +367,7 @@ validate_compose_files() {
     done
     
     # Validate compose file syntax
-    if ! $COMPOSE_CMD "${COMPOSE_FILES[@]}" config --quiet 2>/dev/null; then
+    if ! $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" config --quiet 2>/dev/null; then
         error_exit "Invalid compose configuration. Please check your compose files."
     fi
     
@@ -384,7 +385,7 @@ pull_images() {
     
     # Get list of services with error handling
     local services
-    if ! services=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" config --services 2>/dev/null); then
+    if ! services=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" config --services 2>/dev/null); then
         error_exit "Failed to get service list from compose configuration"
     fi
     
@@ -397,7 +398,7 @@ pull_images() {
         log_message INFO "Pulling image for service: $service"
         
         retry_network_operation "pull image for $service" \
-            $COMPOSE_CMD "${COMPOSE_FILES[@]}" pull "$service" || \
+            $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" pull "$service" || \
             log_message WARNING "Failed to pull image for $service, will use local if available"
     done
     
@@ -439,7 +440,7 @@ start_services() {
     
     # Create and start containers with retry
     retry_network_operation "create containers" \
-        $COMPOSE_CMD "${COMPOSE_FILES[@]}" up -d --no-recreate $services_cmd || \
+        $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" up -d --no-recreate $services_cmd || \
         error_exit "Failed to start services"
     
     # Wait for services to initialize
@@ -454,24 +455,24 @@ stop_services() {
     log_message INFO "Stopping services"
     
     # Stop containers with timeout
-    safe_execute 60 $COMPOSE_CMD "${COMPOSE_FILES[@]}" stop || \
+    safe_execute 60 $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" stop || \
         log_message WARNING "Some services may not have stopped cleanly"
     
     if [[ "$TEARDOWN" == "true" ]]; then
         log_message INFO "Removing containers and networks"
         
         # Remove containers
-        safe_execute 30 $COMPOSE_CMD "${COMPOSE_FILES[@]}" rm -f || \
+        safe_execute 30 $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" rm -f || \
             log_message WARNING "Failed to remove some containers"
         
         # Remove networks
-        safe_execute 30 $COMPOSE_CMD "${COMPOSE_FILES[@]}" down --remove-orphans || \
+        safe_execute 30 $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" down --remove-orphans || \
             log_message WARNING "Failed to remove some networks"
         
         # Clean up volumes if force flag is set
         if [[ "$FORCE" == "true" ]]; then
             log_message WARNING "Removing volumes (--force specified)"
-            safe_execute 30 $COMPOSE_CMD "${COMPOSE_FILES[@]}" down -v || \
+            safe_execute 30 $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" down -v || \
                 log_message WARNING "Failed to remove some volumes"
         fi
     fi
@@ -490,7 +491,7 @@ wait_for_service() {
     while [[ $elapsed -lt $timeout ]]; do
         # Check container status with error handling
         local status
-        status=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" ps --status running --services 2>/dev/null | grep -c "^${service}$" || true)
+        status=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" ps --status running --services 2>/dev/null | grep -c "^${service}$" || true)
         
         if [[ "$status" -eq 1 ]]; then
             # Check if service is responding (basic health check)
@@ -541,7 +542,7 @@ check_service_health() {
         *)
             # Generic check - just verify container is running
             local container_id
-            container_id=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" ps -q "$service" 2>/dev/null | head -1)
+            container_id=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" ps -q "$service" 2>/dev/null | head -1)
             if [[ -n "$container_id" ]]; then
                 local is_running
                 is_running=$($CONTAINER_RUNTIME inspect "$container_id" --format='{{.State.Running}}' 2>/dev/null || echo "false")
@@ -559,7 +560,7 @@ verify_deployment() {
     
     # Get list of expected services with error handling
     local services
-    if ! services=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" config --services 2>/dev/null); then
+    if ! services=$($COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" config --services 2>/dev/null); then
         log_message WARNING "Could not get service list for verification"
         return 1
     fi
@@ -587,11 +588,11 @@ display_status() {
     log_message INFO "Current service status:"
     
     # Show running services
-    $COMPOSE_CMD "${COMPOSE_FILES[@]}" ps || true
+    $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" ps || true
     
     # Show port mappings with error handling
     echo -e "\n${BLUE}Port Mappings:${NC}"
-    if ! $COMPOSE_CMD "${COMPOSE_FILES[@]}" ps --format="table {{.Service}}\t{{.Ports}}" 2>/dev/null; then
+    if ! $COMPOSE_CMD "${COMPOSE_FILES[@]}" --profile "$COMPOSE_PROFILE" ps --format="table {{.Service}}\t{{.Ports}}" 2>/dev/null; then
         log_message WARNING "Could not retrieve port mappings"
     fi
 }
