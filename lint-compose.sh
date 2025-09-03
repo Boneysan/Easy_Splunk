@@ -20,6 +20,13 @@ source "${SCRIPT_DIR}/lib/core.sh" 2>/dev/null || {
     exit 1
 }
 
+# Define color variables if not already defined (for compatibility)
+BLUE="${BLUE:-}"
+NC="${NC:-}"
+RED="${RED:-}"
+GREEN="${GREEN:-}"
+YELLOW="${YELLOW:-}"
+
 # Set defaults
 file="${1:-docker-compose.yml}"
 QUIET="${QUIET:-0}"

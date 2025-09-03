@@ -951,6 +951,13 @@ create_env_file() {
         echo "SPLUNK_SECRET=${splunk_secret}"
         echo "CLUSTER_SECRET=${cluster_secret}"
         echo "COMPOSE_PROJECT_NAME=splunk"
+        # Add image variables for Docker Compose
+        echo "SPLUNK_IMAGE=${SPLUNK_IMAGE}"
+        echo "UF_IMAGE=${UF_IMAGE}"
+        echo "PROMETHEUS_IMAGE=${PROMETHEUS_IMAGE}"
+        echo "GRAFANA_IMAGE=${GRAFANA_IMAGE}"
+        echo "APP_IMAGE=${APP_IMAGE}"
+        echo "REDIS_IMAGE=${REDIS_IMAGE}"
     } > "$ENV_FILE"
 
     chmod 600 "$ENV_FILE" || true
@@ -1251,9 +1258,9 @@ main() {
 
     pre_deployment_checks
     build_compose_command
-    validate_compose_services
     handle_credentials
     create_env_file
+    validate_compose_services
     build_deploy_cmd
 
     deploy_cluster
