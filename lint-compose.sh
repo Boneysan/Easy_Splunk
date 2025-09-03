@@ -58,6 +58,8 @@ check_image_variables() {
         "PROM_IMAGE"
         "PROMETHEUS_IMAGE"
         "GRAFANA_IMAGE"
+        "ALERTMANAGER_IMAGE"
+        "NODE_EXPORTER_IMAGE"
         "APP_IMAGE"
         "REDIS_IMAGE"
     )

@@ -956,6 +956,8 @@ create_env_file() {
         echo "UF_IMAGE=${UF_IMAGE}"
         echo "PROMETHEUS_IMAGE=${PROMETHEUS_IMAGE}"
         echo "GRAFANA_IMAGE=${GRAFANA_IMAGE}"
+        echo "ALERTMANAGER_IMAGE=${ALERTMANAGER_IMAGE}"
+        echo "NODE_EXPORTER_IMAGE=${NODE_EXPORTER_IMAGE}"
         echo "APP_IMAGE=${APP_IMAGE}"
         echo "REDIS_IMAGE=${REDIS_IMAGE}"
     } > "$ENV_FILE"
