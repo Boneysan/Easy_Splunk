@@ -93,6 +93,11 @@ log_message() {
     esac
 }
 
+# State flags
+CREDENTIALS_GENERATED=0
+ENV_GENERATED=0
+HEALTH_CHECK_RUNNING=0
+
 # Runtime detection
 RUNTIME=""
 COMPOSE=""
@@ -143,14 +148,14 @@ on_error() {
                 fi
             fi
         fi
-        # Clean up generated files
-        if (( CREDENTIALS_GENERATED )); then
+        # Clean up generated files (but not during health checks)
+        if (( CREDENTIALS_GENERATED && ! HEALTH_CHECK_RUNNING )); then
             log_message WARN "Cleaning up generated credential files..."
             rm -f "${CREDS_USER_FILE}" "${CREDS_PASS_FILE}" || true
             rm -f "${CREDS_USER_FILE}.enc" "${CREDS_PASS_FILE}.enc" || true
             rm -f "${CREDS_DIR}/.session_key" || true
         fi
-        if (( ENV_GENERATED )); then
+        if (( ENV_GENERATED && ! HEALTH_CHECK_RUNNING )); then
             log_message WARN "Cleaning up generated .env file..."
             rm -f "${ENV_FILE}" || true
         fi
@@ -1004,22 +1009,40 @@ run_health_checks() {
         return 0
     fi
 
+    HEALTH_CHECK_RUNNING=1
     log_message INFO "Running health checks..."
     sleep 10
 
-    local running_count
-    if out_json=$($COMPOSE "${COMPOSE_FILES[@]}" ps --status running --format json 2>/dev/null); then
-        running_count=$(printf "%s" "$out_json" | grep -ci splunk || true)
-    else
-        # Fallback: plain text listing
-        out_text=$($COMPOSE "${COMPOSE_FILES[@]}" ps 2>/dev/null || true)
-        running_count=$(printf "%s" "$out_text" | grep -ciE 'splunk.*(Up|running)' || true)
+    local running_count=0
+    
+    # Primary method: Use compose if .env file exists
+    if [[ -f "${ENV_FILE}" ]]; then
+        if out_json=$($COMPOSE "${COMPOSE_FILES[@]}" ps --status running --format json 2>/dev/null); then
+            running_count=$(printf "%s" "$out_json" | grep -ci splunk || true)
+        else
+            # Fallback: plain text listing
+            out_text=$($COMPOSE "${COMPOSE_FILES[@]}" ps 2>/dev/null || true)
+            running_count=$(printf "%s" "$out_text" | grep -ciE 'splunk.*(Up|running)' || true)
+        fi
     fi
+    
+    # Fallback method: Direct docker ps if compose fails or no .env file
+    if [[ "${running_count:-0}" -eq 0 ]]; then
+        log_message INFO "Fallback: checking containers directly with docker ps"
+        if command -v docker >/dev/null 2>&1; then
+            running_count=$(docker ps --format "table {{.Names}}\t{{.Status}}" | grep -ciE 'splunk.*Up' || true)
+        fi
+    fi
+    
     if [[ "${running_count:-0}" -gt 0 ]]; then
-        log_message SUCCESS "Splunk-related containers are running (${running_count} matched)"
+        log_message SUCCESS "Splunk-related containers are running (${running_count} detected)"
     else
         log_message ERROR "No running Splunk containers detected"
-        $COMPOSE "${COMPOSE_FILES[@]}" ps || true
+        # Show container status for debugging
+        if command -v docker >/dev/null 2>&1; then
+            log_message INFO "Current container status:"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -i splunk || true
+        fi
         return 1
     fi
 
@@ -1030,6 +1053,8 @@ run_health_checks() {
     fi
 
     poll_splunk_ready 600 || log_message WARN "Proceeding without mgmt readiness confirmation"
+    
+    HEALTH_CHECK_RUNNING=0
 }
 
 # ============================= Deployment Functions ===========================
