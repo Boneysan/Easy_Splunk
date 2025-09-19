@@ -166,7 +166,7 @@ exit
 # (log back in to your system)
 
 # Verify installation is complete
-./verify-installation.sh
+sudo ./verify-installation.sh
 ```
 
 **Why is this required?**
