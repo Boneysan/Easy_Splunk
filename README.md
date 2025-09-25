@@ -667,26 +667,100 @@ sudo firewall-cmd --reload
 
 ## 📤 Air‑Gapped Deployment
 
-On a connected build machine:
+### **With Size Templates (Recommended)**
 
+For production air-gapped deployments, use this three-step process to include cluster size configuration:
+
+**Step 1: Generate compose file with desired cluster size (Connected Machine)**
+```bash
+# Generate docker-compose.yml for small production cluster
+./deploy.sh small --dry-run --config config-templates/small-production.conf
+
+# OR for medium production cluster  
+./deploy.sh medium --dry-run --config config-templates/medium-production.conf
+
+# OR for large production cluster
+./deploy.sh large --dry-run --config config-templates/large-production.conf
+
+# OR with unified CLI (alternative syntax)
+./bin/easy-splunk deploy --dry-run --config config-templates/small-production.conf
+```
+
+The `--dry-run` flag generates the `docker-compose.yml` file with your specified cluster size but doesn't deploy anything. This compose file will include the appropriate:
+- **Service profiles** (small, medium, or large)
+- **Resource limits** (CPU, memory)  
+- **Container counts** (indexers, search heads)
+- **Network configuration**
+
+**Step 2: Create air-gapped bundle (Connected Machine)**
+```bash
+# Resolve and pin image digests for security
+./resolve-digests.sh
+
+# Create the air-gapped bundle (includes the generated docker-compose.yml)
+./create-airgapped-bundle.sh --with-secrets
+
+# OR using unified CLI
+./bin/easy-splunk-airgap --resolve-digests --verify
+```
+
+The bundle will include:
+- Container images archive (`images.tar.gz`)
+- Your size-configured `docker-compose.yml`
+- Configuration files and templates
+- Scripts and libraries  
+- Credentials (if `--with-secrets` used)
+- Security manifests and checksums
+
+**Step 3: Deploy on air-gapped target (Offline Machine)**
+```bash
+# Extract the bundle
+tar -xzf splunk-cluster-airgapped-*.tar.gz
+cd splunk-cluster-airgapped-*/
+
+# Verify bundle integrity
+./verify-bundle.sh
+
+# Deploy with your pre-configured cluster size
+./airgapped-quickstart.sh
+
+# Check deployment status
+./health_check.sh  # (if included in bundle)
+```
+
+### **Basic Air-Gapped (Uses Existing Compose File)**
+
+If you already have a `docker-compose.yml` file configured:
+
+**Connected build machine:**
 ```bash
 ./resolve-digests.sh
 ./create-airgapped-bundle.sh
 ```
 
-On the offline target:
-
+**Offline target:**
 ```bash
 tar -xzf splunk-cluster-airgapped-*.tar.gz
 ./verify-bundle.sh
 ./airgapped-quickstart.sh
 ```
 
-Flow:
-1) Resolve and pin image digests
-2) Create bundle with checksums & manifest
-3) Verify bundle on target
-4) Load images and deploy
+### **Air-Gapped Deployment Flow**
+1. **Size Configuration** - Generate compose file with desired cluster size
+2. **Digest Resolution** - Pin container images to immutable SHA256 digests
+3. **Bundle Creation** - Package images, configs, and scripts
+4. **Bundle Transfer** - Move to air-gapped environment (USB, secure transfer)
+5. **Bundle Verification** - Validate checksums and manifests
+6. **Deployment** - Load images and start services with size configuration
+
+### **Available Cluster Sizes**
+| Template | Indexers | Search Heads | Memory | Use Case |
+|----------|----------|--------------|--------|----------|
+| **small** | 1 | 1 | ~6GB | Development, small teams |
+| **medium** | 3 | 2 | ~16GB | Production, moderate load |
+| **large** | 6+ | 3+ | ~32GB+ | High-volume production |
+
+**💡 Pro Tip**: The air-gapped bundle preserves your exact cluster configuration, so testing the size template with `--dry-run` before bundle creation ensures your air-gapped deployment matches your requirements.
 
 ---
 
