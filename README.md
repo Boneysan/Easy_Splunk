@@ -14,6 +14,7 @@ Supports air-gapped environments, automated credential/TLS generation, integrate
 - **[🚀 Quick Start Guide](QUICK_START.md)** - Exact commands for prerequisites, deployment, and login
 - **[🐳 Docker vs Podman Guide](DOCKER_PODMAN_GUIDE.md)** - When and why we choose Docker/Podman automatically
 - **[🚨 Enhanced Error Handling: Start Here](ENHANCED_ERROR_START_HERE.md)** - Quick fixes for common issues
+- **[📤 Air-Gapped Deployment Guide](AIR_GAPPED_DEPLOYMENT.md)** - Complete offline deployment with size templates
 
 **Having Issues?** Jump to [Immediate Solutions](#-immediate-solutions-troubleshooting) for quick fixes.
 
@@ -761,6 +762,8 @@ tar -xzf splunk-cluster-airgapped-*.tar.gz
 | **large** | 6+ | 3+ | ~32GB+ | High-volume production |
 
 **💡 Pro Tip**: The air-gapped bundle preserves your exact cluster configuration, so testing the size template with `--dry-run` before bundle creation ensures your air-gapped deployment matches your requirements.
+
+**📚 For complete air-gapped deployment documentation, see: [Air-Gapped Deployment Guide](AIR_GAPPED_DEPLOYMENT.md)**
 
 ---
 

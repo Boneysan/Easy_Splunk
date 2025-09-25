@@ -40,6 +40,16 @@ Click the link that matches your error message or symptom:
 | Monitoring not working | [Start Monitoring](monitoring/start-monitoring.sh) | `monitoring/start-monitoring.sh` |
 | Prometheus/Grafana issues | [Generate Monitoring Config](generate-monitoring-config.sh) | `generate-monitoring-config.sh` |
 
+### 📦 Air-Gapped Deployment Issues
+
+| Issue | Quick Fix | Guide |
+|-------|-----------|-------|
+| Bundle creation fails | [Create Air-Gapped Bundle](create-airgapped-bundle.sh) | [Air-Gapped Guide](README.md#-airgapped-deployment) |
+| Image digest resolution | [Resolve Digests](resolve-digests.sh) | [Security Validation](docs/SECURITY_VALIDATION.md) |
+| Bundle verification fails | [Verify Bundle](verify-bundle.sh) | [Bundle Verification](README.md#-airgapped-deployment) |
+| Size template not applied | Use `--dry-run` first | [Air-Gapped with Size Templates](README.md#with-size-templates-recommended) |
+| Offline deployment errors | [Air-Gapped Quickstart](airgapped-quickstart.sh) | [Three-Step Process](README.md#-airgapped-deployment) |
+
 ## 🎯 Most Common Issues (Top 5)
 
 ### 1. **Podman-Compose on RHEL 8**

@@ -13,7 +13,7 @@ This guide explains when and why Easy_Splunk automatically chooses Docker over P
 | **Debian 10+** | ✅ **Yes** | ⚠️ Optional | Mature Docker tooling and community support |
 | **Fedora 35+** | ⚠️ Optional | ✅ **Yes** | Podman is Fedora's native container runtime |
 | **RHEL 9+** | ⚠️ Optional | ✅ **Yes** | Modern Python 3.9+ supports podman-compose |
-| **Air-gapped** | ✅ **Yes** | ❌ No | Docker's mature air-gapped tooling |
+| **Air-gapped** | ✅ **Yes** | ❌ No | Docker's mature air-gapped tooling, better bundle compatibility |
 | **CI/CD Pipelines** | ✅ **Yes** | ❌ No | Docker's dominant position in CI/CD |
 
 ## 🔍 Detailed Explanations
@@ -58,10 +58,15 @@ docker-compose --version
 ### Air-gapped Environments
 
 **Why Docker is preferred:**
-- **Mature Tooling**: Docker has more mature air-gapped deployment tools
+- **Mature Tooling**: Docker has more mature air-gapped deployment tools and workflows
 - **Registry Support**: Better support for private registries and image mirroring
 - **Enterprise Adoption**: More widely adopted in enterprise air-gapped scenarios
-- **Documentation**: More comprehensive air-gapped deployment guides
+- **Bundle Compatibility**: Optimized for the three-step air-gapped deployment process:
+  1. Generate compose with size templates (`--dry-run`)
+  2. Create air-gapped bundle with Docker images
+  3. Deploy on offline systems with better Docker compatibility
+- **Documentation**: More comprehensive air-gapped deployment guides and troubleshooting
+- **Image Transfer**: Proven workflows for `docker save/load` operations in air-gapped environments
 
 ## ⚙️ Automatic Detection Logic
 

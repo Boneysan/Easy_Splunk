@@ -227,13 +227,52 @@ curl http://localhost:9090      # Prometheus
 ```
 
 ### **Air-Gapped Deployment**
-```bash
-# Create bundle for offline installation
-./bin/easy-splunk airgap --output offline-bundle.tar.gz
 
-# Deploy from bundle (on air-gapped system)
-./airgapped-quickstart.sh offline-bundle.tar.gz
+For production air-gapped deployments, use this three-step process to include cluster size configuration:
+
+**Step 1: Generate compose file with desired cluster size (Connected Machine)**
+```bash
+# Generate docker-compose.yml for small production cluster
+./deploy.sh small --dry-run --config config-templates/small-production.conf
+
+# OR for medium production cluster  
+./deploy.sh medium --dry-run --config config-templates/medium-production.conf
+
+# OR for large production cluster
+./deploy.sh large --dry-run --config config-templates/large-production.conf
 ```
+
+**Step 2: Create air-gapped bundle (Connected Machine)**
+```bash
+# Resolve and pin image digests for security
+./resolve-digests.sh
+
+# Create the air-gapped bundle (includes the generated docker-compose.yml)
+./create-airgapped-bundle.sh --with-secrets
+
+# OR using unified CLI
+./bin/easy-splunk-airgap --resolve-digests --verify
+```
+
+**Step 3: Deploy on air-gapped target (Offline Machine)**
+```bash
+# Extract the bundle
+tar -xzf splunk-cluster-airgapped-*.tar.gz
+cd splunk-cluster-airgapped-*/
+
+# Verify bundle integrity
+./verify-bundle.sh
+
+# Deploy with your pre-configured cluster size
+./airgapped-quickstart.sh
+```
+
+**Available Cluster Sizes for Air-Gapped:**
+| Template | Indexers | Search Heads | Memory | Use Case |
+|----------|----------|--------------|--------|----------|
+| **small** | 1 | 1 | ~6GB | Development, small teams |
+| **medium** | 3 | 2 | ~16GB | Production, moderate load |
+| **large** | 6+ | 3+ | ~32GB+ | High-volume production |
 
 ### **Backup and Monitoring**
 ```bash

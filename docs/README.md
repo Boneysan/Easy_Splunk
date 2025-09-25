@@ -17,6 +17,7 @@ Welcome to the Easy_Splunk documentation! This index helps you find the right gu
 | **[Installation Guide](INSTALLATION.md)** | Complete setup instructions | New users |
 | **[Prerequisites Script](../install-prerequisites.sh)** | Automated dependency installation | All users |
 | **[Generate Credentials](../generate-credentials.sh)** | TLS certificates and passwords | Administrators |
+| **[Air-Gapped Deployment Guide](../AIR_GAPPED_DEPLOYMENT.md)** | Complete offline deployment guide | Enterprise/Secure environments |
 
 ## ⚙️ Configuration & Deployment
 
@@ -68,7 +69,17 @@ Welcome to the Easy_Splunk documentation! This index helps you find the right gu
 |-------|---------|-----------|
 | **[Backup Cluster](../backup_cluster.sh)** | Create system backups | Weekly/Monthly |
 | **[Restore Cluster](../restore_cluster.sh)** | Restore from backups | As needed |
-| **[Air-gapped Quickstart](../airgapped-quickstart.sh)** | Offline deployment | Initial setup |
+| **[Air-gapped Deployment Guide](../README.md#-airgapped-deployment)** | Complete offline deployment workflow | Initial setup |
+| **[Air-gapped Quickstart](../airgapped-quickstart.sh)** | Deploy from bundle | Air-gapped environments |
+
+## 🌐 Air-Gapped Deployment
+
+| Guide | Purpose | Environment |
+|-------|---------|-------------|
+| **[Comprehensive Air-Gapped Guide](../README.md#-airgapped-deployment)** | Three-step process with size templates | Production air-gapped |
+| **[Create Air-Gapped Bundle](../create-airgapped-bundle.sh)** | Bundle creation script | Connected machine |
+| **[Resolve Digests](../resolve-digests.sh)** | Pin container image digests | Security compliance |
+| **[Verify Bundle](../verify-bundle.sh)** | Validate bundle integrity | Air-gapped machine |
 
 ## 🧪 Testing & Validation
 
@@ -77,6 +88,7 @@ Welcome to the Easy_Splunk documentation! This index helps you find the right gu
 | **[Smoke Tests](../tests/smoke/)** | Basic functionality validation | All environments |
 | **[Run All Tests](../run_all_tests.sh)** | Comprehensive test suite | Development |
 | **[Bundle Hardening](../bundle-hardening.sh)** | Air-gapped bundle validation | Production |
+| **[Air-Gapped Bundle Testing](../tests/integration/test_airgapped_bundle.sh)** | Validate air-gapped workflows | Air-gapped testing |
 
 ## 📋 Best Practices & Standards
 
