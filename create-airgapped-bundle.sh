@@ -19,8 +19,8 @@ source "${SCRIPT_DIR}/lib/error-handling.sh" || {
 setup_standard_logging "create-airgapped-bundle"
 
 # Set error handling
-```bash
-#!/usr/bin/env bash
+init_error_handling
+
 # ==============================================================================
 # create-airgapped-bundle.sh
 # Build a comprehensive air-gapped bundle (images + scripts + configs).

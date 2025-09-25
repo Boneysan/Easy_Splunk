@@ -237,7 +237,8 @@ verify_versions_env() {
   done
 
   # Spot-check *_VERSION (only those that look like semver with optional leading v)
-  for var in $(compgen -A variable | LC_ALL=C grep -E '_VERSION$' | LC_ALL=C sort); do
+  # Exclude built-in bash variables and system variables
+  for var in $(compgen -A variable | LC_ALL=C grep -E '_VERSION$' | LC_ALL=C grep -v -E '^(BASH_|OSTYPE|HOSTNAME)' | LC_ALL=C sort); do
     local val="${!var-}"
     if [[ "$val" =~ ^v?[0-9]+(\.[0-9]+){2} ]]; then
       validate_version_format "$val" || { log_error "Invalid semver: ${var}='${val}'"; ok=1; }
