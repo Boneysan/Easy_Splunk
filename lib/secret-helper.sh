@@ -8,7 +8,8 @@ IFS=$'\n\t'
 # Helper to fetch secrets with fallback. Used by compose and monitoring scripts.
 # Returns secret value to stdout or exits with error if not found/accessible.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+LIB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECRETS_CLI="${SCRIPT_DIR}/../security/secrets_manager.sh"
 
 get_secret() {
