@@ -69,9 +69,11 @@ Create the air-gapped bundle containing all required components:
 - 🐳 Your size-configured `docker-compose.yml` from Step 1
 - ⚙️ Configuration files and templates
 - 🔧 Scripts and libraries
-- 🔐 Credentials (if `--with-secrets` used)
+- 🔐 Pre-generated credentials (if `--with-secrets` used)
 - 📋 Security manifests and checksums
 - 📚 Documentation and guides
+
+**Important**: When using `--with-secrets`, all Splunk admin passwords, SSL certificates, and security credentials are automatically generated during bundle creation on the connected machine. The air-gapped deployment will use these pre-generated credentials without prompting for any user input.
 
 **Output:**
 ```bash
@@ -94,11 +96,14 @@ cd splunk-cluster-airgapped-*/
 ./verify-bundle.sh
 
 # Deploy with your pre-configured cluster size
+# Note: This uses pre-generated credentials from the bundle - no user input required
 ./airgapped-quickstart.sh
 
 # Optional: Check deployment status
 ./health_check.sh  # (if included in bundle)
 ```
+
+**Credential Handling**: The deployment script uses pre-generated credentials from the bundle and does not prompt for passwords or secrets. All credentials were created during Step 2 when `--with-secrets` was used.
 
 ## 📊 Available Cluster Sizes
 
@@ -206,6 +211,21 @@ docker-compose config --services
 ```
 
 ## 🔒 Security Considerations
+
+### Credential Management
+
+Air-gapped deployments use a two-phase credential approach for security:
+
+**Phase 1 - Bundle Creation (Connected Machine):**
+- `--with-secrets` flag triggers automatic credential generation
+- Calls `generate-credentials.sh` to create admin passwords, SSL certificates, and secrets
+- Stores all credentials securely in `config/secrets/` and `config/certs/` within the bundle
+
+**Phase 2 - Deployment (Air-Gapped Machine):**  
+- `airgapped-quickstart.sh` uses pre-generated credentials from the bundle
+- No user prompts for passwords or secrets during deployment
+- Script hardens credential file permissions (600) for security
+- Credentials are immediately available after deployment
 
 ### Image Digest Pinning
 
