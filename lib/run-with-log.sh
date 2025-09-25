@@ -10,7 +10,8 @@ IFS=$'\n\t'
 # log file created by lib/error-handling.sh. Intended to be sourced by entrypoint
 # scripts before they invoke their top-level main() when executed directly.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+LIB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Try to source error-handling (best-effort)
 if [[ -f "${SCRIPT_DIR}/error-handling.sh" ]]; then

@@ -12,7 +12,8 @@ IFS=$'\n\t'
 readonly SECRETS_HYGIENE_LIB_SOURCED=1
 
 # Source required libraries
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+LIB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/error-handling.sh"
 
 # =============================================================================
