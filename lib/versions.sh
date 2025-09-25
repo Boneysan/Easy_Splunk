@@ -137,8 +137,8 @@ fi
 # Semver: 1.2.3, optional leading v
 __REGEX_SEMVER='^v?[0-9]+(\.[0-9]+){2}([.-][A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$'
 __REGEX_DIGEST_SHA256='^sha256:[a-f0-9]{64}$'
-# Very permissive repo pattern: registry[:port]/path/name (lowercase recommended but allow caps)
-__REGEX_REPO='^[A-Za-z0-9._-]+(:[0-9]+)?(/[A-Za-z0-9._-]+)+$'
+# Very permissive repo pattern: registry[:port]/path/name OR official Docker Hub images
+__REGEX_REPO='^[A-Za-z0-9._-]+((:[0-9]+)?(/[A-Za-z0-9._-]+)*)?$'
 
 # ------------------------------------------------------------------------------
 # Validation helpers
