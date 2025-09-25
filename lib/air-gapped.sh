@@ -8,6 +8,8 @@ IFS=$'\n\t'
 # ==============================================================================
 # lib/air-gapped.sh
 # Air-gapped bundle creation, verification, and loading.
+# Version: 1.0.0
+readonly AIR_GAPPED_VERSION="1.0.0"
 #
 # Dependencies (required):
 #   - lib/core.sh              (log_*, die, have_cmd, register_cleanup)
