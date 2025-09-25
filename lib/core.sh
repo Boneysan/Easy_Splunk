@@ -544,6 +544,32 @@ with_retry() {
   local max_attempts="${WITH_RETRY_ATTEMPTS:-3}"
   local delay="${WITH_RETRY_DELAY:-2}"
   local max_delay="${WITH_RETRY_MAX_DELAY:-30}"
+  
+  # Parse optional arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --retries)
+        max_attempts="$2"
+        shift 2
+        ;;
+      --base-delay)
+        delay="$2"
+        shift 2
+        ;;
+      --max-delay)
+        max_delay="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  
   local attempt=1
   local -a cmd=( "$@" )
 
