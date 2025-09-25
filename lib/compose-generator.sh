@@ -20,7 +20,8 @@ IFS=$'\n\t'
 #   ENABLE_SPLUNK=true generate_compose_file splunk-compose.yml
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+LIB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # SELinux helper: add :Z to bind mounts if Docker+SELinux enforcing
 add_selinux_flag_if_needed() {

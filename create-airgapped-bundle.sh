@@ -177,6 +177,8 @@ source <(sed 's/\r$//' "${SCRIPT_DIR}/versions.env")
 source "${SCRIPT_DIR}/lib/versions.sh"
 # shellcheck source=lib/runtime.sh
 source "${SCRIPT_DIR}/lib/runtime.sh"
+# shellcheck source=lib/runtime-detection-simple.sh
+source "${SCRIPT_DIR}/lib/runtime-detection-simple.sh"
 # shellcheck source=lib/air-gapped.sh
 source "${SCRIPT_DIR}/lib/air-gapped.sh"
 
